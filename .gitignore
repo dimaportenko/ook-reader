@@ -1,0 +1,20 @@
+# Tuist-generated Xcode files (regenerate with `tuist generate`)
+*.xcodeproj
+*.xcworkspace
+.build/
+Derived/
+
+# sourcekit-lsp / build server (machine-specific paths; regenerate with
+# `xcode-build-server config -workspace OokReader.xcworkspace -scheme OokReader`)
+buildServer.json
+.index-build/
+
+# xcodebuild.nvim project-local settings (scheme/device cache)
+.nvim/
+
+# macOS
+.DS_Store
+
+# Xcode user data
+xcuserdata/
+*.xcuserstate
