@@ -1,0 +1,5 @@
+{
+  "commands": {
+    "dx:serve": "dx serve --platform desktop"
+  }
+}
