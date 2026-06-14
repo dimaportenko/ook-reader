@@ -1,16 +1,30 @@
-# Ook Reader 
+# Ook Reader
 
-This e-book reader project for multiple Apple platforms (osx, ios, ipados).Use Swift as programming language. NeoVim as IDE. 
+A cross-platform e-book (EPUB) reader. **Rust** as the programming language,
+**[Dioxus 0.7](https://dioxuslabs.com/learn/0.7/)** as the UI framework, **NeoVim**
+(LazyVim) as the IDE. Target order: **desktop first** (macOS/Windows/Linux), then
+mobile (iOS/Android) and web (WASM) — one Rust codebase across all of them.
 
-Short term goals:
-- Figure out neovim setup for Swift development. How feasible it is to use neovim for Swift development.
-- Learn Swift language and relevant software development patters. 
-- Build basic a epub reader app, where I can add extra features which I miss in the other reader apps. 
+> **History:** this project began in Swift (Readium Swift Toolkit, Apple-only) and was
+> restarted on Dioxus/Rust for a real single-codebase cross-platform path. The Swift
+> rationale and pivot are recorded in [`RESEARCH.md`](RESEARCH.md).
 
-First step: 
-- create new project with macos, ipados, ios targets. 
-- do research and setup neovim for swift development. 
-  - we are using https://github.com/lazyvim/lazyvim setup;
-  - official swift doc - https://www.swift.org/documentation/articles/zero-to-swift-nvim.html#files ;
-  - https://wojciechkulik.pl/ios/the-complete-guide-to-ios-macos-development-in-neovim
-  - https://wojciechkulik.pl/ios/how-to-develop-ios-and-macos-apps-in-other-ides-like-neovim-or-vs-code
+## Short-term goals
+
+- Stand up a Rust + Dioxus dev environment in NeoVim and confirm the build/run/debug loop.
+- Learn enough Rust + Dioxus (ownership, traits, `async`, components, signals, `rsx!`).
+- Build a basic EPUB reader (open a book, render it, turn pages, remember position) and
+  then add the features missing from other reader apps.
+
+## First steps
+
+- Set up the Rust/Dioxus NeoVim toolchain — see
+  [`docs/guides/neovim-rust-dioxus-project-setup.md`](docs/guides/neovim-rust-dioxus-project-setup.md):
+  - LazyVim base (https://github.com/lazyvim/lazyvim) + the `lang.rust` extra;
+  - Dioxus docs — https://dioxuslabs.com/learn/0.7/ ;
+  - rustaceanvim — https://github.com/mrcjkb/rustaceanvim .
+- Scaffold the app with `dx new` (desktop), then render a real `.epub` with `rbook` in a
+  webview iframe.
+
+Why this matters / how to read the plan: [`docs/roadmap.md`](docs/roadmap.md).
+</content>

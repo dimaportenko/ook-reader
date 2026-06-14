@@ -1,20 +1,21 @@
-# Tuist-generated Xcode files (regenerate with `tuist generate`)
-*.xcodeproj
-*.xcworkspace
-.build/
-Derived/
+# Rust / Cargo build output
+/target
+/dist
 
-# sourcekit-lsp / build server (machine-specific paths; regenerate with
-# `xcode-build-server config -workspace OokReader.xcworkspace -scheme OokReader`)
-buildServer.json
-.index-build/
+# Dioxus build artifacts
+/.dioxus
 
-# xcodebuild.nvim project-local settings (scheme/device cache)
-.nvim/
+# Tailwind generated output (if used)
+assets/tailwind.css
+
+# Local SQLite databases / test books
+*.db
+*.db-shm
+*.db-wal
 
 # macOS
 .DS_Store
 
-# Xcode user data
-xcuserdata/
-*.xcuserstate
+# Editor / local
+.idea/
+*.swp

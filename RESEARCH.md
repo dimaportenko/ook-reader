@@ -1,141 +1,352 @@
-# Ook Reader — Research & Plan
+# Ook Reader — Research & Plan (Dioxus / Rust)
 
-> Deep research on building a multi-platform (macOS / iOS / iPadOS) EPUB reader in Swift,
-> using NeoVim (LazyVim) as the primary IDE instead of Xcode.
-> Date: 2026-06-12. 22 sources, 23 verified claims, 2 refuted.
+> Deep research on building a cross-platform EPUB reader in **Rust** with the
+> **Dioxus 0.7** UI framework, developed in **NeoVim** (LazyVim).
+> Date: 2026-06-14. Supersedes the prior Swift/Readium research (project pivoted
+> away from Swift — Dioxus gives one Rust codebase for desktop, mobile, and web).
+> All version/library claims verified against live sources on 2026-06-14.
 
 ## TL;DR
 
-- **NeoVim for Swift/Apple dev is viable in 2026** — ~90% of day-to-day work stays in the editor.
-- Core stack: **sourcekit-lsp** + **xcode-build-server** + **xcodebuild.nvim** + **nvim-dap/codelldb**.
-- **Keep Xcode installed** for signing, profiling (Instruments), asset catalogs, and some debugging.
-- **Tuist** is the best project generator for a CLI-driven multi-target workflow.
-- **Readium Swift Toolkit** is the EPUB library — but its Navigator is **UIKit-only** and the
-  package declares **iOS only (no macOS)**. So: ship **iOS + iPadOS first**, do macOS later via **Mac Catalyst**.
+- **Dioxus 0.7 is the stack.** One Rust codebase targets **web (WASM)**, **desktop**
+  (macOS/Windows/Linux), and **mobile** (iOS/Android), switched by Cargo feature +
+  `dx --platform`. Stable since v0.7.0 (2025-10-31); 0.7.9 latest at research time.
+- **The webview is the headline fit.** Desktop/mobile render through the system
+  **webview** (wry/tao → WebKit/WebView2). EPUB content *is* XHTML + CSS, so the
+  renderer natively understands book content — no custom layout engine needed.
+- **Parse EPUBs with [`rbook`](https://crates.io/crates/rbook)** (Apache-2.0, actively
+  maintained) over the more-downloaded `epub` crate (GPL-3.0, viral license).
+- **Render each chapter in a sandboxed `<iframe>`** (the epub.js / Readium approach),
+  serving EPUB-internal resources via Dioxus's **`use_asset_handler`** custom protocol
+  (desktop) or blob URLs (web).
+- **Persist with `rusqlite` (bundled SQLite)**; locate the DB via the `directories`
+  crate. Abstract persistence behind a trait if web/WASM joins the roadmap.
+- **Target order: desktop first** (decided), then mobile + web. Desktop is the easiest
+  Dioxus path and gives full filesystem access for the library.
+- **Dev in NeoVim is much simpler than the old Swift toolchain** — `rust-analyzer`
+  reads Cargo natively (no `xcode-build-server` bridge, no Tuist generate step).
+- **LCP / Adobe DRM are out of scope** — they require EDRLab licensing and have no
+  credible Rust support. We read DRM-free EPUBs only.
 
 ---
 
-## 1. Is NeoVim viable for Swift/Apple dev? Yes (~90% in-editor)
+## 1. Why Dioxus (and why not Swift)
 
-| Piece | Role | Install |
+The original plan was a Swift app (Readium Swift Toolkit) built in NeoVim. That works,
+but: (a) the NeoVim/Swift toolchain needs an `xcode-build-server` bridge + Tuist project
+generation + per-project `:XcodebuildSetup`; (b) Readium's navigator is UIKit-only and
+its package targets iOS only, so macOS needed Mac Catalyst and a separate rendering
+path; (c) Swift effectively locks you to Apple platforms.
+
+**Dioxus** removes all three frictions. It is a cross-platform Rust UI framework —
+"one codebase ... runs on web, desktop, and mobile"
+([learn/0.7](https://dioxuslabs.com/learn/0.7/)). Components are Rust functions that
+return an `Element` via an HTML/CSS-like `rsx!` macro.
+
+| Renderer | How it draws | Notes |
 |---|---|---|
-| **sourcekit-lsp** | LSP: completion, diagnostics, go-to-def. Apple's, bundled with Xcode. Officially documented by swift.org for NeoVim. | comes with Xcode/toolchain |
-| **xcode-build-server** | Bridges sourcekit-lsp → `.xcodeproj`/`.xcworkspace` via Build Server Protocol. sourcekit-lsp natively understands only SwiftPM / `compile_commands.json`, **not** Xcode projects. | `brew install xcode-build-server` |
-| **xcodebuild.nvim** | Build/run/test on simulators & devices; wraps official `xcodebuild` + `xcrun simctl`; test explorer, coverage, quickfix. | nvim plugin |
-| **nvim-dap + lldb-dap** | Debugging. NOTE: research said codelldb, but xcodebuild.nvim now uses Apple's bundled **`lldb-dap`** for **Xcode 16+** (we run 26.5) — codelldb no longer needed. | nvim plugin (adapter ships with Xcode) |
+| **Web** (`dioxus-web`) | Compiles to **WASM**, renders to the browser DOM | distribution = a URL |
+| **Desktop** (`dioxus-desktop`) | System **webview** via **wry** + **tao** (windowing) | your Rust runs natively, not in JS |
+| **Mobile** (`dioxus-mobile`) | Same webview model, iOS/Android | needs Xcode / Android Studio |
+| **Fullstack** (`dioxus-fullstack`) | SSR + server functions on **Axum** | not needed for a local reader |
+| **Native / Blitz** | GPU renderer (Stylo/Taffy/Vello), **no webview** | new in 0.7, **partial CSS** — *not* for EPUB |
 
-Sources: [swift.org NeoVim guide](https://www.swift.org/documentation/articles/zero-to-swift-nvim.html),
-[the complete guide (wojciechkulik.pl)](https://wojciechkulik.pl/ios/the-complete-guide-to-ios-macos-development-in-neovim),
-[xcodebuild.nvim](https://github.com/wojciech-kulik/xcodebuild.nvim),
-[xcode-build-server](https://github.com/SolaWing/xcode-build-server).
+**Critical point for an EPUB reader:** the default desktop/mobile renderer is the OS
+webview, which natively renders XHTML + CSS — exactly EPUB's content model. The cost is
+cross-engine differences (WebKit on macOS/iOS, WebView2 on Windows, WebKitGTK on Linux)
+— the same caveat every web-based reader lives with. **Do not** target Dioxus Native /
+Blitz for book content; its CSS engine is only partial.
 
-**Two corrections to common assumptions** (both adversarially verified):
+Sources: [learn/0.7](https://dioxuslabs.com/learn/0.7/) ·
+[FAQ — "Is it Electron?"](https://github.com/dioxuslabs/dioxus/blob/v0.7.2/notes/FAQ.md) ·
+[desktop README (wry)](https://github.com/dioxuslabs/dioxus/blob/v0.7.2/packages/desktop/README.md) ·
+[0.7 release notes](https://dioxuslabs.com/blog/release-070/).
 
-- **SweetPad is NOT a NeoVim plugin** — it's a *VSCode* extension. No role in a NeoVim workflow.
-- You do **not** have to abandon hand-managed `.xcodeproj` for XcodeGen/Tuist. Generators are
-  *convenient* for a CLI workflow, not *required* (claim refuted 0-3).
+## 2. Dioxus 0.7 — tooling & programming model
 
-## 2. What still forces you into Xcode
+### Tooling: the `dx` CLI
 
-Keep Xcode installed and open it occasionally for:
+Crate `dioxus-cli`, binary `dx`. Prefer the prebuilt binary (source build is slow):
 
-- **Code signing / provisioning** (the single most-cited Xcode dependency)
-- Advanced debugging (sanitizers, memory graph), view-hierarchy / UI debugging
-- Performance profiling (Instruments)
-- **SwiftUI previews** (xcodebuild.nvim now has partial support)
-- StoreKit 2 debugging
-- Editing **asset catalogs** (`.xcassets`) — just easier there
+```sh
+cargo binstall dioxus-cli --force      # prebuilt (recommended)
+# or: curl -sSL https://dioxus.dev/install.sh | bash
+# or: cargo install dioxus-cli --locked  (slow)
+```
 
-Known pain point: sourcekit-lsp **background indexing can spike CPU**
-([issue #2346](https://github.com/swiftlang/sourcekit-lsp/issues/2346), still open).
-Be ready to limit/disable background indexing on a multi-target project.
+| Command | Purpose |
+|---|---|
+| `dx new my-app` | scaffold (`Cargo.toml`, `Dioxus.toml`, `src/main.rs`, `assets/`) |
+| `dx serve [--platform desktop\|web\|mobile]` | dev server with **hot reload** |
+| `dx serve --hotpatch` | experimental Rust **logic** hot-patching (Subsecond) |
+| `dx build --release` | production build |
+| `dx bundle --platform desktop` | package an installable artifact |
+| `dx fmt` / `dx check` | format `rsx!` / type-check without building |
 
-## 3. Project structure: Tuist is the best CLI-driven fit
+Sources: [getting started](https://dioxuslabs.com/learn/0.7/getting_started/) ·
+[CLI README](https://github.com/dioxuslabs/dioxus/blob/v0.7.2/packages/cli/README.md).
 
-For a shared macOS+iOS+iPadOS codebase, **Tuist** is the strongest match: Swift-DSL manifests
-(`Project.swift` / `Workspace.swift` — Xcode autocompletion on the config itself), generates standard
-Xcode projects/workspaces, auto-creates a workspace for multi-target setups, builds/tests via `xcodebuild`.
-XcodeGen (YAML) is the lighter alternative. Plain SPM works but is awkward for app targets with
-resources/entitlements. Source: [Tuist docs](https://docs.tuist.dev/en/guides/features/projects).
+### Programming model
 
-## 4. The EPUB reader: Readium — with a macOS caveat
+A component is a function returning `Element`, annotated `#[component]`; state lives in
+**signals**.
 
-**[Readium Swift Toolkit](https://github.com/readium/swift-toolkit)** (BSD-3-Clause, v3.9.0 May 2026,
-SPM-installable) is the clear choice: EPUB reflowable + fixed-layout, PDF, audiobooks, comics.
-FolioReaderKit (named in the original question) appears largely unmaintained by comparison.
+```rust
+use dioxus::prelude::*;
 
-**Two real constraints for the multi-platform goal:**
+fn main() { dioxus::launch(App); }
 
-- The rendering Navigator (`EPUBNavigatorViewController`) is **UIKit-only** — no native SwiftUI navigator.
-  Bridge it into SwiftUI with `UIViewControllerRepresentable`
-  ([Readium SwiftUI guide](https://github.com/readium/swift-toolkit/blob/develop/docs/Guides/Navigator/SwiftUI.md)).
-- Readium's develop-branch `Package.swift` declares **`.iOS` only — no macOS platform**. A native macOS
-  target is not a drop-in. Realistic options: ship **iOS + iPadOS first** (Readium works natively), then
-  use **Mac Catalyst** for desktop (runs the iPad/UIKit app on macOS, carries the UIKit Navigator along)
-  rather than a separate AppKit app. A native AppKit reader would need a different rendering path
-  (e.g. WKWebView-based).
+#[component]
+fn App() -> Element {
+    let mut count = use_signal(|| 0);          // reactive state
+    rsx! {
+        div { "Count: {count}" }
+        button { onclick: move |_| count += 1, "Increment" }
+    }
+}
+```
 
----
+Reactivity primitives (0.7):
 
-## Step-by-step plan
+- **`use_signal(|| init)`** — fine-grained reactive value; reading subscribes the
+  component, writing wakes only subscribers.
+- **`Store`** *(new in 0.7)* — reactive primitive for **nested** state (structs,
+  collections); only changed sub-fields mark dirty. Use it for the reader's larger state
+  tree (library, per-book progress, settings).
+- **`use_resource(|| async { … })`** — async derived state; re-runs when read signals
+  change. Ideal for async EPUB parsing / file IO.
+- **`use_effect`** — side effects on dependency change.
+- **Context** — `use_context_provider` / `use_context::<T>()` for app-wide state
+  (theme, reader settings).
 
-### Phase 0 — Toolchain (before any app code)
-1. Install Xcode + Command Line Tools (need the SDKs/simulators regardless).
-2. From the LazyVim base, add: `sourcekit-lsp` via nvim-lspconfig, `brew install xcode-build-server`,
-   `xcodebuild.nvim`, `nvim-dap` (debugging uses Xcode's bundled `lldb-dap` on Xcode 16+; no codelldb). Follow the
-   [swift.org guide](https://www.swift.org/documentation/articles/zero-to-swift-nvim.html) for LSP and the
-   [xcodebuild.nvim wiki](https://github.com/wojciech-kulik/xcodebuild.nvim/wiki/Neovim-Configuration) for the rest.
-3. **Validate with a throwaway "Hello World" iOS app** — build, run on simulator, set a breakpoint, hit it.
-   Don't start the real project until this round-trip works.
+Routing via `dioxus-router` and `#[derive(Routable)]`:
 
-### Phase 1 — Learn Swift (parallel with Phase 0, ~1–2 weeks)
-- Work through [The Swift Programming Language](https://docs.swift.org/swift-book/) +
-  [Apple SwiftUI tutorials](https://developer.apple.com/tutorials/swiftui)
-  (or [Hacking with Swift 100 Days](https://www.hackingwithswift.com/100/swiftui)).
-- Keep the [API Design Guidelines](https://www.swift.org/documentation/api-design-guidelines/) open — that's
-  where idiomatic naming/patterns come from.
-- Default to **SwiftUI**; drop to UIKit only where Readium forces it.
+```rust
+#[derive(Routable, Clone, PartialEq)]
+enum Route {
+    #[layout(Shell)]
+        #[route("/")]            Library {},
+        #[route("/book/:id")]    Reader { id: String },
+}
+```
 
-### Phase 2 — Project scaffold (iOS + iPadOS first)
-- `brew install tuist`; define `Project.swift` with an iOS app target (iPad comes free via device family).
-- Generate the project, run `xcode-build-server config` against the generated workspace+scheme to wire up the LSP.
-- Gitignore the generated `.xcodeproj`. Confirm the NeoVim build/run/debug loop on the real project.
+**Assets / styling:** the `asset!` macro (Manganis) declares static assets at compile
+time (hashed, hot-reloadable); inject CSS with `document::Stylesheet { href: CSS }`.
+First-party Tailwind support in the CLI.
 
-### Phase 3 — Minimal EPUB reader
-- Add Readium via SPM (`https://github.com/readium/swift-toolkit.git`).
-- Build: SwiftUI library/file-picker → open `.epub` → render with `EPUBNavigatorViewController`
-  wrapped in `UIViewControllerRepresentable`.
-- Target: open a book, paginate, persist reading position. Ship this as the "basic reader."
+Sources: [dioxus README](https://github.com/dioxuslabs/dioxus/blob/v0.7.2/packages/dioxus/README.md) ·
+[reactivity](https://github.com/dioxuslabs/dioxus/blob/v0.7.2/packages/core/docs/reactivity.md) ·
+[Stores (release notes)](https://dioxuslabs.com/blog/release-070/) ·
+[assets tutorial](https://dioxuslabs.com/learn/0.7/tutorial/assets/).
 
-### Phase 4 — Differentiator features
-- Add the features missing in other readers (the point of the project), building on Readium's
-  navigator events/decorations.
+> **One documented gap:** Dioxus 0.7's MSRV is not authoritatively published. Use a
+> recent **stable** Rust and verify resolution when pinning.
 
-### Phase 5 — macOS (deferred, deliberately)
-- Add a **Mac Catalyst** destination to the iOS target — lowest-effort path that keeps the Readium
-  UIKit Navigator working. Treat a native AppKit reader as a separate, later investigation only if
-  Catalyst's UX disappoints.
+## 3. The EPUB layer
 
-**Expectation-setters:** (1) keep Xcode for signing, Instruments, and asset catalogs — NeoVim is ~90%,
-not 100%; (2) the macOS-native story is the weakest part of the stack, which is why it's last.
+### 3.1 Parsing — use `rbook`
 
----
+| Crate | Latest | License | Reads | Notes |
+|---|---|---|---|---|
+| **`rbook`** ✅ | 0.7.7 (2026-05-23) | **Apache-2.0** | EPUB 2/3 | actively maintained, 0 open issues, streaming reader + unified TOC |
+| `epub` (epub-rs) | 2.1.5 (2025-10-29) | **GPL-3.0** | EPUB 2/3 | more downloads but viral license, lightly maintained |
+| `epub-builder` | 0.8.3 | MPL-2.0 | — | **write-only**, not a reader |
+| `epub-parser`, `iepub` | new / MOBI-focused | MIT | yes | niche |
 
-## Open questions (worth resolving before/at the relevant phase)
-- Does Readium support macOS (AppKit/Catalyst) for a shared codebase, or must macOS use a different
-  rendering path? (develop-branch manifest declares iOS only)
-- How well does codelldb/nvim-dap debugging perform on **physical devices** (vs simulator) in 2026?
-  (physical-device debugging reportedly needs `pymobiledevice3`)
-- Is the sourcekit-lsp background-indexing CPU issue (#2346) reproducible on macOS/NeoVim, and what
-  mitigations are recommended?
-- Current real-world state of code signing/provisioning **entirely outside Xcode**
-  (fastlane match, `xcodebuild -allowProvisioningUpdates`, manual profiles)?
+**Decision: `rbook`.** Two decisive reasons over `epub`: (1) **Apache-2.0** vs
+**GPL-3.0** (GPL is viral and problematic for app distribution); (2) maintenance — a
+May 2026 release with zero open issues. It also has better reader ergonomics.
+
+```rust
+use rbook::{Ebook, Epub};
+let epub = Epub::open("book.epub")?;
+println!("{}", epub.metadata().title().unwrap().value());
+let mut reader = epub.reader();
+while let Some(Ok(content)) = reader.read_next() {
+    let xhtml: &str = content.content();   // chapter XHTML in reading order
+}
+let cover = epub.manifest().cover_image().unwrap().read_bytes()?;
+```
+
+Sources: [rbook crate](https://crates.io/crates/rbook) ·
+[docs.rs](https://docs.rs/rbook/latest/rbook/) ·
+[epub crate (alternative)](https://crates.io/crates/epub).
+
+### 3.2 Rendering — sandboxed iframe + custom protocol
+
+EPUB chapters are XHTML + CSS, so the webview renders them directly. Two ways to inject
+chapter HTML:
+
+- **`dangerous_inner_html`** on an element (sets `innerHTML`). Simple, but **no style
+  scoping** — the book's `<style>`/CSS leaks into the app and collides. Only for trusted,
+  sanitized fragments.
+- **One `<iframe>` per spine item** *(recommended)* — full style/JS isolation, a clean
+  URL-resolution context, and a natural pagination unit. This is what epub.js and Readium
+  do.
+
+**Serving EPUB-internal resources** (images, fonts, CSS use OPF-relative paths):
+
+- **Desktop/mobile:** register a custom protocol with Dioxus's
+  **`use_asset_handler`** (wraps wry's `with_asynchronous_custom_protocol`); read the
+  resource bytes out of the EPUB zip and `responder.respond(bytes)`.
+  *Gotcha:* the scheme resolves as `wry://path/…` on macOS/iOS/Linux but
+  `http://wry.path/…` on Windows/Android — never hardcode `scheme://`.
+- **Web/WASM:** no filesystem/custom protocol — extract the zip in WASM and serve each
+  resource as a **blob URL**, maintaining an internal-path → blob-URL map and rewriting
+  chapter HTML.
+
+Rewrite OPF-relative URLs to the custom-protocol/blob URLs (or inject `<base href>`),
+and intercept internal hyperlinks → convert to navigation events. For an iframe, set
+`sandbox` (omit `allow-scripts`) to neutralize book JS while still rendering XHTML/CSS.
+
+**Pagination happens in the webview (CSS/JS), not in Rust.** The Readium/epub.js
+approach: native CSS **multi-column** (`column-width`/`column-gap`) in a clipped
+viewport, advancing pages with `transform: translateX()` / `scrollLeft` (add the gap
+into the per-page step). Continuous vertical scroll (`overflow-y:auto`, no columns) is
+the simpler first cut. Rust only holds nav state (spine index, page index).
+
+Sources: [escape hatch / dangerous_inner_html](https://dioxuslabs.com/learn/0.7/essentials/ui/escape/) ·
+[use_asset_handler](https://docs.rs/dioxus-desktop/latest/dioxus_desktop/fn.use_asset_handler.html) ·
+[wry custom protocol](https://docs.rs/wry/latest/wry/struct.WebViewBuilder.html) ·
+[ReadiumCSS injection & pagination](https://github.com/readium/css/blob/master/docs/CSS03-injection_and_pagination.md).
+
+### 3.3 Reading features — feasibility vs Readium
+
+| Feature | Difficulty | Approach |
+|---|---|---|
+| Resume position + progress bar | **Easy** | `{spine_index, progression}`; progression = `scrollTop/scrollHeight` via JS eval |
+| TOC navigation (nested, NCX + nav.xhtml) | **Easy — full parity** | parser hands you the tree; resolve href → spine index |
+| Themes (font, size, spacing, light/dark/sepia) | **Easy — near parity** | inject CSS custom properties on `:root`; optionally vendor [ReadiumCSS](https://github.com/readium/readium-css) (BSD) |
+| Full-text search | **Easy** | naive Unicode substring per book, or [`tantivy`](https://crates.io/crates/tantivy) for a large library |
+| Precise/shareable highlights | **Hard** | needs a WebView JS bridge that resolves positions in the live DOM |
+| EPUB CFI | **Very hard — skip v1** | no mature Rust crate; only matters for cross-reader portability |
+
+**The one structurally hard area** is what Readium's native navigator gives for free:
+resolving a stored position back into the **live rendered DOM** (precise highlights,
+CFI, jump-to-search-hit). A char offset into Rust-extracted text does **not** map to a
+DOM offset (whitespace collapsing, `display:none`). Defer it; when needed, follow
+Readium's pattern — store before/highlight/after **text context** and **re-find it in
+the DOM via injected JS** at display time, rather than computing CFI.
+
+Sources: [Readium Locator model](https://readium.org/architecture/models/locators/) ·
+[ReadiumCSS user prefs](https://readium.org/css/docs/CSS12-user_prefs.html) ·
+[tantivy](https://crates.io/crates/tantivy).
+
+### 3.4 DRM — out of scope
+
+Readium **LCP** (now ISO/IEC 23078-2:2024) requires signing EDRLab's agreement,
+certification, and issued keys — you cannot legally decrypt production content without
+them, and there is **no credible Rust crate** (Readium ships Go/Swift/Kotlin/TS, no
+Rust). Adobe ADEPT is proprietary. **We support DRM-free EPUBs only.**
+
+Sources: [EDRLab LCP](https://www.edrlab.org/readium-lcp/) ·
+[become a license provider](https://www.edrlab.org/projects/readium-lcp/become-lcp-license-provider/).
+
+## 4. Persistence
+
+**Recommended: `rusqlite` with the `bundled` feature** (statically compiles SQLite in —
+the documented way to avoid system-lib issues on iOS/Android). One DB holds the library
+table + positions/bookmarks/highlights.
+
+```toml
+rusqlite = { version = "0.40", features = ["bundled"] }
+directories = "6"   # ProjectDirs::data_dir() → platform-correct app data dir
+```
+
+- **MVP shortcut:** `serde_json` index file (no migrations, but rewrites the whole file).
+- **Web/WASM caveat:** native SQLite + filesystem do **not** work in the browser — use
+  IndexedDB/localStorage there. If web is on the roadmap, **abstract persistence behind
+  a trait** with a separate WASM backend.
+
+Sources: [rusqlite](https://crates.io/crates/rusqlite) ·
+[directories](https://crates.io/crates/directories).
+
+## 5. Development environment (NeoVim)
+
+Rust in NeoVim is markedly simpler than the old Swift setup. Full runbook:
+[`docs/guides/neovim-rust-dioxus-project-setup.md`](docs/guides/neovim-rust-dioxus-project-setup.md).
+Summary:
+
+- **Toolchain:** `rustup` (stable; `clippy`/`rustfmt` in the default profile),
+  `rustup component add rust-analyzer rust-src`,
+  `rustup target add wasm32-unknown-unknown` (web). `cargo binstall dioxus-cli`.
+  **macOS desktop webview needs no extra deps** (system WebKit).
+- **Editor:** LazyVim **`lang.rust`** extra → **rustaceanvim** owns rust-analyzer
+  (don't also call `lspconfig.rust_analyzer.setup`), plus `crates.nvim`, treesitter
+  `rust`, and Mason `codelldb`.
+- **Debug:** `:RustLsp debuggables` (rustaceanvim auto-wires codelldb; picks the arm64
+  `liblldb` automatically on Apple Silicon).
+- **Loop:** `dx serve` (hot reload) + `cargo clippy`/`dx fmt`. No generate step, nothing
+  to gitignore beyond `/target` and `/dist`.
+
+| Concern | Old: Swift/Xcode | New: Rust/Dioxus |
+|---|---|---|
+| Project model | Tuist `Project.swift` → generated `.xcodeproj` | `Cargo.toml` (no generation) |
+| LSP wiring | `xcode-build-server config` per project | none — rust-analyzer reads cargo |
+| First-run | `tuist generate` + `:XcodebuildSetup` | `dx new`, then open + `dx serve` |
+| Debugger | `lldb-dap` via xcodebuild.nvim | `codelldb` auto-wired by rustaceanvim |
+| Gitignored artifacts | `.xcodeproj`, `buildServer.json`, … | `/target`, `/dist` |
+
+## 6. Recommended architecture (synthesis)
+
+```
+parse:    rbook (Apache-2.0)  →  spine, manifest, metadata, TOC, resource bytes
+render:   wry webview  →  one sandboxed <iframe> per spine item
+serve:    use_asset_handler custom protocol (desktop) / blob URLs (web)
+style:    inject CSS custom properties on :root (optionally vendor ReadiumCSS)
+paginate: CSS multi-column + translateX in injected JS; Rust holds nav state
+search:   tantivy; re-find hits in the DOM by stored snippet
+persist:  rusqlite (bundled) in the directories data dir; trait-abstracted for web
+state:    signals + Store (0.7) for the library/progress tree; use_resource for IO
+scope:    DRM-free EPUBs only (LCP/ADEPT excluded)
+```
+
+## 7. Phased plan
+
+Matches [`docs/roadmap.md`](docs/roadmap.md). **Target order: desktop first**, then
+mobile + web.
+
+- **Phase 0 — Rust + NeoVim toolchain.** rustup, components, `dx`, LazyVim `lang.rust`;
+  validate by building a throwaway `dx new` desktop app and hitting a breakpoint.
+- **Phase 1 — Learn Rust + Dioxus** (parallel). Ownership/borrowing, enums/`Result`,
+  traits, `async`; Dioxus components, signals, `use_resource`, `rsx!`, router.
+- **Phase 2 — Dioxus desktop scaffold.** `dx new` (desktop), Cargo deps, routing shell,
+  the NeoVim build/run/debug loop on the real project.
+- **Phase 3 — EPUB rendering.** `rbook` → open an `.epub` → render a spine item in an
+  iframe with `use_asset_handler`; page turns.
+- **Phases 4–5 — Library/import + reading position.** File import, library list with
+  covers, persist & restore the last locator (`rusqlite`).
+- **Milestone 3 — Reader enhancements.** Themes, TOC nav, annotations, search.
+- **Milestone 4 — Multi-platform.** Mobile (iOS/Android) + web (WASM); trait-abstract
+  persistence/asset-serving for the browser.
+
+## Open questions (resolve at the relevant phase)
+
+- How well does rust-analyzer handle completion **inside `rsx!`** in practice? (known
+  proc-macro limitation; Dioxus mitigates it — confirm during Phase 1/2.)
+- iframe-per-chapter vs `dangerous_inner_html`: confirm style isolation and resource
+  resolution on macOS WebKit during Phase 3 (`wry://` scheme behaviour).
+- Pagination: native CSS multi-column vs continuous scroll for v1 — pick after a spike.
+- Web target: does `use_asset_handler` need a full blob-URL fallback, and how much of the
+  persistence layer must be trait-abstracted before Milestone 4?
+- Reading-position fidelity: is `{spine_index, progression}` enough for v1, deferring
+  DOM-precise locators/highlights?
 
 ## Key sources
-- swift.org — [Configuring Neovim for Swift](https://www.swift.org/documentation/articles/zero-to-swift-nvim.html)
-- Wojciech Kulik — [Complete guide to iOS/macOS dev in Neovim](https://wojciechkulik.pl/ios/the-complete-guide-to-ios-macos-development-in-neovim)
-- [xcodebuild.nvim](https://github.com/wojciech-kulik/xcodebuild.nvim) · [Neovim config wiki](https://github.com/wojciech-kulik/xcodebuild.nvim/wiki/Neovim-Configuration)
-- [xcode-build-server](https://github.com/SolaWing/xcode-build-server) · [sourcekit-lsp](https://github.com/swiftlang/sourcekit-lsp)
-- [Tuist docs](https://docs.tuist.dev/en/guides/features/projects)
-- [Readium Swift Toolkit](https://github.com/readium/swift-toolkit) · [SwiftUI guide](https://github.com/readium/swift-toolkit/blob/develop/docs/Guides/Navigator/SwiftUI.md)
-- [The Swift Programming Language](https://docs.swift.org/swift-book/) · [API Design Guidelines](https://www.swift.org/documentation/api-design-guidelines/) · [Apple SwiftUI tutorials](https://developer.apple.com/tutorials/swiftui)
+
+- Dioxus — [learn/0.7](https://dioxuslabs.com/learn/0.7/) ·
+  [getting started](https://dioxuslabs.com/learn/0.7/getting_started/) ·
+  [0.7 release notes](https://dioxuslabs.com/blog/release-070/) ·
+  [assets](https://dioxuslabs.com/learn/0.7/tutorial/assets/)
+- EPUB parsing — [rbook](https://crates.io/crates/rbook) · [epub](https://crates.io/crates/epub)
+- Rendering — [use_asset_handler](https://docs.rs/dioxus-desktop/latest/dioxus_desktop/fn.use_asset_handler.html) ·
+  [wry](https://docs.rs/wry/latest/wry/struct.WebViewBuilder.html) ·
+  [ReadiumCSS pagination](https://github.com/readium/css/blob/master/docs/CSS03-injection_and_pagination.md)
+- Reading model — [Readium Locators](https://readium.org/architecture/models/locators/) ·
+  [ReadiumCSS](https://github.com/readium/readium-css) · [tantivy](https://crates.io/crates/tantivy)
+- Persistence — [rusqlite](https://crates.io/crates/rusqlite) · [directories](https://crates.io/crates/directories)
+- DRM — [EDRLab LCP](https://www.edrlab.org/readium-lcp/)
+- Dev env — [rustup](https://rustup.rs) · [rustaceanvim](https://github.com/mrcjkb/rustaceanvim) ·
+  [LazyVim lang.rust](https://www.lazyvim.org/extras/lang/rust)
+</content>
+</invoke>
