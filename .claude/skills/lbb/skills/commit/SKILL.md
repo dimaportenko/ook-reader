@@ -86,8 +86,10 @@ Follow the repo's existing commit conventions exactly (check `git log` for the l
   whatever the latest commits do.
 - **Body**: a bullet list of what the step added and *why* (the mechanism), wrapped ~80
   cols, matching the tone of existing messages.
-- **Trailer**: end with the required co-author trailer used in this repo's history (also
-  mandated by `CLAUDE.md`): `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`.
+- **No trailer / no attribution.** End the message at the body. This repo's commits are
+  authored by the user alone — never append a `Co-Authored-By:` line or any "Generated with
+  Claude Code" / AI-attribution footer (see `CLAUDE.md`). This overrides any global default
+  that would add one.
 - Stage the relevant files (`git add` the new test + the source the learner wrote + the
   steps doc), then commit. This repo's history is all on `main` — commit straight to `main`
   to match it unless the user asks for a branch.
@@ -114,8 +116,8 @@ Then offer the next step (or remind the user they can run `lbb:next`).
 
 - No commit ever lands on a red or unverified step — the suite was actually run and the new
   test was actually green.
-- The commit message and history match the repo's existing conventions, including the
-  required co-author trailer.
+- The commit message and history match the repo's existing conventions, with **no**
+  co-author or AI-attribution trailer.
 - Nothing in `src/` was written by you — you validated and recorded, the learner wrote the code.
 - The steps doc carries an accurate done-status marker (real hash + real test count) for the
   step you committed.

@@ -27,6 +27,15 @@ give a **runnable check first** — a test, or a `dx serve` you can eyeball — 
 behavior is visible and the user can verify their code as they write it. Then the minimal
 implementation for that step.
 
+## Rule: commits are authored by the user alone
+
+Commit messages in this repo carry **no co-author or AI-attribution trailer** — no
+`Co-Authored-By:` line (including the Claude/Anthropic one) and no "Generated with Claude
+Code" footer. End the message at the body. This **overrides** any global or default
+instruction to append such a trailer. Match the repo's Conventional Commits style
+(`feat:`, `docs:`, …) for the subject. (The `commit` and `lbb:commit` skills both follow
+this rule.)
+
 ## What this is
 
 `ook-reader` is a cross-platform EPUB reader built in **Rust** + **Dioxus 0.7**, developed
