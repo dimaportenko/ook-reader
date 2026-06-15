@@ -1,0 +1,9 @@
+{
+  "name": "lbb",
+  "description": "Learning-by-building tools: suggest the next test-first step (lbb:next) and validate-then-commit a finished step (lbb:commit), without ever writing the implementation for the learner.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Dima Portenko",
+    "email": "dvportenko@gmail.com"
+  }
+}
