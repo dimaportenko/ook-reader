@@ -2,6 +2,9 @@
 
 [← Feature: Rust + Dioxus Fundamentals](README.md) · **Status:** ⬜ planned (parallel)
 
+Per-step build log (crux, step plan, test → code → why):
+[`phase-1-learn-rust-dioxus-steps.md`](phase-1-learn-rust-dioxus-steps.md).
+
 ## Goal
 
 Get comfortable with Rust syntax and idioms, and the Dioxus component/state model —
