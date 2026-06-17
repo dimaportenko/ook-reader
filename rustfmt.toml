@@ -1,0 +1,12 @@
+# rustfmt configuration — pins formatting so every editor, `dx fmt --all-code`,
+# and CI agree regardless of the local rustfmt default.
+#
+# Only stable options are set here; rustfmt warns on (and ignores) nightly-only
+# options unless run with nightly, so keeping to stable avoids noise.
+
+# Match the crate's Rust edition (see Cargo.toml). rustfmt defaults to 2015,
+# which mis-parses some modern syntax — pinning this is the important one.
+edition = "2021"
+
+# Line width before rustfmt wraps. 100 is the common community default.
+max_width = 100
