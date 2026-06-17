@@ -49,9 +49,9 @@ that). Concrete conventions this skill must honor:
   per-step build log in a companion `phase-N-<topic>-steps.md` next to it, and keep the
   phase doc's checklist as the step-plan index. See `docs/roadmap.md` for the
   milestone → feature → phase tree.
-- **Commits** are Conventional Commits on `main` (`feat:`, `docs:`, …) with the
-  `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>` trailer — handled
-  by `lbb:commit`.
+- **Commits** are Conventional Commits on `main` (`feat:`, `docs:`, …) authored by the user
+  alone — **no** `Co-Authored-By:` line and no "Generated with Claude Code" / AI-attribution
+  footer (see `CLAUDE.md`). Handled by `lbb:commit`.
 
 The rest of this doc is the general method; the bullets above pin down what's
 project-specific.
