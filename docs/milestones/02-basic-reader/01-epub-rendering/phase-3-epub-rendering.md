@@ -1,11 +1,19 @@
 # Phase 3 — EPUB Rendering
 
-[← Feature: EPUB Rendering](README.md) · **Status:** ⬜ planned (first concrete reader work)
+[← Feature: EPUB Rendering](README.md) · **Status:** 🚧 in progress (Slice 1 underway) ·
+build log: [`phase-3-epub-rendering-steps.md`](phase-3-epub-rendering-steps.md)
 
 ## Goal
 
 Add `rbook` and render a real `.epub`: open a file → read the spine → display a chapter's
 XHTML in the webview, with working page turns.
+
+> **Build order (ADR-0002, dogfood-driven).** This phase is approached as
+> [Slice 1](../../../vision-mvp-reader.md) first: open the bundled book, render the current
+> spine item **raw** (`dangerous_inner_html`), Next/Prev to walk it. The "Known constraints"
+> below describe the *eventual faithful* renderer — the iframe + asset-protocol items are
+> the deferred **faithful-styling unlock**, pulled in when a broken cover / missing styles
+> become the worst real annoyance, not up front. Per-step detail in the build log.
 
 ## Planned steps
 

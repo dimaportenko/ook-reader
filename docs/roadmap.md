@@ -27,6 +27,13 @@ web — one codebase across all targets.
 > **Pivoted from Swift.** Earlier milestones were planned for Swift/Readium; the project
 > restarted on Dioxus/Rust. See [`../RESEARCH.md`](../RESEARCH.md) §1.
 
+**How we build it:** thin, end-to-end **vertical slices** — each step is something a real
+reader can use (open a book, see text, turn a page, resume). The MVP slice sequence and the
+"learning rides inside the slices" principle are in
+[`vision-mvp-reader.md`](vision-mvp-reader.md); the decision is
+[ADR-0001](adr/0001-walking-skeleton-vertical-slices.md). Domain vocabulary:
+[`glossary.md`](glossary.md). Decisions: [`adr/`](adr/).
+
 ## Status legend
 
 ✅ done · 🚧 in progress · ⬜ planned · ⏸ deferred
