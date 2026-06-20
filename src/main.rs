@@ -69,14 +69,30 @@ fn App() -> Element {
 #[component]
 fn SpineList() -> Element {
     let docs = use_hook(|| load_spine(BOOK).expect("bundled epub should load"));
+    let mut current = use_signal(|| 0usize);
+    let len = docs.len();
+    let current_doc = &docs[current()];
 
     rsx! {
         div {
-            for (i, doc) in docs.iter().enumerate() {
-                div {
-                    key: "{i}",
-                    dangerous_inner_html: "{doc}",
+            style: "display: flex; flex-direction: column; height: 100vh;",
+            div {
+                style: "display: flex; gap: 8px;",
+                button {
+                    onclick: move |_| current.set(prev_index(current())),
+                    "Prev"
                 }
+
+                button {
+                    onclick: move |_| current.set(next_index(current(), len)),
+                    "Next"
+                }
+            }
+
+            iframe {
+                "sandbox": "allow-same-origin",
+                style: "flex: 1; width: 100%; border: none;",
+                srcdoc: "{current_doc}",
             }
         }
     }
@@ -94,6 +110,14 @@ fn load_spine(path: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     }
 
     Ok(docs)
+}
+
+fn prev_index(current: usize) -> usize {
+    current.saturating_sub(1)
+}
+
+fn next_index(current: usize, len: usize) -> usize {
+    (current + 1).min(len.saturating_sub(1))
 }
 
 #[cfg(test)]
@@ -163,5 +187,18 @@ mod test {
             !cover_doc.contains("../"),
             "no unresolved OPF-relative paths should remain in the cover document"
         );
+    }
+
+    #[test]
+    fn paging_clamps_at_both_ends() {
+        let len = 15;
+
+        assert_eq!(next_index(0, len), 1);
+
+        assert_eq!(next_index(len - 1, len), len - 1);
+
+        assert_eq!(prev_index(5), 4);
+
+        assert_eq!(prev_index(0), 0);
     }
 }
