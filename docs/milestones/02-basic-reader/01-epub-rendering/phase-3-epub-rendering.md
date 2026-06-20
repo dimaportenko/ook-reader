@@ -14,6 +14,12 @@ XHTML in the webview, with working page turns.
 > below describe the *eventual faithful* renderer — the iframe + asset-protocol items are
 > the deferred **faithful-styling unlock**, pulled in when a broken cover / missing styles
 > become the worst real annoyance, not up front. Per-step detail in the build log.
+>
+> **Update (2026-06-20).** That unlock is being pulled forward by choice — the
+> `use_asset_handler` custom protocol and sandboxed `<iframe>` items below are now sequenced
+> as the **faithful-styling arc (Steps 4–7)** in the
+> [build log](phase-3-epub-rendering-steps.md). The deferral is lifted deliberately, not by
+> drift.
 
 ## Planned steps
 
