@@ -28,17 +28,19 @@ eyeball. Do the testable half first.
 
 ## Step plan (smallest-first, one idea each)
 
-1. **Load the spine into `Vec<String>`** — pure Rust, `cargo test` against the real book.
+1. ✅ **Load the spine into `Vec<String>`** — pure Rust, `cargo test` against the real book.
    *(rbook, `Result`/`?`, `Vec`, ownership)*
-2. **Render the current document** — show `docs[current]` via `dangerous_inner_html` in a
-   scrollable view (`current` fixed at 0). Eyeball under `dx serve`. *(Dioxus element +
-   `dangerous_inner_html`)*
+2. ✅ **Render the spine documents** — render the spine via `dangerous_inner_html` in a
+   scrollable view (shipped showing *all* docs, not just `docs[current]`). Eyeballed under
+   `dx serve`. *(Dioxus element + `dangerous_inner_html`)*
 3. **Turn pages** — a `use_signal` index; Next/Prev mutate it, clamped to `0..docs.len()`.
    Eyeball: page through all 15 items. *(signals, event handlers, clamping)*
 
 ---
 
 ## Step 1 — load the spine into a `Vec<String>`
+
+> **Status:** done — committed in `2f40058` (1 test green: `loads_spine_in_reading_order`).
 
 ### Runnable check (`cargo test`)
 
@@ -130,6 +132,9 @@ big books ever bite. The broken cover at index 0 is expected and shows up in Ste
 ---
 
 ## Step 2 — render the spine documents
+
+> **Status:** done — committed in `2f40058` (visual: `cargo clippy` clean + `dx serve`
+> render confirmed).
 
 ### Runnable check (`dx serve`)
 
