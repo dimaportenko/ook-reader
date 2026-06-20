@@ -40,7 +40,7 @@ eyeball. Do the testable half first.
 2. ✅ **Render the spine documents** — render the spine via `dangerous_inner_html` in a
    scrollable view (shipped showing *all* docs, not just `docs[current]`). Eyeballed under
    `dx serve`. *(Dioxus element + `dangerous_inner_html`)*
-3. **Turn pages** — a `use_signal` index; Next/Prev mutate it, clamped to `0..docs.len()`.
+3. ✅ **Turn pages** — a `use_signal` index; Next/Prev mutate it, clamped to `0..docs.len()`.
    Eyeball: page through all 15 items. *(signals, event handlers, clamping)*
 
 ### Faithful-styling arc — load the book's own images & CSS (Steps 4–7)
@@ -80,7 +80,7 @@ Testable pure-Rust seams (Steps 4, 6) interleave with webview wiring eyeballed (
    `PathRewrite::prefix("/epub/")` into `load_spine`. Pure Rust, `cargo test` asserts a doc's
    hrefs now start with `/epub/` and no `../` survives. *(rbook `read_str_with` /
    `reader_builder().rewrite`, why the prefix string must equal the handler name)*
-7. **Render `docs[current]` in a sandboxed `<iframe srcdoc>`** — swap the all-docs
+7. ✅ **Render `docs[current]` in a sandboxed `<iframe srcdoc>`** — swap the all-docs
    `dangerous_inner_html` column for one isolated item. Eyeball: cover + images render, the
    book's CSS applies *inside* the frame, app styles don't leak in or out. *(iframe `srcdoc`
    + `sandbox`, root-relative URL resolution inside srcdoc)*
@@ -237,6 +237,124 @@ And `App` now mounts `SpineList {}` in place of the old `Counter`.
   the result in a signal. The signal isn't mutated here (it could be a plain `let`), but it
   sets up the reactive state Step 3 will lean on. `.expect` panics if the bundled book fails
   to load — acceptable for a fixed, always-present fixture; real error UI comes later.
+
+---
+
+## Step 3 — turn pages
+
+> **Status:** done — committed in `8903716` (4 tests green: added
+> `paging_clamps_at_both_ends`). Done out of numeric order (the faithful-styling arc, Steps
+> 4–6, was pulled forward first per the 2026-06-20 note), and **fused with Step 7**: the
+> learner skipped Step 3's intermediate `dangerous_inner_html` div and went straight to the
+> iframe, so the same commit lands both steps.
+
+The crux of this step is **`use_hook` vs `use_signal`**. `docs` currently lives in `use_hook`
+— a value that *persists* across renders but whose mutation paints nothing. Pagination needs
+the opposite: a value whose **write schedules a re-render**. That's `use_signal`. Add a
+`current` index signal, render only `docs[current]`, and let Next/Prev `.set` it. The one
+trap is the ends — advancing past the last document would index `docs[15]` and panic — so the
+"turn" logic must clamp. That clamp is pure, bug-prone logic, so this step is **test-first for
+the clamp + eyeball for the wiring**: the same Rust/UI split that's kept every step small.
+
+### Runnable check (`cargo test` for the clamp)
+
+Extract the two "where does the index go" decisions into tiny pure functions and test them.
+Add alongside the existing tests in `mod test`:
+
+```rust
+#[test]
+fn paging_clamps_at_both_ends() {
+    let len = 15; // this book's spine, per loads_spine_in_reading_order
+
+    // Forward from the cover advances one document.
+    assert_eq!(next_index(0, len), 1);
+    // Forward at the last document stays put — this guards against indexing
+    // docs[15] and panicking.
+    assert_eq!(next_index(len - 1, len), len - 1);
+
+    // Back from the middle steps down one.
+    assert_eq!(prev_index(5), 4);
+    // Back at the cover stays put — saturating_sub keeps 0 - 1 from underflowing.
+    assert_eq!(prev_index(0), 0);
+}
+```
+
+`cargo test` won't compile (no `next_index`/`prev_index`) — that's the red. The assertions
+describe the *behavior* (advances, clamps, doesn't underflow), not "it compiles."
+
+### Minimal implementation
+
+Two one-line helpers, then rewrite `SpineList` (replacing the all-docs `for` loop):
+
+```rust
+/// Advance toward the last document, clamped so we never index past the end.
+fn next_index(current: usize, len: usize) -> usize {
+    (current + 1).min(len.saturating_sub(1))
+}
+
+/// Step back toward the cover, clamped so we never underflow past zero.
+fn prev_index(current: usize) -> usize {
+    current.saturating_sub(1)
+}
+
+#[component]
+fn SpineList() -> Element {
+    let docs = use_hook(|| load_spine(BOOK).expect("bundled epub should load"));
+    let mut current = use_signal(|| 0usize);
+    let len = docs.len();
+
+    rsx! {
+        div {
+            button {
+                onclick: move |_| current.set(prev_index(current())),
+                "Prev"
+            }
+            button {
+                onclick: move |_| current.set(next_index(current(), len)),
+                "Next"
+            }
+            div {
+                dangerous_inner_html: "{docs[current()]}",
+            }
+        }
+    }
+}
+```
+
+Under `dx serve`: the cover shows alone; **Next** walks cover → … → last story and **stops**
+at the last doc; **Prev** walks back and **stops** at the cover; no panic at either end.
+`cargo clippy` clean.
+
+### Why it works
+
+- **`use_signal(|| 0usize)` is the whole point.** `use_hook` would hold the index too, but
+  writing it wouldn't repaint. A signal's `.set()` marks the component dirty, so the next
+  render reads the new `current` and swaps the document. **Reading `current()` in the rsx is
+  what *subscribes* this component** — that subscription is the wire from click to repaint.
+- **`let len = docs.len();` before the closures is the ownership move that matters.** The
+  handlers are `move` closures; a closure saying `docs.len()` directly would move the whole
+  `Vec<String>` into itself, leaving the second closure and the `docs[current()]` in the rsx
+  with nothing. Pulling `len` out first means the closures capture a plain `usize` (`Copy`, so
+  each gets its own) and `docs` stays owned by the function body for the render to index.
+  Capture the small `Copy` fact you need, not the big owned thing.
+- **`current` is `Copy`, so both `move` closures can capture it.** A `Signal` is a cheap
+  handle, not the data, so copying it into each handler is fine — both copies point at the
+  same underlying state. That's why one `let mut current` feeds two `move` closures.
+- **`saturating_sub` vs `- 1`.** `prev_index(0)` must not compute `0 - 1` — on `usize` that
+  panics in debug and wraps to a huge number in release. `saturating_sub(1)` floors at 0;
+  `len.saturating_sub(1)` is the last valid index and `.min()` refuses to pass it. The test
+  pins both ends precisely because these are the classic off-by-one panics.
+
+### Scope note
+
+- **`use_hook` clones the whole `Vec<String>` every render.** Free in Step 2 (one render);
+  now every page-turn re-render clones all 15 documents' XHTML. Harmless for this ~380 KB
+  book, but it's exactly what the phase-ending review-and-refactor step should catch — parking
+  `docs` in a signal and reading by index would drop the clone. Noted here, not fixed now.
+- **This unblocks Step 7.** The sandboxed-iframe capstone renders `docs[current()]` and needs
+  this `current` signal — that's the dependency flagged in the step plan above.
+- If a page visibly doesn't swap on click (raw-HTML diffing can be finicky), add
+  `key: "{current()}"` to the content `div` to force a fresh element. Try without first.
 
 ---
 
@@ -537,7 +655,12 @@ into the book. Fixing that isolation is Step 7 — and Step 7 needs the `current
 
 ## Step 7 — render `docs[current]` in a sandboxed `<iframe srcdoc>`
 
-> **Status:** planned — **depends on Step 3 (Turn pages)** for the `current` signal.
+> **Status:** done — committed in `8903716` together with Step 3 (4 tests green; visual:
+> `cargo clippy` clean + `dx serve` confirmed — pages turn, the book's images/CSS render
+> *inside* the frame, app styles don't leak in or out). The fully-restricted `sandbox=""`
+> hit exactly the opaque-origin edge this step's scope note warns about (subresources didn't
+> load), so the sandbox was relaxed to **`allow-same-origin`** — keeping book scripts inert
+> while letting the `/epub/…` subresources resolve.
 
 The capstone: stop dumping every document into the app's own DOM and render the *current* one
 inside an isolated `<iframe>`. The iframe is a separate document, so the book's CSS is scoped
