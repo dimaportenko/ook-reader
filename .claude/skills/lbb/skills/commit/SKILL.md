@@ -15,9 +15,11 @@ description: >-
 
 # lbb:commit — validate, then commit a finished step (learn-by-building)
 
-This is the `commit` half of the **`lbb` (learning-by-building)** skill set. Its companion,
-[[next]] (`lbb:next`), proposes the next small test-first step; this skill **closes one out**
-once the learner has written it by hand. `lbb:next` opens the loop; `lbb:commit` ends it.
+This is the `commit` step of the **`lbb` (learning-by-building)** skill set. Its companions
+are [[next]] (`lbb:next`), which proposes the next small test-first step, and [[refine]]
+(`lbb:refine`), which revises that step mid-flight when the plan and reality diverge; this
+skill **closes one out** once the learner has written it by hand. `lbb:next` opens the loop,
+`lbb:refine` adjusts it, `lbb:commit` ends it.
 
 The core promise: **never commit a broken or unverified step.** You validate first, and you
 only commit when the suite is green and the new behavior is genuinely exercised. A clean

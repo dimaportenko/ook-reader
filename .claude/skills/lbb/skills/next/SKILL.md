@@ -27,9 +27,10 @@ If you write the implementation, you do the learning and they don't. So you sugg
 explain, and review — and you hand them a step small enough to write themselves and a test
 concrete enough to know when they got it right.
 
-This is the `next` half of the **`lbb` (learning-by-building)** skill set. Its companion,
-[[commit]] (`lbb:commit`), validates a finished step and commits it. `lbb:next` proposes
-work; `lbb:commit` closes it out.
+This is the `next` step of the **`lbb` (learning-by-building)** skill set. Its companions are
+[[refine]] (`lbb:refine`), which revises the current in-flight step when the plan and reality
+diverge, and [[commit]] (`lbb:commit`), which validates a finished step and commits it.
+`lbb:next` proposes work; `lbb:refine` adjusts it mid-flight; `lbb:commit` closes it out.
 
 ## This project (ook-reader)
 
@@ -167,7 +168,9 @@ Most sessions settle into this rhythm. Recognize where the user is and pick up t
 
 1. **Suggest** the next step (test → minimal code → why), in chat and appended to the doc.
    *(this skill, `lbb:next`)*
-2. **User implements** by hand. Wait for them.
+2. **User implements** by hand. Wait for them. If the step turns out wrong mid-flight — too
+   big, a better approach surfaced, or a new requirement to fold in — hand off to [[refine]]
+   (`lbb:refine`) to revise the current step in place rather than proposing a fresh one.
 3. **Validate, commit & record** when they ask — hand off to [[commit]] (`lbb:commit`),
    which reads the changed files, runs the suite, confirms the new test passes and nothing
    regressed, commits + pushes following repo conventions, and writes the done-status

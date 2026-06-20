@@ -43,6 +43,4 @@ in NeoVim. It's also a vehicle for **learning** the stack: optimize explanations
 **understanding** the language and framework, not for clever or maximally terse code. A
 comment explaining *why* a line exists is worth more than a one-liner that hides it.
 
-See [`README.md`](README.md) for the stack rationale, [`docs/roadmap.md`](docs/roadmap.md)
-for the roadmap → milestones → phases, and [`RESEARCH.md`](RESEARCH.md) for the tech
-evaluation behind the pivot from Swift.
+See [`README.md`](README.md) for the stack rationale, [`docs/roadmap.md`](docs/roadmap.md) for the roadmap → milestones → phases → steps.
