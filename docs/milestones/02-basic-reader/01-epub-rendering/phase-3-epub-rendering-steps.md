@@ -46,26 +46,53 @@ eyeball. Do the testable half first.
 ### Faithful-styling arc — load the book's own images & CSS (Steps 4–7)
 
 The deferred ADR-0002 unlock, now pulled forward on purpose and split smallest-first. The
-shape: **serve** the zip's bytes at a URL the webview can fetch (custom protocol), then
-**point** each document's relative URLs at it inside an isolated iframe. Testable pure-Rust
-seams first (Steps 4, 6), webview wiring eyeballed (Steps 5, 7).
+shape: **serve** the zip's bytes at a URL the webview can fetch (an asset handler), then
+**point** each document's relative URLs at it, then **isolate** the document in an iframe.
+Testable pure-Rust seams (Steps 4, 6) interleave with webview wiring eyeballed (Steps 5, 7).
 
-4. **Read the cover image's bytes out of the zip** — pure Rust, `cargo test` against the real
-   book. *(rbook `manifest().cover_image()` / `read_bytes`, media-type, magic numbers)*
-5. **Register the `use_asset_handler("epub", …)` custom protocol** — map a request path →
-   resource bytes → `responder.respond(Response …)` with the right `content-type`. Eyeball
-   via devtools / a tiny `<img>`. *(`use_asset_handler`, `http::Response`, the `wry://` vs
-   `http://wry.` scheme split across platforms)*
-6. **Rewrite a spine doc's OPF-relative URLs to the `epub://` protocol** — pure Rust,
-   `cargo test` on a sample XHTML string (or inject a `<base href>`). *(string rewriting,
-   OPF-relative paths)*
-7. **Render `docs[current]` in a sandboxed `<iframe>`** wired to the protocol — swap the
-   all-docs `dangerous_inner_html` column for one isolated item. Eyeball: the cover renders,
-   the book's CSS applies, app styles don't leak. *(iframe `srcdoc` + `sandbox`)*
+> **Plan revised (2026-06-20) after reading the actual `dioxus-desktop 0.7.9` and `rbook
+> 0.7.9` sources.** Two assumptions baked into the original Step 5/6 turned out wrong, and
+> the corrections make the arc *smaller*, not bigger:
+>
+> 1. **No custom URL scheme, no `wry://` vs `http://wry.` platform split.**
+>    `use_asset_handler` does **not** register a separate scheme. dioxus serves handler
+>    assets from the app's *own* origin and routes by the **first path segment** of the
+>    request URI (`protocol.rs`: `request.uri().path().split('/').nth(1)` → the handler
+>    `name`). So `use_asset_handler("epub", …)` catches every request to **`/epub/…`**, and
+>    the URL documents use is a plain **root-relative `/epub/…`** — identical on every
+>    platform. The cross-platform scheme worry is deleted.
+> 2. **rbook rewrites the URLs for us.** rbook 0.7.9 ships
+>    `EpubRewriteOptions::rewrite_paths(PathRewrite::prefix("/epub/"))`, which resolves each
+>    document's relative `src`/`href` against its location in the zip and rewrites e.g.
+>    `../images/1.png` → `/epub/opf/data/images/1.png` (and `.inject_css(…)` too). So Step 6
+>    is rbook *config*, not hand-rolled string surgery. On the return trip,
+>    `epub.read_resource_bytes(path)` normalizes the path itself, so the handler just strips
+>    the `/epub/` prefix and hands the rest back to rbook.
+
+4. ✅ **Read the cover image's bytes out of the zip** — pure Rust, `cargo test` against the
+   real book. *(rbook `manifest().cover_image()` / `read_bytes`, media-type, magic numbers)*
+5. ✅ **Register `use_asset_handler("epub", …)`** — strip the `/epub/` prefix off
+   `request.uri().path()`, read the resource bytes, `responder.respond(Response …)` with a
+   `Content-Type`. Eyeball via a tiny `<img src="/epub/…">` + devtools Network. *(asset
+   handler, `'static` closure ownership of the `Epub` via `Rc`, `wry::http::Response`,
+   content-type)*
+6. ✅ **Rewrite spine docs' resource paths with rbook** — fold an `EpubRewriteOptions` with
+   `PathRewrite::prefix("/epub/")` into `load_spine`. Pure Rust, `cargo test` asserts a doc's
+   hrefs now start with `/epub/` and no `../` survives. *(rbook `read_str_with` /
+   `reader_builder().rewrite`, why the prefix string must equal the handler name)*
+7. **Render `docs[current]` in a sandboxed `<iframe srcdoc>`** — swap the all-docs
+   `dangerous_inner_html` column for one isolated item. Eyeball: cover + images render, the
+   book's CSS applies *inside* the frame, app styles don't leak in or out. *(iframe `srcdoc`
+   + `sandbox`, root-relative URL resolution inside srcdoc)*
+
+> **What "css/image usage" actually lands on.** Images and the book's own CSS become visible
+> at the **end of Step 6** — served by the handler (5) once the docs point at it (6) — even
+> in today's leaky all-docs column. **Step 7 doesn't add the styling; it isolates it** so the
+> book's CSS and the app's CSS stop bleeding into each other.
 
 > **Dependency.** Step 7 renders `docs[current]`, so it needs the `current` signal from
-> **Step 3**. Steps 4–6 don't — they can be written now, in any order, before or alongside
-> Step 3. Do Step 3 before Step 7.
+> **Step 3 (Turn pages)**. Steps 4–6 don't — write them now, in order. **Do Step 3 before
+> Step 7.**
 
 ---
 
@@ -215,7 +242,8 @@ And `App` now mounts `SpineList {}` in place of the old `Counter`.
 
 ## Step 4 — read the cover image's bytes out of the zip
 
-> **Status:** planned — first step of the faithful-styling arc.
+> **Status:** done — committed in `e25cd38` (3 tests green: added
+> `reads_cover_image_bytes`).
 
 The visible symptom this whole arc fixes is the **broken cover at index 0**, so start exactly
 there: prove you can pull the cover image's *bytes* out of the EPUB zip. That's pure Rust
@@ -306,6 +334,257 @@ the webview can fetch is **Step 5** (`use_asset_handler`); pointing the document
 `<img>`/`<link>` URLs at that protocol is **Steps 6–7** (rewrite + iframe). The broken cover
 stays broken on screen until Step 7 — Step 4 just proves the bytes are reachable.
 
-When this is green, the next concrete step is **Step 5 (register the protocol)** — want me to
-lay that one out in full? (Or, if you'd rather finish **Step 3 / Turn pages** first since it's
-the in-flight step and Step 7 depends on it, say so and I'll hold the arc here.)
+When this is green, the rest of the arc — Steps 5, 6, 7 — is laid out below.
+
+---
+
+## Step 5 — register `use_asset_handler("epub", …)`
+
+> **Status:** done — committed in `e25cd38` (visual: `cargo clippy` clean +
+> `dx serve` cover/asset render confirmed). The `'static` handler closure owns
+> an `Rc<Epub>` (`Epub` isn't `Clone`, `Rc<Epub>` is — which `use_hook`
+> requires); the temporary `<img>` probe was removed once verified.
+
+Step 4 proved you can pull a resource's bytes out of the zip. Step 5 puts those bytes on a
+URL the webview can fetch. The key fact (confirmed from the `dioxus-desktop 0.7.9` source,
+not assumed): an asset handler is **not** a separate URL scheme. dioxus routes asset requests
+by the **first path segment** of the request URI to the handler with that `name`, all on the
+app's own origin. So a handler named `"epub"` answers every request whose path starts with
+`/epub/`, and the document just uses a root-relative `/epub/…` URL — the same string on macOS,
+Linux, Windows. No `wry://` vs `http://wry.` branching.
+
+### Runnable check (`dx serve` + devtools)
+
+This is webview wiring, so it's an eyeball check, not a unit test. Drop **one** literal image
+into the rsx, pointing at the cover via the handler, and confirm it renders:
+
+```rust
+// somewhere visible in the rsx, just for this step:
+img { src: "/epub/{cover_href}" }   // cover_href from Step 4's manifest().cover_image().href()
+```
+
+Pass criteria under `dx serve`:
+
+- The cover image **renders** (not a broken-image icon).
+- In devtools → Network, the request to `/epub/…` returns **200** with a `Content-Type:
+  image/*`.
+- `cargo clippy` is clean.
+
+If you'd rather de-risk routing before resource lookup: have the handler ignore the path and
+always respond with the Step-4 cover bytes, and `eprintln!("{}", request.uri().path())` so you
+*see* `/epub/…` arriving. Once the image shows, switch to real path→resource mapping. Either
+order is fine; the green light is "a real image from the zip appears in the window."
+
+### Minimal implementation
+
+```rust
+use dioxus::desktop::{use_asset_handler, wry::http::Response};
+
+// inside a component (App is fine — it mounts once):
+use_asset_handler("epub", move |request, responder| {
+    // dioxus already matched the "epub" segment; strip it to get the in-zip path.
+    // "/epub/opf/data/images/cover.jpg" -> "/opf/data/images/cover.jpg"
+    let path = request.uri().path().strip_prefix("/epub").unwrap_or_default();
+
+    match epub.read_resource_bytes(path) {
+        Ok(bytes) => {
+            let body = Response::builder()
+                .header("Content-Type", content_type_for(path)) // see note below
+                .body(bytes)
+                .unwrap();
+            responder.respond(body);
+        }
+        Err(_) => {
+            let not_found = Response::builder().status(404).body(Vec::new()).unwrap();
+            responder.respond(not_found);
+        }
+    }
+});
+```
+
+### Why it works
+
+- **`use_asset_handler(name, handler)`** registers `handler` under `name`. When a webview
+  request's path is `/epub/…`, dioxus's protocol layer splits the path, sees `epub`, finds
+  your handler, and calls it. That's the entire "custom protocol" — no scheme registration.
+- **The closure is `'static` (`FnMut + 'static`).** It outlives the render, so it cannot
+  *borrow* a local `Epub` — it must **own** one. That's the real design decision this step
+  forces: open an `Epub` and `move` it into the closure (or wrap it so it can be shared with
+  `load_spine`). Re-opening the zip on every request also compiles, but it's wasteful; owning
+  one `Epub` for the handler's lifetime is the better default. Whichever you pick, name *why*
+  in a comment — `'static` ownership is the lesson here.
+- **`strip_prefix("/epub")`** leaves a root-relative `/opf/…` path. `read_resource_bytes`
+  *normalizes and resolves* that itself (confirmed in `epub.rs::transform_resource`), so you
+  don't have to reconcile it against manifest hrefs — feed it the stripped path and it finds
+  the entry.
+- **`Content-Type`** matters: the webview won't decode an image (or apply a stylesheet) served
+  without the right type. Two honest options — look the entry up
+  (`manifest().by_href(path).media_type()`, but note `by_href` is an exact, *un-normalized*
+  match so the stripped path may not hit it) or derive the type from the file extension
+  (`.jpg`/`.png`/`.css` → the obvious MIME). Pin whichever actually works against this book;
+  the extension map is the more robust default.
+
+### Scope note
+
+Step 5 serves *any* `/epub/…` request, but nothing in the book points at `/epub/…` yet — the
+spine docs still carry their original `../images/…` URLs. So the broken cover *inside the
+book* stays broken; you only see the image via the hand-written `<img>` test tag. Making the
+documents themselves request `/epub/…` is **Step 6**. Remove the test `<img>` once Step 6
+lands.
+
+---
+
+## Step 6 — rewrite spine docs' resource paths with rbook
+
+> **Status:** done — committed in `e25cd38` (3 tests green: added
+> `rewrites_resource_paths_to_the_epub_handler`). `load_spine` now reads each
+> doc via `manifest_entry().read_str_with(&rewrite)` with
+> `PathRewrite::prefix("/epub/")`; the all-docs column now shows the book's
+> images and CSS (isolation is Step 7).
+
+Now point the documents at the handler. This was planned as hand-rolled string rewriting, but
+rbook 0.7.9 does it natively: `EpubRewriteOptions::rewrite_paths(PathRewrite::prefix("/epub/"))`
+resolves each relative URL against the document's spot in the zip and rewrites it to
+`/epub/<full-zip-path>` — exactly the shape Step 5's handler answers. Back to a pure-Rust seam,
+so it gets a real `cargo test`.
+
+### Runnable check (`cargo test`)
+
+Extend `load_spine` to apply the rewrite, then assert the URLs actually changed. The cover
+document (spine index 0) references the cover image, so it's a good probe:
+
+```rust
+#[test]
+fn rewrites_resource_paths_to_the_epub_handler() {
+    let docs = load_spine(BOOK).expect("should open the bundled epub");
+
+    // At least one document now points image/CSS URLs at the asset handler …
+    assert!(
+        docs.iter().any(|d| d.contains("/epub/")),
+        "expected rewritten resource URLs under /epub/"
+    );
+
+    // … and the unresolved relative form is gone from that document.
+    let cover_doc = &docs[0];
+    assert!(
+        cover_doc.contains("/epub/"),
+        "the cover document should reference the cover image via /epub/"
+    );
+    assert!(
+        !cover_doc.contains("../"),
+        "no unresolved OPF-relative paths should remain in the cover document"
+    );
+}
+```
+
+Red first: it fails until `load_spine` applies the rewrite. (If `docs[0]` turns out not to be
+the doc that carries an image, adjust the probe to whichever document does — the existing
+`loads_spine_in_reading_order` test already tells you what's at each index.)
+
+### Minimal implementation
+
+Two ways; pick one. **Per-document** (smallest change to today's loop):
+
+```rust
+use rbook::epub::rewrite::{EpubRewriteOptions, PathRewrite};
+
+fn load_spine(path: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let epub = Epub::open(path)?;
+    let rewrite = EpubRewriteOptions::default().rewrite_paths(PathRewrite::prefix("/epub/"));
+
+    let mut docs = Vec::new();
+    for entry in epub.reader() {
+        let data = entry?;
+        docs.push(data.manifest_entry().read_str_with(&rewrite)?); // was: data.content().to_string()
+    }
+    Ok(docs)
+}
+```
+
+**Reader-wide** (rbook applies the rewrite to every spine doc itself):
+
+```rust
+let rewrite = EpubRewriteOptions::default().rewrite_paths(PathRewrite::prefix("/epub/"));
+let reader = epub.reader_builder().rewrite(rewrite).create();
+// then iterate `reader` and take each doc's content as before
+```
+
+Confirm the exact accessor names (`manifest_entry()`, `read_str_with`, `reader_builder`)
+against your rbook — they're in the 0.7.9 source, but pin the call that compiles.
+
+### Why it works
+
+- **`PathRewrite::prefix("/epub/")`** is the seam between the two halves: rbook turns
+  `../images/1.png` into `/epub/opf/data/images/1.png`, and Step 5's handler is registered as
+  `"epub"`, so that URL routes straight to it. **The prefix string and the handler name are
+  the same contract** — change one, change the other, or the requests 404.
+- **rbook resolves relative to the document's location**, not the package root, so a link from
+  a deeply-nested chapter resolves correctly without you tracking directories. That correct
+  resolution is precisely the part hand-rolled string replacement gets wrong.
+- **`read_str_with` returns `EbookResult`** (rewriting can fail on malformed markup), so it
+  takes a `?` — note it's a *different* error type than `read_bytes`' `ArchiveResult`, which is
+  why `load_spine`'s boxed error return earns its keep again.
+
+### Scope note
+
+After Step 6 the all-docs `dangerous_inner_html` column **shows images and applies the book's
+CSS** — that's the "css/image usage" goal, reached. But because everything still renders into
+one shared page, the book's CSS is global: it styles the whole app and the app's styles bleed
+into the book. Fixing that isolation is Step 7 — and Step 7 needs the `current` index from
+**Step 3**, so do Step 3 next if you haven't.
+
+---
+
+## Step 7 — render `docs[current]` in a sandboxed `<iframe srcdoc>`
+
+> **Status:** planned — **depends on Step 3 (Turn pages)** for the `current` signal.
+
+The capstone: stop dumping every document into the app's own DOM and render the *current* one
+inside an isolated `<iframe>`. The iframe is a separate document, so the book's CSS is scoped
+to it (no leak out) and the app's CSS doesn't reach in (no leak in) — the "style isolation"
+the phase doc's Known Constraints call for.
+
+### Runnable check (`dx serve`)
+
+Eyeball, with three things to verify at once:
+
+- The current chapter renders, and its **images + the book's CSS apply inside the frame**
+  (carried over from Step 6, now scoped).
+- An obvious **app-level style** (e.g. a lurid `body { background }` in the app) does **not**
+  bleed into the chapter, and the book's CSS does **not** restyle the app chrome around it.
+- Next/Prev (Step 3) swaps the iframe to the next document.
+
+`cargo clippy` clean.
+
+### Minimal implementation
+
+```rust
+// replacing the `for doc in docs.iter()` column:
+iframe {
+    sandbox: "",                       // no allow-scripts: book JS stays inert
+    srcdoc: "{docs.read()[current()]}", // the current document's (rewritten) XHTML
+}
+```
+
+### Why it works
+
+- **`srcdoc`** hands the iframe a full HTML string to render as its own document — that's the
+  rewritten XHTML from Step 6, `/epub/…` URLs and all.
+- **`sandbox: ""`** (empty, so *no* tokens — notably no `allow-scripts`) renders content but
+  blocks scripts and other escalations. Book content is trusted-ish, but there's no reason to
+  let it run JS, so deny it.
+- **Root-relative `/epub/…` URLs still resolve to the handler.** A `srcdoc` document inherits
+  its base URL from the embedding page, so `/epub/…` resolves against the app origin and hits
+  your handler — the same path that worked in the leaky column keeps working once isolated.
+- **`current()`** is the Step 3 signal; reading it here subscribes the component, so Next/Prev
+  re-render the iframe with the new document. That subscription is why Step 7 *needs* Step 3.
+
+### Scope note — watch for the sandbox edge
+
+A sandboxed iframe can get an **opaque origin**, and depending on the webview that can affect
+whether subresource (`/epub/…`) requests fire as you expect. If images/CSS load in the leaky
+column (Step 6) but go missing once inside the sandbox, that's the thing to debug — the usual
+fixes are injecting a `<base href="/">` into the srcdoc or relaxing the sandbox with
+`allow-same-origin`. Treat it as an eyeball-and-adjust detail of this step, not a
+re-architecture. Pagination (CSS multi-column / scroll) and internal-link navigation remain
+later steps in the phase doc's checklist.

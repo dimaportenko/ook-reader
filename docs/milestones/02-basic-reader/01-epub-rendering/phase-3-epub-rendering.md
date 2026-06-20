@@ -23,13 +23,16 @@ XHTML in the webview, with working page turns.
 
 ## Planned steps
 
-- [ ] Add `rbook` to `Cargo.toml` (`rbook = "0.7"`)
-- [ ] Open an `.epub` with `Epub::open`; read metadata, manifest, spine, TOC
-- [ ] Register a `use_asset_handler` custom protocol that reads resource bytes out of the
-      EPUB zip and `responder.respond(bytes)` — minding the `wry://` vs `http://wry.`
-      scheme split across platforms
-- [ ] Render the current spine item in a **sandboxed `<iframe>`** (omit `allow-scripts`);
-      rewrite OPF-relative URLs (images/CSS/fonts) to the custom-protocol URLs
+- [x] Add `rbook` to `Cargo.toml` (`rbook = "0.7"`)
+- [x] Open an `.epub` with `Epub::open`; read metadata, manifest, spine, TOC
+- [x] Register a `use_asset_handler("epub", …)` that reads resource bytes out of the EPUB zip
+      and `responder.respond(Response …)`. (No custom scheme / no `wry://` vs `http://wry.`
+      split — dioxus routes by the request's first path segment on the app origin, so the URL
+      is a plain root-relative `/epub/…`. See the build log's Step 5.)
+- [x] Rewrite spine docs' OPF-relative URLs (images/CSS/fonts) to `/epub/…` — done by rbook's
+      `EpubRewriteOptions` / `PathRewrite::prefix("/epub/")`, not hand-rolled (build log Step 6)
+- [ ] Render the current spine item in a **sandboxed `<iframe srcdoc>`** (omit `allow-scripts`)
+      for style isolation (build log Step 7; needs the `current` signal from "Turn pages")
 - [ ] Page turns: start with continuous vertical scroll; spike CSS multi-column +
       `translateX` for true pagination
 - [ ] Intercept internal hyperlinks → navigation events (next/prev spine item)
