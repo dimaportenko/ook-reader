@@ -34,7 +34,7 @@ eyeball. Do the testable half first.
    scrollable view (`current` fixed at 0). Eyeball under `dx serve`. *(Dioxus element +
    `dangerous_inner_html`)*
 3. **Turn pages** — a `use_signal` index; Next/Prev mutate it, clamped to `0..docs.len()`.
-   Eyeball: page through all 16 items. *(signals, event handlers, clamping)*
+   Eyeball: page through all 15 items. *(signals, event handlers, clamping)*
 
 ---
 
@@ -63,10 +63,10 @@ mod tests {
     fn loads_spine_in_reading_order() {
         let docs = load_spine(BOOK).expect("should open the bundled epub");
 
-        // This book's spine is 16 documents: cover, PG header, 12 stories, PG footer.
+        // This book's spine is 15 documents: cover, PG header, 12 stories, PG footer.
         // If you get a different number, that's a real finding about what `reader()`
         // iterates — adjust to what's true, but it should be deterministic for this file.
-        assert_eq!(docs.len(), 16);
+        assert_eq!(docs.len(), 15);
 
         // Reading *order*, not manifest order: the first story's title is present,
         // and it is NOT at index 0 (index 0 is the cover).
@@ -126,3 +126,51 @@ fn load_spine(path: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
 No rendering yet (Step 2) and no current-index state (Step 3). We load *all* document text
 eagerly into memory — fine for one ~380 KB book; lazy/by-index loading is a later concern if
 big books ever bite. The broken cover at index 0 is expected and shows up in Step 2/3.
+
+---
+
+## Step 2 — render the spine documents
+
+### Runnable check (`dx serve`)
+
+This half is the Rust/UI seam crossed: there's no unit test, you *eyeball* it. `cargo check`
+and `cargo clippy` must build clean, then under `dx serve` the window should show the book's
+text — Sherlock Holmes prose flowing down the page. The cover at index 0 renders as a broken
+image (no asset protocol yet — expected per ADR-0002), and the book's own CSS doesn't load.
+That's the deliberately-crude Slice 1: it *reads*, even if it isn't yet styled faithfully.
+
+### Minimal implementation
+
+```rust
+#[component]
+fn SpineList() -> Element {
+    const BOOK: &str = "book/The Adventures of Sherlock Holmes by Arthur Conan Doyle.epub";
+    let docs = use_signal(|| load_spine(BOOK).expect("bundled epub should load"));
+
+    rsx! {
+        div {
+            for doc in docs.iter() {
+                div {
+                    dangerous_inner_html: "{doc}",
+                }
+            }
+        }
+    }
+}
+```
+
+And `App` now mounts `SpineList {}` in place of the old `Counter`.
+
+### Why it works
+
+- **`dangerous_inner_html: "{doc}"`** injects each spine document's XHTML straight into a
+  `<div>` as raw markup. It's "dangerous" because Dioxus does no escaping — exactly what we
+  want for trusted book content we're deliberately rendering as HTML. (The faithful, sandboxed
+  `<iframe>` + asset-protocol renderer is the deferred unlock; this is the crude first cut.)
+- **`for doc in docs.iter()`** renders *every* spine document at once into a single scrollable
+  column — a deviation from the original Step-2 plan ("show `docs[current]`"). Showing the
+  whole book is simpler and already reads; per-page navigation is Step 3's job.
+- **`use_signal(|| load_spine(...).expect(...))`** runs `load_spine` once on mount and parks
+  the result in a signal. The signal isn't mutated here (it could be a plain `let`), but it
+  sets up the reactive state Step 3 will lean on. `.expect` panics if the bundled book fails
+  to load — acceptable for a fixed, always-present fixture; real error UI comes later.

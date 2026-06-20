@@ -10,3 +10,6 @@ edition = "2021"
 
 # Line width before rustfmt wraps. 100 is the common community default.
 max_width = 100
+
+#
+blank_lines_upper_bound = 2
