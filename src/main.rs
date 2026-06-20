@@ -4,7 +4,8 @@ use dioxus::prelude::*;
 use rbook::Epub;
 
 const FAVICON: Asset = asset!("/assets/favicon.ico");
-const MAIN_CSS: Asset = asset!("/assets/main.css");
+// const MAIN_CSS: Asset = asset!("/assets/main.css");
+const BOOK: &str = "book/The Adventures of Sherlock Holmes by Arthur Conan Doyle.epub";
 
 fn main() {
     dioxus::launch(App);
@@ -17,23 +18,23 @@ fn App() -> Element {
             rel: "icon",
             href: FAVICON,
         }
-        document::Link {
-            rel: "stylesheet",
-            href: MAIN_CSS,
-        }
+        // document::Link {
+        //     rel: "stylesheet",
+        //     href: MAIN_CSS,
+        // }
         SpineList {}
     }
 }
 
 #[component]
 fn SpineList() -> Element {
-    const BOOK: &str = "book/The Adventures of Sherlock Holmes by Arthur Conan Doyle.epub";
-    let docs = use_signal(|| load_spine(BOOK).expect("bundled epub should load"));
+    let docs = use_hook(|| load_spine(BOOK).expect("bundled epub should load"));
 
     rsx! {
         div {
-            for doc in docs.iter() {
+            for (i, doc) in docs.iter().enumerate() {
                 div {
+                    key: "{i}",
                     dangerous_inner_html: "{doc}",
                 }
             }
@@ -56,7 +57,7 @@ fn load_spine(path: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod test {
     use super::*;
-    const BOOK: &str = "book/The Adventures of Sherlock Holmes by Arthur Conan Doyle.epub";
+
     #[test]
     fn loads_spine_in_reading_order() {
         let docs = load_spine(BOOK).expect("should open the bundled epub");

@@ -19,3 +19,6 @@ assets/tailwind.css
 # Editor / local
 .idea/
 *.swp
+
+# 
+book/unzipped/
