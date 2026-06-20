@@ -109,7 +109,9 @@ next single step.
    the table of contents for the topic. Keep each step to something the user can write and
    verify in a sitting — the failure mode you're avoiding is "a big implementation that's
    hard to understand by rewriting it without running it." That exact pain is why steps are
-   small and test-first.
+   small and test-first. **The last step of every phase is always a review-and-refactor
+   pass** (see below) — plan it in from the start so the learner knows the phase ends by
+   stepping back and cleaning up, not just by landing the final feature.
 
 ### Each step: test first, then minimal code, then why
 
@@ -140,6 +142,52 @@ Always in this order — the order is the pedagogy:
 
 End the suggestion by **offering** the next step, not barrelling into it: "Want me to lay
 out Step N?" The user drives the pace.
+
+### The last step of every phase: review and refactor
+
+Every phase ends with a deliberate **review-and-refactor** step, before the phase is marked
+done. The feature steps get it *working*; this step makes it *good* — and in a learning
+project, the refactor is where a lot of the language learning actually lands, because the
+learner now has working code in front of them and can see *why* the idiomatic form is
+better than what they first reached for. Don't skip it just because the tests are green.
+
+This step is shaped a little differently from a feature step:
+
+1. **Runnable check first — but here it's a safety net, not a target.** The whole suite
+   stays green and `cargo clippy` comes back clean. Refactoring must not change behavior, so
+   the existing tests *are* the spec: run them before and after and they pass identically.
+   If a refactor needs a behavior change, it isn't a refactor — split it back out into its
+   own feature step. New tests here are fair game only to lock down behavior that was
+   implicit before (an edge case the refactor now makes explicit).
+
+2. **A concrete review punch-list, not a vague "clean it up."** Read the phase's code and
+   name specific, actionable changes, each with the *why*. This is the one step where you
+   lean hard on your reviewer role. Look for:
+   - **Idiomatic Rust** — `match`/`if let` over nested `unwrap()`, `?` over manual `Result`
+     plumbing, iterator chains over index loops, `&str` params over `&String`, deriving
+     traits instead of hand-rolling them, `impl Trait` where it reads cleaner. Explain the
+     idiom's payoff, don't just cite the rule.
+   - **Code split & function shape** — a function doing three things broken into three, a
+     deeply nested block flattened with early returns, duplicated logic pulled into a helper,
+     a sprawling `match` arm extracted.
+   - **File & module organization** — types/logic that have outgrown `main.rs` or a catch-all
+     module moved into their own file, a `mod`/`pub` boundary tightened so internals aren't
+     leaked, related items grouped. Point at the specific move ("lift `Spine` and its `impl`
+     into `src/epub/spine.rs`, expose it via `pub mod spine`") and say what it buys.
+   - **Naming & clarity** — names that now misdescribe what the code grew into, comments that
+     restate the code instead of explaining the why, dead scaffolding from earlier steps.
+
+   Keep the punch-list honest and small — if it's enormous, the phase was under-refactored as
+   it went; surface the top few highest-leverage changes rather than an exhausting list.
+
+3. **Why each change is better.** Same as a feature step: the mechanism and the payoff, not a
+   restatement. "`?` here propagates the `EpubError` to the caller and drops six lines of
+   `match … return Err(e)` — and it makes the happy path the thing you read top-to-bottom."
+
+The hard rule still holds: **you propose the refactor, the learner makes the edits.** This
+is a review, so you may be more specific than usual — exact before/after snippets in the
+suggestion are great — but the diff still lands in `src/` by their hand, not yours. Offer
+the changes as a checklist they can work through and tick off.
 
 ## Always write the step into the steps doc
 
@@ -206,3 +254,5 @@ stamp:
 - Nothing in `src/` was written by you — only tests, the steps doc, and explanations.
 - The steps doc reads, after the fact, as a clear build log of how the topic was built.
 - Steps were small enough that no single one was "too big to understand by rewriting it."
+- Every phase closed with a review-and-refactor pass, so the landed code is idiomatic and
+  well-organized — not just working — and the learner saw *why* the cleaner form is better.
