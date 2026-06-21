@@ -83,6 +83,10 @@ fn SpineList() -> Element {
                     "Prev"
                 }
 
+                span {
+                    "{current()}"
+                }
+
                 button {
                     onclick: move |_| current.set(next_index(current(), len)),
                     "Next"
