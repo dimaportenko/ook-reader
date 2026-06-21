@@ -9,6 +9,7 @@ edition = "2021"
 [dependencies]
 dioxus = { version = "0.7.1", features = [] }
 rbook = "0.7"
+base64 = "0.22"
 
 [features]
 default = ["desktop"]

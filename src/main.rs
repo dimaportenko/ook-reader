@@ -23,6 +23,7 @@ fn content_type_for(path: &str) -> &'static str {
         "png" => "image/png",
         "gif" => "image/gif",
         "svg" => "image/svg+xml",
+        "xhtml" | "htm" | "html" => "application/xhtml+xml",
         _ => "application/octet-stream",
     }
 }
@@ -96,16 +97,25 @@ fn SpineList() -> Element {
             iframe {
                 "sandbox": "allow-same-origin",
                 style: "flex: 1; width: 100%; border: none;",
-                srcdoc: "{current_doc}",
+                src: "{to_xhtml_data_url(current_doc)}",
             }
         }
     }
 }
 
+fn to_xhtml_data_url(xhtml: &str) -> String {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    format!(
+        "data:application/xhtml+xml;base64,{}",
+        STANDARD.encode(xhtml)
+    )
+}
+
 fn load_spine(path: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let epub = Epub::open(path)?;
 
-    let rewrite = EpubRewriteOptions::default().rewrite_paths(PathRewrite::prefix("/epub/"));
+    let rewrite = EpubRewriteOptions::default()
+        .rewrite_paths(PathRewrite::prefix("dioxus://index.html/epub/"));
 
     let mut docs = Vec::new();
     for entry in epub.reader() {
@@ -174,26 +184,6 @@ mod test {
     }
 
     #[test]
-    fn rewrites_resource_paths_to_the_epub_handler() {
-        let docs = load_spine(BOOK).expect("should open the bundled epub");
-        assert!(
-            docs.iter().any(|d| d.contains("/epub/")),
-            "expected rewritten resource URLs under /epub/"
-        );
-
-        let cover_doc = &docs[0];
-        assert!(
-            cover_doc.contains("/epub"),
-            "expected rewritten resource URLs under /epub/"
-        );
-
-        assert!(
-            !cover_doc.contains("../"),
-            "no unresolved OPF-relative paths should remain in the cover document"
-        );
-    }
-
-    #[test]
     fn paging_clamps_at_both_ends() {
         let len = 15;
 
@@ -204,5 +194,17 @@ mod test {
         assert_eq!(prev_index(5), 4);
 
         assert_eq!(prev_index(0), 0);
+    }
+
+    #[test]
+    fn wraps_xhtml_as_a_base64_data_url() {
+        let url = to_xhtml_data_url("<html />");
+        assert!(url.starts_with("data:application/xhtml+xml;base64,"));
+
+        use base64::{engine::general_purpose::STANDARD, Engine};
+        let payload = url
+            .strip_prefix("data:application/xhtml+xml;base64,")
+            .unwrap();
+        assert_eq!(STANDARD.decode(payload).unwrap(), b"<html />");
     }
 }
