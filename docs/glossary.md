@@ -33,6 +33,31 @@ these terms).
   document (e.g. `c1.xhtml#section-a`). Two ToC entries can target the same file at
   different fragments.
 
+## Theming & rendering
+
+Grounded in [Readium CSS](https://github.com/readium/readium-css) (the de-facto reader
+theming model) and [ADR-0003](adr/0003-reader-controlled-theming-injected-layer.md).
+
+- **Reading mode / theme** — a named set of user style values applied to the whole book,
+  chiefly background + text colour: **day** (light), **sepia**, **night** (dark). In this
+  model a theme is *just* a bundle of `--USER__*` values, so custom themes and caching fall
+  out for free.
+- **Override layer (cascade)** — the reader's styling expressed as a small CSS layer injected
+  *around* the book's own CSS, never replacing it. Three tiers by source order:
+  **RS defaults** (injected *before* the book CSS) < **author/publisher CSS** (untouched) <
+  **user overrides** (injected *after*). Priority by design: **USER > author > RS**.
+- **`--RS__` vs `--USER__` variable** — the two prefixes for the reading-system's CSS custom
+  properties. `--RS__*` are reading-system defaults that *lose* to the book; `--USER__*` are
+  user settings that *win*. Switching a setting = changing a `--USER__*` value.
+- **Advanced-settings flag** — a gate (e.g. a `--USER__*` toggle) that withholds the more
+  aggressive overrides (font-family, justification) unless the user opts in, so the reader
+  doesn't fight embedded fonts or author `!important` and create invisible-text bugs.
+- **Served XHTML (vs `srcdoc`)** — rendering a content document by pointing the iframe at a
+  URL served with `Content-Type: application/xhtml+xml`, so the webview parses it as **XML**.
+  Contrast `srcdoc`, which parses as **HTML**. The distinction matters: XHTML self-closing
+  non-void tags like `<a id="x"/>` are honoured under XML parsing but mis-parsed as unclosed
+  under HTML parsing. Served XHTML is also the **injection seam** for the override layer.
+
 ## Concepts that are easy to conflate
 
 - **Chapter** — a *navigational* concept = (usually) a ToC entry. **Not** the same as a

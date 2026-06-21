@@ -33,6 +33,12 @@ XHTML in the webview, with working page turns.
       `EpubRewriteOptions` / `PathRewrite::prefix("/epub/")`, not hand-rolled (build log Step 6)
 - [ ] Render the current spine item in a **sandboxed `<iframe srcdoc>`** (omit `allow-scripts`)
       for style isolation (build log Step 7; needs the `current` signal from "Turn pages")
+- [ ] Fix the **anchor-wrap rendering bug** (chapters render as a giant hover-red link): the
+      XHTML self-closing `<a id="…"/>` is mis-parsed as unclosed under `srcdoc`'s HTML parser.
+      Fixed by switching to **served XHTML** — see
+      [Phase 4, Step 1](../../03-reader-enhancements/04-themes-typography/phase-4-theming-steps.md)
+      and [ADR-0003](../../../adr/0003-reader-controlled-theming-injected-layer.md); the fix
+      doubles as the theming injection seam, so it lives in Phase 4.
 - [ ] Page turns: start with continuous vertical scroll; spike CSS multi-column +
       `translateX` for true pagination
 - [ ] Intercept internal hyperlinks → navigation events (next/prev spine item)
