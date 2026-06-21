@@ -91,7 +91,7 @@ Testable pure-Rust seams (Steps 4, 6) interleave with webview wiring eyeballed (
    URL** instead. Split: **8a** render via `data:` URL (bug fixed; styling may lag) → **8b**
    restore CSS/images by basing their URLs on the `dioxus://` scheme. *(content-type → XML parse,
    nav guard, `data:` URLs, base64, opaque-origin subresources)*
-9. ⬜ **Review & refactor the rendering arc** — the review-and-refactor convention, scoped here
+9. ✅ **Review & refactor the rendering arc** — the review-and-refactor convention, scoped here
    to the render path (Steps 4–8), not the whole phase (pagination / internal links / sample
    epub still follow). Reconcile the churn Step 8 left (the rewrite machinery is **repurposed**
    if 8b rewrites URLs, or genuinely dead if 8b uses `<base>`), make names honest for whatever
@@ -925,11 +925,17 @@ than left as plain navigations.
 
 ## Step 9 — review & refactor the rendering arc
 
-> **Status:** ⬜ planned. The review-and-refactor convention applied to the **render path
-> (Steps 4–8)**, run right after Step 8 lands. **Scoped to the rendering arc, not the whole
-> phase** — pagination, internal-link navigation, and bundling a sample epub still follow, and
-> the phase gets its *true* final review when they land. Reviewing the arc now, while the Step 8
-> detour (served XHTML → `data:` URLs) is fresh and has left churn behind, is the point.
+> **Status:** done — committed in `70b91df` (4 tests green, clippy clean; same 4 green before
+> and after, so the move was behaviour-preserving). Landed punch-list items **1** (one
+> `EPUB_ROUTE` const, replacing the three `/epub` literals), **3 + 5** (lifted `load_spine`,
+> `content_type_for`, `to_xhtml_data_url` and their tests into `src/epub.rs` as `pub(crate)`),
+> plus the `collect::<Result<Vec<_>, _>>()` rewrite of `load_spine`. **Deferred** (optional
+> polish, no churn risk): `SpineList` → an honest name, the two `.body(…).unwrap()` →
+> `.expect(…)`, and `#![allow(non_snake_case)]` → `#[expect(…, reason = …)]`. The
+> review-and-refactor convention applied to the **render path (Steps 4–8)**, run right after
+> Step 8. **Scoped to the rendering arc, not the whole phase** — pagination, internal-link
+> navigation, and bundling a sample epub still follow, and the phase gets its *true* final
+> review when they land.
 
 ### The discipline (why the ordering matters)
 
