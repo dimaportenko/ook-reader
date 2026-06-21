@@ -33,14 +33,17 @@ XHTML in the webview, with working page turns.
       `EpubRewriteOptions` / `PathRewrite::prefix("/epub/")`, not hand-rolled (build log Step 6)
 - [x] Render the current spine item in a **sandboxed `<iframe srcdoc>`** (omit `allow-scripts`)
       for style isolation (build log Step 7; needs the `current` signal from "Turn pages")
-- [ ] Fix the **anchor-wrap rendering bug** by rendering the current spine item as **served
-      XHTML** (iframe `src="/epub/…"` with `Content-Type: application/xhtml+xml`) instead of
-      `srcdoc`. Chapters currently render as a giant hover-red link because the XHTML
-      self-closing `<a id="…"/>` is mis-parsed as unclosed under `srcdoc`'s HTML parser; an
-      XML-parsed served document honours it (build log **Step 8**). This is a rendering-
-      correctness fix that belongs here; the served-XHTML renderer it produces is also the
-      seam [Phase 4 (theming)](../../03-reader-enhancements/04-themes-typography/phase-4-theming.md)
-      builds on. See [ADR-0003](../../../adr/0003-reader-controlled-theming-injected-layer.md).
+- [x] Fix the **anchor-wrap rendering bug** by getting the spine item in front of the browser's
+      **XML** parser, so the self-closing `<a id="…"/>` is honoured instead of mis-parsed as an
+      unclosed tag under `srcdoc`'s HTML parser (which makes chapters a giant hover-red link).
+      The clean "served XHTML via iframe `src`" route is **blocked on macOS** by dioxus's
+      navigation guard (it refuses `dioxus://` iframe navigations after first load), so the
+      renderer uses a **`data:application/xhtml+xml` URL** instead (build log **Step 8**, split
+      8a render / 8b subresources). This is a rendering-correctness fix that belongs here; the
+      bytes we build for the `data:` URL are also the theming-injection seam
+      [Phase 4 (theming)](../../03-reader-enhancements/04-themes-typography/phase-4-theming.md)
+      builds on — a relocation of the seam ADR-0003 assumed lived in the served response. See
+      [ADR-0003](../../../adr/0003-reader-controlled-theming-injected-layer.md).
 - [ ] Page turns: start with continuous vertical scroll; spike CSS multi-column +
       `translateX` for true pagination
 - [ ] Intercept internal hyperlinks → navigation events (next/prev spine item)

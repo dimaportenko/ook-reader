@@ -84,9 +84,27 @@ Testable pure-Rust seams (Steps 4, 6) interleave with webview wiring eyeballed (
    `dangerous_inner_html` column for one isolated item. Eyeball: cover + images render, the
    book's CSS applies *inside* the frame, app styles don't leak in or out. *(iframe `srcdoc`
    + `sandbox`, root-relative URL resolution inside srcdoc)*
-8. ⬜ **Render the current item as served XHTML** — swap `srcdoc` for `src="/epub/…"` served
-   with `application/xhtml+xml`, fixing the anchor-wrap bug at the parser level. *(content-type
-   → XML parse, iframe `src` + base-URL relative resolution, spine doc paths)*
+8. ✅ **Render the current item as XHTML, fixing the anchor-wrap bug** — get the document in
+   front of the browser's **XML** parser so self-closing `<a/>` (and its whole class) parse
+   correctly. The clean "served XHTML via `iframe src`" route is **blocked on macOS** by
+   dioxus's navigation guard (see the Step 8 log), so the route is a **`data:application/xhtml+xml`
+   URL** instead. Split: **8a** render via `data:` URL (bug fixed; styling may lag) → **8b**
+   restore CSS/images by basing their URLs on the `dioxus://` scheme. *(content-type → XML parse,
+   nav guard, `data:` URLs, base64, opaque-origin subresources)*
+9. ⬜ **Review & refactor the rendering arc** — the review-and-refactor convention, scoped here
+   to the render path (Steps 4–8), not the whole phase (pagination / internal links / sample
+   epub still follow). Reconcile the churn Step 8 left (the rewrite machinery is **repurposed**
+   if 8b rewrites URLs, or genuinely dead if 8b uses `<base>`), make names honest for whatever
+   `load_spine` now returns (content / `data:` URLs, not `paths`), and (optional) lift the EPUB
+   logic out of `main.rs`. Safety net: the post-Step-8 suite stays green + clippy clean, no
+   behavior change. *(dead-code vs repurpose, naming honesty, module boundaries)*
+
+> **Sequencing 8 and 9.** Land **Step 8 (8a then 8b) to green first** (feature), then run
+> **Step 9 on that green baseline** (refactor). The "green before == green after, no behavior
+> change" rule applies to the *refactor half only* — it can't span Step 8, which changes
+> behavior and rewrites tests on purpose. (The original "delete the rewrite test" interlock is
+> moot: with `data:` URLs `load_spine` returns content again, so the content-based tests are
+> back in play rather than removed.)
 
 > **What "css/image usage" actually lands on.** Images and the book's own CSS become visible
 > at the **end of Step 6** — served by the handler (5) once the docs point at it (6) — even
@@ -719,10 +737,13 @@ later steps in the phase doc's checklist.
 
 ## Step 8 — render the current item as served XHTML (fixes the anchor-wrap bug)
 
-> **Status:** ⬜ planned. This is the "next step" — a rendering-correctness fix that belongs
-> in Phase 3. The served-XHTML renderer it produces is also the injection seam
-> [Phase 4 (theming)](../../03-reader-enhancements/04-themes-typography/phase-4-theming.md)
-> builds on; decision recorded in
+> **Status:** done — committed in `77adf23` (4 tests green). Landed as **8a + 8b** via the
+> `data:application/xhtml+xml` route (the served-XHTML route was blocked on macOS — see below).
+> **8b verified styled:** under `dx serve` the chapter renders as prose (no red link) *and* the
+> book's CSS + cover/images load inside the frame — confirming the open question that a
+> `data:`-origin document *can* load `dioxus://…/epub/…` subresources via the asset handler.
+> The theming-injection seam this leaves behind (the bytes we encode) feeds Phase 4; the
+> relocation from "served response" to "encoded bytes" should be written back into
 > [ADR-0003](../../../adr/0003-reader-controlled-theming-injected-layer.md).
 
 ### The bug
@@ -736,100 +757,241 @@ closing tag the rest of the chapter becomes its descendant — inheriting `1.css
 `a:link { color: blue }` / `a:hover { color: red }`.
 
 This is **not** an `rbook` bug: its rewriter round-trips `<a/>` faithfully (quick-xml
-`Event::Empty` in → `<a/>` out). The breakage is at *our* rendering seam — XHTML fed to an
-HTML parser. `srcdoc` has **no content type** to set, so the only fix is to stop using it:
-serve the document at a URL with `Content-Type: application/xhtml+xml` and point the iframe
-at it with `src`, so the webview's **XML** parser honours the self-closing anchor.
+`Event::Empty` in → `<a/>` out). The breakage is at *our* rendering seam — **XHTML fed to an
+HTML parser**. `srcdoc` is always parsed as `text/html` and has no content type to override.
+The real fix is to get the document in front of the browser's **XML** parser. There are two
+ways to do that, and the first one we tried hit a wall worth recording in full — it's the
+load-bearing finding of this step and it reshapes Phase 4.
 
-### Runnable check
+### Attempt A — served XHTML via `iframe src` (blocked by dioxus's nav guard)
 
-Webview wiring, so eyeball — plus a pure-Rust test for the new `load_spine` shape.
+The plan: teach the handler to serve content docs as `application/xhtml+xml`, have `load_spine`
+return spine **paths**, and point the iframe at `src="/epub/{path}"`. We built it
+(`content_type_for` gained an `xhtml` arm; `load_spine` returned `href()`; iframe used `src`).
+It rendered **nothing** — an empty `<html><head></head><body></body></html>` — and an
+`eprintln!` at the top of the asset handler showed it was **never called** for the iframe's
+document request. (Subresource requests *do* reach it — hold that asymmetry.)
 
-- The chapter renders as **normal prose**, not a blue link; **hovering does not turn it red**.
-- Next/Prev still swap chapters; the book's images + CSS still load inside the frame.
-- devtools → Network: the document request returns `Content-Type: application/xhtml+xml`.
-- `cargo clippy` clean.
+Two real bugs were found and fixed along the way (worth keeping, they're correct):
 
-`cargo test` for the pure-Rust half — `load_spine` now returns the spine's **paths** (to build
-the `src`), not its content, so retarget `loads_spine_in_reading_order` onto paths:
+- **Double slash.** `href()` returns a leading-slash *absolute* zip path (`/OEBPS/wrap0000.xhtml`),
+  so `"/epub/{path}"` produced `/epub//OEBPS/…`. After `strip_prefix("/epub")` that left
+  `//OEBPS/…`, which rbook's `transform_resource` couldn't resolve. Fix: `"/epub{path}"` (no
+  slash — the path already has one). Confirmed with a probe test:
+  `read_resource_bytes("/OEBPS/…")` → `Ok(54958 bytes)`.
+- **Content type irrelevant.** Even served as `text/html`, still blank — so the MIME wasn't the
+  blocker.
+
+The actual root cause is in `dioxus-desktop 0.7.9` (`webview.rs:369`):
+
+```rust
+.with_navigation_handler(move |var| {
+    if var.starts_with("dioxus://") || var.starts_with("http://dioxus.") || ... {
+        // After the page has loaded once, don't allow any more navigation
+        let page_loaded = page_loaded.swap(true, Ordering::SeqCst);
+        return !page_loaded;          // first load: true; every later nav: FALSE
+    }
+    ... // data:/blob:/external fall through to the allow branch
+})
+```
+
+On macOS the app runs under the custom scheme `dioxus://index.html/` (`webview.rs:368`,
+`protocol.rs:22`), so `/epub/…` resolves to `dioxus://index.html/epub/…`. The **first**
+navigation (the app itself) is allowed and flips `page_loaded` to `true`; **every** later
+`dioxus://` navigation — including an iframe's `src` — returns `false` and is **blocked**. The
+frame loads nothing and the handler never runs. *Subresources* (img/css) aren't "navigations,"
+so they bypass this guard and reach the protocol handler — which is exactly why Step 7's images
+worked but a top-level iframe navigation does not.
+
+Two dead ends fall out, recorded so we don't retry them:
+
+- **Can't override the guard from user code.** The `dioxus://` branch returns *before* the
+  user-supplied `navigation_handler` is ever consulted.
+- **Can't switch to an `http(s)` origin on macOS.** The URL is hardcoded to `dioxus://`, and
+  WKWebView forbids registering a scheme handler for real `http`/`https` (Apple's restriction —
+  the very reason dioxus minted `dioxus://`). "Serve over http" is a Windows/Linux option, not a
+  macOS one. (This is the original "Option 2"; it's a dead end here.)
+
+### The fix — `data:application/xhtml+xml` URL
+
+The nav guard only blocks `dioxus://` (and `http(s)://dioxus.`) URLs. A **`data:` URL** falls
+through to the allow branch, so the iframe *can* navigate to it — and a
+`data:application/xhtml+xml` document is handed to the browser's **real XML parser**. A one-line
+spike confirmed both at once:
+
+```rust
+src: "data:application/xhtml+xml,<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><p>hello <a id=\"x\"/>world</p></body></html>",
+```
+
+→ rendered `hello world` as plain text, and the inspector showed `<a id="x"></a>` — the parser
+**self-closed the anchor** (the text is a sibling, not swallowed). That fixes the anchor-wrap
+bug at the parser level, and — unlike a hand-rolled `<a/>`→`<a></a>` transform — it fixes the
+*whole class* of self-closing-non-void elements for free, because a real XML parser is doing the
+parsing. That "general, not whack-a-mole" property is the reason we chose it.
+
+The cost `data:` imposes: an opaque origin, so the document's relative resource URLs (`0.css`,
+images) have no base to resolve against. That splits the work cleanly:
+
+- **Step 8a — render the current item as a `data:` XHTML URL.** Bug fixed; CSS/images may be
+  missing for now. Prose renders, no red link, paging works.
+- **Step 8b — restore subresources** by giving those relative URLs an absolute base on the
+  `dioxus://` scheme (which the handler *does* serve for subresources).
+
+### Step 8a — runnable check
+
+Eyeball under `dx serve`:
+
+- The chapter renders as **normal prose**, not a blue link; **hover does not turn it red**.
+- Next/Prev still page; `cargo clippy` clean.
+- (CSS/images may be unstyled/broken — that's 8b. The *bug* is what 8a proves fixed.)
+
+Pure-Rust half — `load_spine` goes **back to returning document content** (we need the bytes to
+build the `data:` URL; the Step-8 paths version is superseded). Test the content, or the built
+URL if you build it in `load_spine`:
 
 ```rust
 #[test]
-fn loads_spine_paths_in_reading_order() {
-    let paths = load_spine(BOOK).expect("should open the bundled epub");
-    assert_eq!(paths.len(), 15);                       // same 15 spine items
-    assert!(paths[0].ends_with(".xhtml"));             // each is a content-doc path
-    // Reading order: the cover wrapper is first, not a story.
-    assert!(!paths[0].contains("h-1"));
+fn builds_xhtml_data_urls_in_reading_order() {
+    let docs = load_spine(BOOK).expect("should open the bundled epub");
+    assert_eq!(docs.len(), 15);
+    assert!(docs[0].starts_with("data:application/xhtml+xml")); // each item is a ready data: URL
 }
 ```
 
-(The old `rewrites_resource_paths_to_the_epub_handler` test is about content rewriting; with
-served XHTML the document's own relative URLs resolve against its `src` base URL, so that test
-loses its subject — drop it or move the rewrite assertion to wherever the rewrite still earns
-its keep. Decide that in the Step 9 review, not here.)
+(If you keep `load_spine` returning raw content and build the URL in a helper, test the helper
+instead — assert it round-trips, e.g. base64-decoding the payload gives back the XHTML.)
 
-### Minimal implementation (sketch — you write it by hand)
+### Step 8a — minimal implementation (sketch; you write it)
 
-Three small moves:
-
-1. **Teach the handler the XHTML content type.** In `content_type_for`, add:
-
-   ```rust
-   "xhtml" | "htm" | "html" => "application/xhtml+xml",
-   ```
-
-   The handler already serves any `/epub/<path>` resource as raw bytes — so once the content
-   type is right, it already serves content documents correctly.
-
-2. **`load_spine` returns paths, not content.** Each reader entry exposes its manifest entry,
-   whose `href()` is the resolved in-zip path:
+1. **`load_spine` returns content again.** Revert it to collect `data.content()` (or
+   `read_str_with` if you keep a rewrite for 8b), not `href()`.
+2. **Build the `data:` URL.** A helper turning XHTML into a `data:` URL. base64 is the robust
+   encoder (raw markup makes percent-encoding fiddly) — add the `base64` crate:
 
    ```rust
-   fn load_spine(path: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-       let epub = Epub::open(path)?;
-       let mut paths = Vec::new();
-       for entry in epub.reader() {
-           let data = entry?;
-           paths.push(data.manifest_entry().href().as_str().to_string());
-       }
-       Ok(paths)
+   fn to_xhtml_data_url(xhtml: &str) -> String {
+       use base64::{engine::general_purpose::STANDARD, Engine};
+       format!("data:application/xhtml+xml;base64,{}", STANDARD.encode(xhtml))
    }
    ```
 
-   Confirm `href()` / `as_str()` against your rbook 0.7.x and check the exact string form it
-   returns (full zip path vs. OPF-relative) — the `src` you build must be a path the handler's
-   `read_resource_bytes` resolves after stripping `/epub`. A one-line `eprintln!` of the
-   incoming `request.uri().path()` (the Step 5 trick) shows you what actually arrives.
+3. **Point the iframe at it.** `src: "{docs[current()]}"` (if `load_spine` returns finished
+   URLs) or `src: "{to_xhtml_data_url(&docs[current()])}"`.
 
-3. **Point the iframe at `src`.** In `SpineList`, replace `srcdoc` with the served URL:
+### Step 8b — restore subresources
 
-   ```rust
-   iframe {
-       sandbox: "allow-same-origin",
-       style: "flex: 1; width: 100%; border: none;",
-       src: "/epub/{docs[current()]}",   // docs now holds paths
-   }
-   ```
+The relative URLs need an absolute base on the `dioxus://` scheme. Two candidate mechanisms —
+and this is the part **still to verify**, because *whether a `data:`-origin document may load
+subresources from a custom scheme* is unconfirmed (the spike had none):
+
+- **Inject `<base href="dioxus://index.html/epub/OEBPS/">`** into the head before encoding, so
+  `0.css` → `dioxus://index.html/epub/OEBPS/0.css` — a subresource request the handler answers.
+- **Or rewrite the URLs to absolute** with `PathRewrite::prefix("dioxus://index.html/epub")`
+  (the machinery Step 9 was going to delete — **repurposed**, not dead, with an absolute prefix).
+
+Runnable check (eyeball): the book's CSS applies and the cover/images show **inside** the frame;
+devtools → Network shows `dioxus://index.html/epub/OEBPS/0.css` returning 200.
+
+**Fallback if subresources are blocked from the `data:` origin** (the live risk): make the
+document self-contained — inline the CSS as a `<style>` block and images as `data:` URIs, read
+through the existing handler path. Heavier, but origin-proof. Decide once 8b's eyeball says which
+world we're in.
 
 ### Why it works
 
-- **The content type, not the markup, picks the parser.** `application/xhtml+xml` → XML
-  parser → `<a id="chap01"/>` is a complete empty element, so nothing gets wrapped. `srcdoc`
-  could never do this: it has no content type and always parses as HTML.
-- **A real document URL gives the document a base URL.** The chapter's own relative
-  references (`0.css`, `1.css`, images) resolve against `/epub/OEBPS/…`, hitting the handler —
-  so subresources load without the rewrite that `srcdoc` needed.
-- **`src` keeps the document out of the rsx.** `srcdoc` forced the whole XHTML string through
-  the component on every render; `src` hands the webview a URL and lets the handler stream the
-  bytes — and that handler is the single place Phase 4 will inject theme CSS.
-- **Sandbox unchanged.** `allow-same-origin` (no `allow-scripts`) still applies; same-origin
-  `/epub/…` subresource requests keep working as in Step 7.
+- **The MIME type picks the parser.** `data:application/xhtml+xml` → XML parser → every
+  self-closing non-void element (`<a/>`, `<span/>`, …) is honoured, not just the one we noticed.
+  A `srcdoc`/`text/html` path can never do this; it always parses as HTML.
+- **`data:` dodges the navigation guard** that blocks `dioxus://` iframe navigations — the only
+  reason the cleaner `src="/epub/…"` approach can't work on macOS.
+- **Phase 4 still has its seam, in a new spot.** ADR-0003 assumed theme CSS is injected into the
+  *served HTTP response*; that seam is dead here (there is no served document). But we build the
+  `data:` bytes in Rust, so theme CSS is injected **before encoding** — same power, different
+  place: the injection point moves into `load_spine` / the URL builder.
 
-### Scope note
+### Scope & ADR-0003 note
 
-This swaps the Phase-3 render path from `srcdoc` to served XHTML on purpose (one-way-door
-flagged in ADR-0003). It fixes the bug and *leaves behind* the served-document seam Phase 4
-needs — but adds **no** theming here. The now-redundant content rewrite (`read_str_with` /
-`PathRewrite`) is left for the **Step 9 review-and-refactor** to remove or repurpose, not
-ripped out mid-fix. Pagination and internal-link navigation remain later Phase-3 steps.
+This replaces the Step-8 plan-of-record (served XHTML via `src`) with `data:` XHTML, because the
+dioxus navigation guard blocks custom-scheme iframe navigation on macOS. That finding should be
+written back into
+[ADR-0003](../../../adr/0003-reader-controlled-theming-injected-layer.md): the theming injection
+point is now "the bytes we encode into the `data:` URL," not "the asset-handler response."
+Pagination and internal-link navigation remain later Phase-3 steps — and **internal links will
+need rethinking**, since a `data:`-framed document can't navigate to `dioxus://` either (same
+guard), so in-book links will have to be intercepted and turned into spine-index changes rather
+than left as plain navigations.
+
+---
+
+## Step 9 — review & refactor the rendering arc
+
+> **Status:** ⬜ planned. The review-and-refactor convention applied to the **render path
+> (Steps 4–8)**, run right after Step 8 lands. **Scoped to the rendering arc, not the whole
+> phase** — pagination, internal-link navigation, and bundling a sample epub still follow, and
+> the phase gets its *true* final review when they land. Reviewing the arc now, while the Step 8
+> detour (served XHTML → `data:` URLs) is fresh and has left churn behind, is the point.
+
+### The discipline (why the ordering matters)
+
+A review-and-refactor's safety net is "the suite is green and clippy clean **before and
+after**, with no behavior change." That rule **cannot span Step 8** — Step 8 changes behavior
+and the `load_spine` shape on purpose. So sequence it: **land Step 8 (8a+8b) to green first**
+(feature), then refactor on that green baseline (renames, module moves, dead-code removal change
+*no* assertion).
+
+### Runnable check (safety net, not a target)
+
+After Step 9: `cargo test` green and `cargo clippy` clean, with **no** visible change under
+`dx serve` (chapters render as prose, Next/Prev page, the book's CSS + images show inside the
+frame). The exact test set depends on what 8a/8b landed — run it before and after the refactor
+and confirm it's identical.
+
+### Punch-list (adapt to what 8a/8b actually left)
+
+The Step 8 detour churned several things; this is the reconciliation:
+
+1. **Rewrite machinery — repurposed (8b chose the rewrite path).** `load_spine` keeps
+   `EpubRewriteOptions` / `PathRewrite::prefix("dioxus://index.html/epub/")` to point subresource
+   URLs at the asset handler, so the import is **alive** — the `<base href>` alternative wasn't
+   used. Cleanup here is to stop the strings drifting: the rewrite prefix, the asset-handler name
+   (`"epub"`), and the `strip_prefix("/epub")` in the handler all encode the same `/epub` contract
+   three times — lift it to one shared constant (or a pair) so changing the route can't silently
+   404. Confirm the `dioxus://index.html/` host literal is the right seam to centralise too.
+2. **Name things for what `load_spine` now returns.** With `data:` URLs it returns content or
+   finished `data:` URLs, **not** `paths` — so the `SpineList` binding and any `current_*` local
+   should say `doc` / `data_url`, not `path`. *Why:* a name that lies about its type costs every
+   future reader; this churned twice (content → paths → content), so pin it honestly now.
+3. **The `data:` URL helper.** If `to_xhtml_data_url` (or wherever encoding lives) grew inline in
+   `SpineList`, lift it to a named function next to `load_spine` — encoding is EPUB-domain logic,
+   not UI. Confirm the `base64` dep is actually used (no stray `EpubRewriteOptions` left over,
+   no unused `base64` if you went `<base>`).
+4. **Stale tests / probes.** Delete any `zz_probe_*` diagnostic tests left from debugging, and
+   make sure the surviving spine test matches the real return type (content vs `data:` URL).
+
+Optional — bigger, cut it if you want the pass light:
+
+5. **Lift the EPUB logic into `src/epub.rs`** — `load_spine`, `content_type_for`, the
+   `data:`-URL builder, the resource-reading concern — leaving `App`/`SpineList` (the UI) in
+   `main.rs`. *Buys:* a real Rust/UI module boundary instead of one catch-all file. *Watch:* the
+   `#[cfg(test)] mod test` block calls `load_spine`/`Epub` directly, so moving the functions
+   means the tests move with them or `use crate::epub::load_spine` — that `pub`/`use` shuffle
+   *is* the lesson here. Defer it if the pass is getting long.
+6. **Minor:** the commented-out `MAIN_CSS` / `document::Link` is dead scaffolding — wire it or
+   delete it.
+
+### Why each is better
+
+- **A name that lies about its type costs every future reader** — `path` on a value that now
+  holds a whole `data:` document is a trap; this one churned twice, so it's worth pinning.
+- **Domain logic out of the component** — encoding and EPUB reading don't belong in `SpineList`;
+  pulling them out makes the component about *rendering state*, which is all a reader should need
+  to follow to change the UI.
+- **Dead imports/probes aren't free** — they fail clippy and tell the next reader "this matters"
+  when it doesn't. The rewrite import is the one to *decide* on (repurposed vs dead), not delete
+  reflexively.
+
+### Commit shape
+
+Either one `feat:` folding in the forced cleanup, or two commits (`feat:` then `refactor:`) —
+splitting reads cleaner in history since feature and cleanup are different intents. `lbb:commit`
+handles whichever. (Per repo convention: no co-author / AI-attribution trailer.)
