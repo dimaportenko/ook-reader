@@ -89,6 +89,35 @@ Tests are the exception worth calling out: writing the runnable test *for* them 
 whole method (see below). The test is the spec; writing the spec isn't the lesson, passing
 it is.
 
+## Step 0 — locate the current phase and step (do this first)
+
+Before suggesting anything, find where work actually stands — **don't infer the phase from
+the recent conversation.** The conversation's momentum (a phase you just planned, a doc you
+just wrote, a topic the user just asked about) is the single most likely thing to make you
+suggest a step from the *wrong* phase. Resist it; read the status board instead.
+
+1. **Read the plan.** `docs/roadmap.md` and the phase docs' `**Status:**` lines.
+2. **The current phase is the *earliest* one that is `🚧 in progress`** (or the earliest with
+   unchecked items in its "Planned steps" checklist) — **not** the most recently edited doc,
+   and **not** the topic just discussed. A freshly written plan for a *later* phase does not
+   make that phase current; an earlier phase with open steps still owns "next."
+3. **Find the next step inside that phase:** the first unchecked checklist item. Reconcile it
+   against the companion `-steps.md` build-log statuses — a step can be marked done in the
+   build log but left unchecked in the phase doc (or vice-versa). Fix the mismatch as you go;
+   don't trust one source alone.
+4. **Only advance to a later or brand-new phase when** the current phase's checklist is fully
+   checked, **or** an ADR/recorded decision deliberately resequences work across phases. In
+   that second case, **state the cross-phase dependency out loud and confirm the switch**
+   before laying out the step — never jump silently.
+5. **If the recent conversation centered on a different phase than the in-progress one, name
+   the discrepancy and ask** which the user wants. Surfacing "we were just discussing Phase N
+   but Phase M is still open — which do you want?" is always better than guessing.
+
+A smell to watch for while doing this: a bug fix or step **filed under a later phase while an
+earlier phase is still open.** That mis-filing is exactly what makes a wrong jump look
+reasonable. When you spot it, flag it — the fix usually belongs in the open phase, and the
+later phase should *build on* it.
+
 ## Anatomy of a good step
 
 Steps come in two sizes. When the user is starting a whole new **topic/phase** (EPUB
