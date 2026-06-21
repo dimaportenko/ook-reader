@@ -1,6 +1,7 @@
 {
   "commands": {
     "dx:serve": "dx serve --platform desktop",
-    "test": "cargo test"
+    "test": "cargo test",
+    "validate": "cargo test && cargo clippy --all-targets"
   }
 }
