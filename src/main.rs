@@ -8,7 +8,7 @@ use rbook::epub::rewrite::{EpubRewriteOptions, PathRewrite};
 use rbook::Epub;
 
 const FAVICON: Asset = asset!("/assets/favicon.ico");
-// const MAIN_CSS: Asset = asset!("/assets/main.css");
+const MAIN_CSS: Asset = asset!("/assets/main.css");
 const BOOK: &str = "book/The Adventures of Sherlock Holmes by Arthur Conan Doyle.epub";
 
 fn main() {
@@ -59,10 +59,10 @@ fn App() -> Element {
             rel: "icon",
             href: FAVICON,
         }
-        // document::Link {
-        //     rel: "stylesheet",
-        //     href: MAIN_CSS,
-        // }
+        document::Link {
+            rel: "stylesheet",
+            href: MAIN_CSS,
+        }
         SpineList {}
     }
 }
@@ -77,8 +77,15 @@ fn SpineList() -> Element {
     rsx! {
         div {
             style: "display: flex; flex-direction: column; height: 100vh;",
+
+            iframe {
+                "sandbox": "allow-same-origin",
+                style: "flex: 1; width: 100%; border: none;",
+                src: "{to_xhtml_data_url(current_doc)}",
+            }
+
             div {
-                style: "display: flex; gap: 8px;",
+                style: "display: flex; gap: 8px; padding: 8px; justify-content: center;",
                 button {
                     onclick: move |_| current.set(prev_index(current())),
                     "Prev"
@@ -92,12 +99,6 @@ fn SpineList() -> Element {
                     onclick: move |_| current.set(next_index(current(), len)),
                     "Next"
                 }
-            }
-
-            iframe {
-                "sandbox": "allow-same-origin",
-                style: "flex: 1; width: 100%; border: none;",
-                src: "{to_xhtml_data_url(current_doc)}",
             }
         }
     }
