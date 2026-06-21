@@ -51,12 +51,12 @@ fn App() -> Element {
             rel: "stylesheet",
             href: MAIN_CSS,
         }
-        SpineList {}
+        Reader {}
     }
 }
 
 #[component]
-fn SpineList() -> Element {
+fn Reader() -> Element {
     let docs = use_hook(|| epub::load_spine(BOOK).expect("bundled epub should load"));
     let mut current = use_signal(|| 0usize);
     let len = docs.len();
