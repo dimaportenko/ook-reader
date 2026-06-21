@@ -126,9 +126,9 @@ Two things to get right, both grounded in the repo:
   explicitly saving for later? If it's the latter, say so and let the learner decide to pull
   it forward on purpose rather than drift into it. Surfacing that trade-off is the refine.
 
-- **Point at the real Dioxus mechanism, don't hand-wave.** Per
-  [`AGENTS.md`](../../../../AGENTS.md), local resources go through the `asset!` macro
-  (paths start at the project root, e.g. `asset!("/assets/cover.png")`), images via
+- **Point at the real Dioxus mechanism, don't hand-wave.** Per the `dioxus-07` skill,
+  local resources go through the `asset!` macro (paths start at the project root, e.g.
+  `asset!("/assets/cover.png")`), images via
   `img { src: asset!("/assets/…") }`, and a stylesheet via the `document::Stylesheet`
   component:
 
@@ -138,8 +138,8 @@ Two things to get right, both grounded in the repo:
 
   For **SCSS** specifically: the asset pipeline is what compiles it, so the step's runnable
   check has to account for that — verify the `dx serve` build actually picks up and compiles
-  the `.scss`, and confirm the exact `asset!`/extension handling against AGENTS.md (and the
-  Dioxus 0.7 docs if AGENTS.md doesn't pin it down) rather than assuming. Don't assert SCSS
+  the `.scss`, and confirm the exact `asset!`/extension handling against the `dioxus-07`
+  skill and Dioxus 0.7 docs rather than assuming. Don't assert SCSS
   behavior you haven't confirmed — a refined step that points the learner at a wrong macro
   wastes their hand-writing time.
 

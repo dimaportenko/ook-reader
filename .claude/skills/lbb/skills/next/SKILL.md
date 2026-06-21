@@ -36,9 +36,9 @@ diverge, and [[commit]] (`lbb:commit`), which validates a finished step and comm
 
 `ook-reader` is a cross-platform **EPUB reader in Rust + Dioxus 0.7**, built by hand in
 NeoVim to learn the stack. The hard "don't write code unprompted" rule lives in
-[`CLAUDE.md`](../../../../CLAUDE.md); the Dioxus 0.7 API reference is
-[`AGENTS.md`](../../../../AGENTS.md) (0.7 dropped `cx`, `Scope`, `use_state` — use only
-that). Concrete conventions this skill must honor:
+`AGENTS.md` / `CLAUDE.md`; the Dioxus 0.7 API reference lives in the `dioxus-07`
+skill (0.7 dropped `cx`, `Scope`, `use_state` — use only that). Concrete conventions
+this skill must honor:
 
 - **Verification = `cargo test` or `dx serve`.** Pure Rust logic (EPUB parsing, nav state,
   persistence) gets a `#[test]` in a `#[cfg(test)] mod tests` block, run with `cargo test`.
