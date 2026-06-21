@@ -1,7 +1,10 @@
 # ADR-0003 — Reader-controlled theming via an injected override layer
 
 **Status:** accepted · 2026-06-21 · builds on [ADR-0002](0002-dogfood-driven-prioritization.md) ·
-realised by [Phase 4 — Themes & Typography](../milestones/03-reader-enhancements/04-themes-typography/phase-4-theming.md)
+realised by [Phase 3, Step 8](../milestones/02-basic-reader/01-epub-rendering/phase-3-epub-rendering-steps.md)
+(served-XHTML renderer + bug fix) and
+[Phase 4 — Themes & Typography](../milestones/03-reader-enhancements/04-themes-typography/phase-4-theming.md)
+(the override layer)
 
 ## Context
 

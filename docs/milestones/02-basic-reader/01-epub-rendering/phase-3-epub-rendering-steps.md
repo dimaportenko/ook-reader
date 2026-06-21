@@ -84,6 +84,9 @@ Testable pure-Rust seams (Steps 4, 6) interleave with webview wiring eyeballed (
    `dangerous_inner_html` column for one isolated item. Eyeball: cover + images render, the
    book's CSS applies *inside* the frame, app styles don't leak in or out. *(iframe `srcdoc`
    + `sandbox`, root-relative URL resolution inside srcdoc)*
+8. ⬜ **Render the current item as served XHTML** — swap `srcdoc` for `src="/epub/…"` served
+   with `application/xhtml+xml`, fixing the anchor-wrap bug at the parser level. *(content-type
+   → XML parse, iframe `src` + base-URL relative resolution, spine doc paths)*
 
 > **What "css/image usage" actually lands on.** Images and the book's own CSS become visible
 > at the **end of Step 6** — served by the handler (5) once the docs point at it (6) — even
@@ -711,3 +714,122 @@ fixes are injecting a `<base href="/">` into the srcdoc or relaxing the sandbox 
 `allow-same-origin`. Treat it as an eyeball-and-adjust detail of this step, not a
 re-architecture. Pagination (CSS multi-column / scroll) and internal-link navigation remain
 later steps in the phase doc's checklist.
+
+---
+
+## Step 8 — render the current item as served XHTML (fixes the anchor-wrap bug)
+
+> **Status:** ⬜ planned. This is the "next step" — a rendering-correctness fix that belongs
+> in Phase 3. The served-XHTML renderer it produces is also the injection seam
+> [Phase 4 (theming)](../../03-reader-enhancements/04-themes-typography/phase-4-theming.md)
+> builds on; decision recorded in
+> [ADR-0003](../../../adr/0003-reader-controlled-theming-injected-layer.md).
+
+### The bug
+
+Dogfooding Step 7 shows each chapter rendering as one giant link that turns **red on hover**.
+Cause, confirmed against the bundled book: chapter `h-1` contains exactly one anchor —
+`<a id="chap01"/>`, self-closing, no `href` — and **zero** `</a>`. The file is XHTML.
+`iframe { srcdoc }` is parsed as **HTML (`text/html`)**, where `<a>` is *not* a void element,
+so the `/>` is ignored, the anchor is treated as an unclosed `<a id="chap01">`, and with no
+closing tag the rest of the chapter becomes its descendant — inheriting `1.css`'s
+`a:link { color: blue }` / `a:hover { color: red }`.
+
+This is **not** an `rbook` bug: its rewriter round-trips `<a/>` faithfully (quick-xml
+`Event::Empty` in → `<a/>` out). The breakage is at *our* rendering seam — XHTML fed to an
+HTML parser. `srcdoc` has **no content type** to set, so the only fix is to stop using it:
+serve the document at a URL with `Content-Type: application/xhtml+xml` and point the iframe
+at it with `src`, so the webview's **XML** parser honours the self-closing anchor.
+
+### Runnable check
+
+Webview wiring, so eyeball — plus a pure-Rust test for the new `load_spine` shape.
+
+- The chapter renders as **normal prose**, not a blue link; **hovering does not turn it red**.
+- Next/Prev still swap chapters; the book's images + CSS still load inside the frame.
+- devtools → Network: the document request returns `Content-Type: application/xhtml+xml`.
+- `cargo clippy` clean.
+
+`cargo test` for the pure-Rust half — `load_spine` now returns the spine's **paths** (to build
+the `src`), not its content, so retarget `loads_spine_in_reading_order` onto paths:
+
+```rust
+#[test]
+fn loads_spine_paths_in_reading_order() {
+    let paths = load_spine(BOOK).expect("should open the bundled epub");
+    assert_eq!(paths.len(), 15);                       // same 15 spine items
+    assert!(paths[0].ends_with(".xhtml"));             // each is a content-doc path
+    // Reading order: the cover wrapper is first, not a story.
+    assert!(!paths[0].contains("h-1"));
+}
+```
+
+(The old `rewrites_resource_paths_to_the_epub_handler` test is about content rewriting; with
+served XHTML the document's own relative URLs resolve against its `src` base URL, so that test
+loses its subject — drop it or move the rewrite assertion to wherever the rewrite still earns
+its keep. Decide that in the Step 9 review, not here.)
+
+### Minimal implementation (sketch — you write it by hand)
+
+Three small moves:
+
+1. **Teach the handler the XHTML content type.** In `content_type_for`, add:
+
+   ```rust
+   "xhtml" | "htm" | "html" => "application/xhtml+xml",
+   ```
+
+   The handler already serves any `/epub/<path>` resource as raw bytes — so once the content
+   type is right, it already serves content documents correctly.
+
+2. **`load_spine` returns paths, not content.** Each reader entry exposes its manifest entry,
+   whose `href()` is the resolved in-zip path:
+
+   ```rust
+   fn load_spine(path: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+       let epub = Epub::open(path)?;
+       let mut paths = Vec::new();
+       for entry in epub.reader() {
+           let data = entry?;
+           paths.push(data.manifest_entry().href().as_str().to_string());
+       }
+       Ok(paths)
+   }
+   ```
+
+   Confirm `href()` / `as_str()` against your rbook 0.7.x and check the exact string form it
+   returns (full zip path vs. OPF-relative) — the `src` you build must be a path the handler's
+   `read_resource_bytes` resolves after stripping `/epub`. A one-line `eprintln!` of the
+   incoming `request.uri().path()` (the Step 5 trick) shows you what actually arrives.
+
+3. **Point the iframe at `src`.** In `SpineList`, replace `srcdoc` with the served URL:
+
+   ```rust
+   iframe {
+       sandbox: "allow-same-origin",
+       style: "flex: 1; width: 100%; border: none;",
+       src: "/epub/{docs[current()]}",   // docs now holds paths
+   }
+   ```
+
+### Why it works
+
+- **The content type, not the markup, picks the parser.** `application/xhtml+xml` → XML
+  parser → `<a id="chap01"/>` is a complete empty element, so nothing gets wrapped. `srcdoc`
+  could never do this: it has no content type and always parses as HTML.
+- **A real document URL gives the document a base URL.** The chapter's own relative
+  references (`0.css`, `1.css`, images) resolve against `/epub/OEBPS/…`, hitting the handler —
+  so subresources load without the rewrite that `srcdoc` needed.
+- **`src` keeps the document out of the rsx.** `srcdoc` forced the whole XHTML string through
+  the component on every render; `src` hands the webview a URL and lets the handler stream the
+  bytes — and that handler is the single place Phase 4 will inject theme CSS.
+- **Sandbox unchanged.** `allow-same-origin` (no `allow-scripts`) still applies; same-origin
+  `/epub/…` subresource requests keep working as in Step 7.
+
+### Scope note
+
+This swaps the Phase-3 render path from `srcdoc` to served XHTML on purpose (one-way-door
+flagged in ADR-0003). It fixes the bug and *leaves behind* the served-document seam Phase 4
+needs — but adds **no** theming here. The now-redundant content rewrite (`read_str_with` /
+`PathRewrite`) is left for the **Step 9 review-and-refactor** to remove or repurpose, not
+ripped out mid-fix. Pagination and internal-link navigation remain later Phase-3 steps.

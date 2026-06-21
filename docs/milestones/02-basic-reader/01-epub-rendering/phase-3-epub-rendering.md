@@ -31,14 +31,16 @@ XHTML in the webview, with working page turns.
       is a plain root-relative `/epub/…`. See the build log's Step 5.)
 - [x] Rewrite spine docs' OPF-relative URLs (images/CSS/fonts) to `/epub/…` — done by rbook's
       `EpubRewriteOptions` / `PathRewrite::prefix("/epub/")`, not hand-rolled (build log Step 6)
-- [ ] Render the current spine item in a **sandboxed `<iframe srcdoc>`** (omit `allow-scripts`)
+- [x] Render the current spine item in a **sandboxed `<iframe srcdoc>`** (omit `allow-scripts`)
       for style isolation (build log Step 7; needs the `current` signal from "Turn pages")
-- [ ] Fix the **anchor-wrap rendering bug** (chapters render as a giant hover-red link): the
-      XHTML self-closing `<a id="…"/>` is mis-parsed as unclosed under `srcdoc`'s HTML parser.
-      Fixed by switching to **served XHTML** — see
-      [Phase 4, Step 1](../../03-reader-enhancements/04-themes-typography/phase-4-theming-steps.md)
-      and [ADR-0003](../../../adr/0003-reader-controlled-theming-injected-layer.md); the fix
-      doubles as the theming injection seam, so it lives in Phase 4.
+- [ ] Fix the **anchor-wrap rendering bug** by rendering the current spine item as **served
+      XHTML** (iframe `src="/epub/…"` with `Content-Type: application/xhtml+xml`) instead of
+      `srcdoc`. Chapters currently render as a giant hover-red link because the XHTML
+      self-closing `<a id="…"/>` is mis-parsed as unclosed under `srcdoc`'s HTML parser; an
+      XML-parsed served document honours it (build log **Step 8**). This is a rendering-
+      correctness fix that belongs here; the served-XHTML renderer it produces is also the
+      seam [Phase 4 (theming)](../../03-reader-enhancements/04-themes-typography/phase-4-theming.md)
+      builds on. See [ADR-0003](../../../adr/0003-reader-controlled-theming-injected-layer.md).
 - [ ] Page turns: start with continuous vertical scroll; spike CSS multi-column +
       `translateX` for true pagination
 - [ ] Intercept internal hyperlinks → navigation events (next/prev spine item)

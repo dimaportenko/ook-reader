@@ -24,34 +24,36 @@ author CSS   (the book's own stylesheets, untouched)
 USER layer   (--USER__*, injected AFTER book CSS, wins)
 ```
 
-Driving it needs an **injection seam**. We get one by rendering each content document as a
-**served XHTML resource** (`Content-Type: application/xhtml+xml`, iframe `src="/epub/…"`)
-instead of `srcdoc` — which also fixes the anchor-wrap bug (see below). A settings change is
-then "re-serve / reload the frame," so the sandbox stays script-free.
+Driving it needs an **injection seam**. We already have one:
+[Phase 3, Step 8](../../02-basic-reader/01-epub-rendering/phase-3-epub-rendering-steps.md)
+renders each content document as a **served XHTML resource**
+(`Content-Type: application/xhtml+xml`, iframe `src="/epub/…"`) instead of `srcdoc` — the
+handler that serves it is where we inject. A settings change is then "re-serve / reload the
+frame," so the sandbox stays script-free.
+
+> **Prerequisite:** Phase 3 Step 8 (served-XHTML renderer) must land first. It also fixes the
+> anchor-wrap rendering bug — that fix is rendering correctness and lives in Phase 3, not here.
 
 ## Planned steps
 
 See the [build log](phase-4-theming-steps.md) for each step's runnable check → minimal
 implementation → why. Smallest-first:
 
-- [ ] **Step 1 — Serve the current content document as XHTML.** Swap iframe `srcdoc` for
-      `src="/epub/…"`, serving the *rewritten* doc with `application/xhtml+xml`. Fixes the
-      anchor-wrap rendering bug **and** establishes the injection seam.
-- [ ] **Step 2 — Model a theme in Rust.** A `Theme` enum → a `:root { --USER__… }` CSS
+- [ ] **Step 1 — Model a theme in Rust.** A `Theme` enum → a `:root { --USER__… }` CSS
       string. Pure Rust, `cargo test` on the variable values for day/sepia/night.
-- [ ] **Step 3 — Inject the USER layer.** Wire Step 2's variable block + a minimal
+- [ ] **Step 2 — Inject the USER layer.** Wire Step 1's variable block + a minimal
       override sheet into the served document, *after* the book's CSS (via `rbook`'s
       `inject_css`, which writes before `</head>`). Night actually darkens the page.
-- [ ] **Step 4 — Add the RS-defaults layer before the book CSS.** Completes the three-tier
+- [ ] **Step 3 — Add the RS-defaults layer before the book CSS.** Completes the three-tier
       cascade (RS < author < USER). Watch the injection point — `inject_css` only writes at
       end-of-head, so the *before* layer needs our own head-rewrite (the spot ADR-0003 flags
       as the only realistic `rbook`-fork trigger).
-- [ ] **Step 5 — Theme switcher in the app chrome.** A `use_signal` holds the current theme;
+- [ ] **Step 4 — Theme switcher in the app chrome.** A `use_signal` holds the current theme;
       Day/Sepia/Night controls re-serve/reload the iframe.
-- [ ] **Step 6 — Typography settings (later).** font-size, line-height, line-length,
+- [ ] **Step 5 — Typography settings (later).** font-size, line-height, line-length,
       margins, then font-family from a *curated* list — each a `--USER__*` variable + a
       control, sequenced one at a time.
-- [ ] **Step 7 — Review & refactor** (per the repo's phase-ending convention).
+- [ ] **Step 6 — Review & refactor** (per the repo's phase-ending convention).
 
 ## Known constraints (from research)
 
@@ -69,14 +71,15 @@ implementation → why. Smallest-first:
 - **Language-sensitive settings.** hyphenation / text-align don't apply to CJK; out of scope
   for the first English-only slice, noted so it isn't designed out.
 
-## The anchor-wrap bug (fixed by Step 1)
+## The anchor-wrap bug (fixed in Phase 3, not here)
 
-Chapters render as one giant link that turns red on hover. Cause: the content doc is XHTML
-with `<a id="chap01"/>` (self-closing, no `href`) and **no** `</a>`; `srcdoc` parses as HTML,
-where `<a>` isn't void, so the anchor never closes and wraps the chapter, inheriting the
-book's `a:link` / `a:hover`. Not an `rbook` bug. Step 1's served-XHTML render makes the
-webview parse it as XML, honouring `<a/>`. (Cross-referenced from the
-[Phase 3 doc](../../02-basic-reader/01-epub-rendering/phase-3-epub-rendering.md).)
+The served-XHTML renderer this phase depends on is the same change that fixes the anchor-wrap
+bug (chapters rendering as a giant hover-red link, because `srcdoc`'s HTML parser mis-reads the
+XHTML self-closing `<a id="…"/>` as unclosed). That is a **rendering-correctness** fix, so it
+lives in
+[Phase 3, Step 8](../../02-basic-reader/01-epub-rendering/phase-3-epub-rendering-steps.md) —
+Phase 4 simply builds on the corrected renderer. (Recorded in
+[ADR-0003](../../../adr/0003-reader-controlled-theming-injected-layer.md).)
 
 ## Reference
 
