@@ -98,6 +98,16 @@ Testable pure-Rust seams (Steps 4, 6) interleave with webview wiring eyeballed (
    `load_spine` now returns (content / `data:` URLs, not `paths`), and (optional) lift the EPUB
    logic out of `main.rs`. Safety net: the post-Step-8 suite stays green + clippy clean, no
    behavior change. *(dead-code vs repurpose, naming honesty, module boundaries)*
+10. 🚧 **Spike CSS-column page turns inside the XHTML iframe** — inject a tiny reader CSS layer
+    before building the `data:application/xhtml+xml` URL, add a separate `page` signal, and use
+    `translateX` to move through columns. Eyeball under `dx serve`; this is deliberately a spike
+    with no page-count clamp yet. *(data-URL injection seam, CSS multicolumn, signal reset)*
+11. ⬜ **Intercept internal hyperlinks** — decide how XHTML links become Rust navigation events
+    now that the iframe document is a `data:` URL and plain `dioxus://` navigations are blocked.
+12. ⬜ **Bundle a small DRM-free sample `.epub` for testing** — make the fixture intentional and
+    documented instead of relying on an ad-hoc local book path.
+13. ⬜ **Review & refactor the finished EPUB rendering phase** — final phase-ending cleanup after
+    pagination, links, and sample-book packaging land.
 
 > **Sequencing 8 and 9.** Land **Step 8 (8a then 8b) to green first** (feature), then run
 > **Step 9 on that green baseline** (refactor). The "green before == green after, no behavior
@@ -1001,3 +1011,125 @@ Optional — bigger, cut it if you want the pass light:
 Either one `feat:` folding in the forced cleanup, or two commits (`feat:` then `refactor:`) —
 splitting reads cleaner in history since feature and cleanup are different intents. `lbb:commit`
 handles whichever. (Per repo convention: no co-author / AI-attribution trailer.)
+
+---
+
+## Step 10 — spike CSS-column page turns inside the XHTML iframe
+
+> **Status:** in progress — proposed next. Verification: one pure helper test with
+> `cargo test`, plus `cargo clippy` and an eyeball check under `dx serve`.
+
+### The crux
+
+Right now **Next/Prev are really spine-item turns**: they swap cover/header/chapter/footer
+XHTML documents. True reader page turns are different: one long XHTML document must be laid out
+into viewport-sized columns, then the reader moves sideways through those columns. The useful
+small slice is a **spike**: inject just enough CSS into the XHTML before it becomes a `data:` URL,
+track a `page` signal in Dioxus, and translate the column layout left/right. Do not solve page
+count/clamping yet — first prove the rendering technique works in this `data:` iframe setup.
+
+### Runnable check
+
+This step has two checks.
+
+#### 1. Pure Rust helper check (`cargo test`)
+
+Add a tiny helper that inserts a reader-controlled `<style>` block before `</head>`, then test
+that it preserves the document and includes the current page offset. Suggested test shape:
+
+```rust
+#[test]
+fn injects_pagination_css_before_head_close() {
+    let xhtml = r#"<html xmlns="http://www.w3.org/1999/xhtml"><head><title>T</title></head><body><p>Hello</p></body></html>"#;
+
+    let paged = inject_pagination_css(xhtml, 2);
+
+    assert!(paged.contains("--ook-page: 2"));
+    assert!(paged.contains("column-width: 100vw"));
+    assert!(paged.find("--ook-page: 2").unwrap() < paged.find("</head>").unwrap());
+    assert!(paged.contains("<p>Hello</p>"));
+}
+```
+
+Red first: no `inject_pagination_css` helper yet.
+
+#### 2. UI spike check (`dx serve` + `cargo clippy`)
+
+Under `dx serve`:
+
+- Open a real chapter, not the cover.
+- The iframe shows **one viewport-sized slice** of the chapter instead of a long vertical scroll.
+- A **Page +** control shifts horizontally to the next column; **Page -** shifts back and clamps at
+  page 0.
+- Changing spine item with the existing chapter controls resets the page index to 0.
+- `cargo clippy` is clean.
+
+Expected rough edge: Page + can eventually move beyond the chapter and show blank space. That is
+allowed in this spike because page-count measurement is the next problem, not this one.
+
+### Minimal implementation sketch
+
+Keep the changes small and local:
+
+1. In `src/epub.rs`, add a helper that injects CSS into the XHTML string before encoding it:
+
+   ```rust
+   pub(crate) fn inject_pagination_css(xhtml: &str, page: usize) -> String {
+       let css = format!(
+           r#"<style type="text/css">
+           :root {{ --ook-page: {page}; }}
+           html {{ width: 100vw; height: 100vh; overflow: hidden; }}
+           body {{
+               width: 100vw;
+               height: 100vh;
+               overflow: visible;
+               column-width: 100vw;
+               column-gap: 0;
+               column-fill: auto;
+               transform: translateX(calc(var(--ook-page) * -100vw));
+           }}
+           </style>"#,
+       );
+
+       xhtml.replacen("</head>", &format!("{css}</head>"), 1)
+   }
+   ```
+
+   This is intentionally string-based for the spike. If `</head>` is ever missing or casing
+   varies, you can harden it later.
+
+2. In `Reader`, add a separate `page` signal (`usize`) next to `current`.
+
+3. Build the iframe URL from the paged XHTML, not the raw current doc:
+
+   ```rust
+   let paged_doc = epub::inject_pagination_css(current_doc, page());
+   let iframe_src = epub::to_xhtml_data_url(&paged_doc);
+   ```
+
+   Then use `src: "{iframe_src}"`.
+
+4. Add Page - / Page + buttons. Page - can use `saturating_sub(1)`; Page + can increment without
+   an upper clamp for now.
+
+5. When chapter Next/Prev changes `current`, also set `page` back to `0`. That keeps every new
+   spine item starting at its first visual page.
+
+### Why it works
+
+- The **data-URL seam** is now the renderer's injection seam. Anything you need the XHTML parser
+  to see — pagination CSS now, theme CSS in Phase 4 — must be inserted **before**
+  `to_xhtml_data_url` encodes the bytes.
+- CSS multicolumn with a fixed-height body makes overflow flow into horizontal columns instead of
+  vertical scroll. `translateX(-N * 100vw)` then picks which viewport-width column is visible.
+- `page` is separate from `current` because they represent different state: `current` chooses the
+  spine document; `page` chooses a visual slice inside that document. Resetting `page` on chapter
+  changes prevents carrying “page 7” from one chapter into the next.
+- The injected style is last in the document head, so for this spike it should beat most author CSS.
+  Later theming work will make the layering intentional instead of ad hoc.
+
+### Scope note
+
+This does **not** compute the number of pages, clamp Page + at the real end, preserve reading
+position, or handle internal links. It only proves that the current `data:application/xhtml+xml`
+iframe can be paginated by a reader-controlled injected CSS layer and driven by Dioxus signals.

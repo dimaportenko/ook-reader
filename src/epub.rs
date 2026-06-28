@@ -36,6 +36,31 @@ pub(crate) fn load_spine(path: &str) -> Result<Vec<String>, Box<dyn std::error::
         .collect()
 }
 
+pub(crate) fn inject_pagination_css(xhtml: &str, page: usize) -> String {
+    let css = format!(
+        r#"<style type="text/css">
+        :root {{ --ook-page: {page}; }}
+        html {{ width: 100vw; height: 100vh; overflow: hidden; }}
+        body {{
+            width: 100vw !important;
+            height: 100vh !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            box-sizing: border-box !important;
+            max-width: none !important;
+
+            overflow: visible;
+            column-width: 100vw;
+            column-gap: 0 !important;
+            column-fill: auto;
+            transform: translateX(calc(var(--ook-page) * -100vw));
+        }}
+        </style>"#,
+    );
+
+    xhtml.replacen("</head>", &format!("{css}</head>"), 1)
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -95,5 +120,17 @@ mod test {
             cover.media_type().starts_with("image/"),
             "cover media-type should be an image/* type"
         );
+    }
+
+    #[test]
+    fn injects_pagination_css_before_head_close() {
+        let xhtml = r#"<html xmlns="http://wwww.w3.org/1999/xhtml"><head><title>T</title></head><body><p>Hello</p></body></html>"#;
+
+        let paged = inject_pagination_css(xhtml, 2);
+
+        assert!(paged.contains("--ook-page: 2"));
+        assert!(paged.contains("column-width: 100vw"));
+        assert!(paged.find("--ook-page: 2").unwrap() < paged.find("</head>").unwrap());
+        assert!(paged.contains("<p>Hello</p>"));
     }
 }

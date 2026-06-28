@@ -48,6 +48,7 @@ XHTML in the webview, with working page turns.
       `translateX` for true pagination
 - [ ] Intercept internal hyperlinks → navigation events (next/prev spine item)
 - [ ] Bundle a small DRM-free sample `.epub` for testing
+- [ ] Review & refactor the finished EPUB rendering phase
 
 ## Known constraints (from research)
 

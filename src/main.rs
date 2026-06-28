@@ -59,8 +59,11 @@ fn App() -> Element {
 fn Reader() -> Element {
     let docs = use_hook(|| epub::load_spine(BOOK).expect("bundled epub should load"));
     let mut current = use_signal(|| 0usize);
+    let mut page = use_signal(|| 0usize);
     let len = docs.len();
     let current_doc = &docs[current()];
+    let paged_doc = epub::inject_pagination_css(current_doc, page());
+    let iframe_src = epub::to_xhtml_data_url(&paged_doc);
 
     rsx! {
         div {
@@ -69,22 +72,45 @@ fn Reader() -> Element {
             iframe {
                 "sandbox": "allow-same-origin",
                 style: "flex: 1; width: 100%; border: none;",
-                src: "{epub::to_xhtml_data_url(current_doc)}",
+                src: "{iframe_src}",
             }
 
             div {
                 style: "display: flex; gap: 8px; padding: 8px; justify-content: center;",
                 button {
-                    onclick: move |_| current.set(prev_index(current())),
+                    onclick: move |_| {
+                        page.set(0);
+                        current.set(prev_index(current()));
+                    },
                     "Prev"
                 }
 
                 span {
-                    "{current()}"
+                    "Chapter {current()}"
                 }
 
                 button {
-                    onclick: move |_| current.set(next_index(current(), len)),
+                    onclick: move |_| {
+                        page.set(0);
+                        current.set(next_index(current(), len));
+                    },
+                    "Next"
+                }
+            }
+
+            div {
+                style: "display: flex; gap: 8px; padding: 8px; justify-content: center;",
+                button {
+                    onclick: move |_| page.set(page().saturating_sub(1)),
+                    "Prev"
+                }
+
+                span {
+                    "Page {page() + 1}"
+                }
+
+                button {
+                    onclick: move |_| page.set(page() + 1),
                     "Next"
                 }
             }
