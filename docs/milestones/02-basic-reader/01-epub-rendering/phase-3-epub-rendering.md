@@ -44,7 +44,7 @@ XHTML in the webview, with working page turns.
       [Phase 4 (theming)](../../03-reader-enhancements/04-themes-typography/phase-4-theming.md)
       builds on — a relocation of the seam ADR-0003 assumed lived in the served response. See
       [ADR-0003](../../../adr/0003-reader-controlled-theming-injected-layer.md).
-- [ ] Page turns: start with continuous vertical scroll; spike CSS multi-column +
+- [x] Page turns: start with continuous vertical scroll; spike CSS multi-column +
       `translateX` for true pagination
 - [ ] Intercept internal hyperlinks → navigation events (next/prev spine item)
 - [ ] Bundle a small DRM-free sample `.epub` for testing

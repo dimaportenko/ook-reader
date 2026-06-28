@@ -98,7 +98,7 @@ Testable pure-Rust seams (Steps 4, 6) interleave with webview wiring eyeballed (
    `load_spine` now returns (content / `data:` URLs, not `paths`), and (optional) lift the EPUB
    logic out of `main.rs`. Safety net: the post-Step-8 suite stays green + clippy clean, no
    behavior change. *(dead-code vs repurpose, naming honesty, module boundaries)*
-10. 🚧 **Spike CSS-column page turns inside the XHTML iframe** — inject a tiny reader CSS layer
+10. ✅ **Spike CSS-column page turns inside the XHTML iframe** — inject a tiny reader CSS layer
     before building the `data:application/xhtml+xml` URL, add a separate `page` signal, and use
     `translateX` to move through columns. Eyeball under `dx serve`; this is deliberately a spike
     with no page-count clamp yet. *(data-URL injection seam, CSS multicolumn, signal reset)*
@@ -1016,8 +1016,7 @@ handles whichever. (Per repo convention: no co-author / AI-attribution trailer.)
 
 ## Step 10 — spike CSS-column page turns inside the XHTML iframe
 
-> **Status:** in progress — proposed next. Verification: one pure helper test with
-> `cargo test`, plus `cargo clippy` and an eyeball check under `dx serve`.
+> **Status:** done — committed in `9989adb` (5 tests green; `cargo clippy` clean; `dx serve` visual confirmed).
 
 ### The crux
 
