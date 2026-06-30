@@ -102,10 +102,11 @@ Testable pure-Rust seams (Steps 4, 6) interleave with webview wiring eyeballed (
     before building the `data:application/xhtml+xml` URL, add a separate `page` signal, and use
     `translateX` to move through columns. Eyeball under `dx serve`; this is deliberately a spike
     with no page-count clamp yet. *(data-URL injection seam, CSS multicolumn, signal reset)*
-11. ⬜ **Intercept internal hyperlinks** — split this into: **11a** ✅ preserve each spine
-    document's EPUB path and resolve `href` strings to Rust `LinkTarget`s; **11b** ⬜ choose/wire
-    the iframe → Dioxus event channel now that the iframe document is a `data:` URL and plain
-    `dioxus://` navigations are blocked.
+11. ✅ **Intercept internal hyperlinks** — split this into: **11a** ✅ preserve each spine
+    document's EPUB path and resolve `href` strings to Rust `LinkTarget`s; **11b** ✅ wire the
+    iframe → Dioxus event channel (injected bridge → `postMessage` → `document::eval` listener)
+    and, after 11b-i observed the absolute rewritten href, switch the resolver to **Option A**
+    (strip the route prefix, match `SpineDoc.href`) and navigate by spine index.
 12. ⬜ **Bundle a small DRM-free sample `.epub` for testing** — make the fixture intentional and
     documented instead of relying on an ad-hoc local book path.
 13. ⬜ **Review & refactor the finished EPUB rendering phase** — final phase-ending cleanup after
@@ -1148,6 +1149,13 @@ iframe can be paginated by a reader-controlled injected CSS layer and driven by 
 > test unit fulfils it, the bin unit doesn't) — `#[allow(dead_code)]` is the
 > right tool, and annotating the entry point silences its transitively-dead
 > callees too.
+>
+> **Superseded input model (see 11b-ii).** This step assumed clicks arrive as *relative* hrefs and
+> built `resolve_relative` + a `base_dir` walk to handle them. 11b-i later observed that rbook
+> rewrites `<a href>` to **absolute** `dioxus://index.html/epub/…` URLs, so that relative path never
+> runs in the real app. 11b-ii revises `resolve_internal_link` to **Option A** (strip the route
+> prefix, match `SpineDoc.href`) and deletes `resolve_relative`. The `SpineDoc`/`LinkTarget` types
+> and the fragment-splitting logic from this step stand; only the path-resolution half changes.
 
 ### The crux
 
@@ -1361,3 +1369,334 @@ This step does **not** intercept clicks inside the iframe yet and does not scrol
 once the target document loads. It only creates the pure Rust navigation target that the next UI
 step can call. Step 11b will choose the iframe-to-Dioxus event channel and reset `page` to `0` when
 an internal link changes spine item.
+
+---
+
+## Step 11b — wire internal-link clicks into spine navigation
+
+> **Status:** done — committed in `4b895f6` (7 tests green; `cargo clippy --all-targets` clean;
+> `dx serve` confirmed: clicking a TOC entry jumps to that chapter and resets to page 1). Landed as
+> 11b-i + 11b-ii in one commit: the channel proved out *and* answered unknown #2 (rbook rewrites
+> `<a href>` → absolute), so the resolver was switched to **Option A** and wired the same pass.
+> Fragment scrolling stays deferred to a later step.
+
+### The crux
+
+Step 11a built the *destination* logic; 11b is the *transport* — getting a click that happens
+**inside the iframe** out to Dioxus so it can call the resolver and move `current`. It's the hard
+part of the phase, for reasons already recorded:
+
+- The iframe is a **`data:application/xhtml+xml`** document with an **opaque origin**, rendered
+  **script-free** (`sandbox="allow-same-origin"`, no `allow-scripts`).
+- Letting the browser *follow* the link is the wrong primitive — internal links resolve toward
+  `dioxus://…`, and **those iframe navigations are blocked by the desktop nav guard** (the Step 8
+  finding). The click must be **intercepted, cancelled, and reported**, never followed.
+
+A script-free sandbox can't intercept anything, so the mechanism is: **inject a trusted bridge
+script** into the XHTML (the same pre-encode seam `inject_pagination_css` uses), **loosen the
+sandbox to `allow-scripts`**, have the script `preventDefault()` + `postMessage` the href to the
+parent, and run a Dioxus-side **`document::eval` listener** that forwards the href into a recv loop
+that calls `resolve_internal_link` and sets `current` / resets `page`.
+
+Two unknowns make this risky enough to split, spike-first:
+
+1. **Does a click even escape?** Does `postMessage` from a sandboxed, opaque-origin `data:` iframe
+   reach a parent `eval` listener? (Plausibly yes — `postMessage` is cross-origin by design — but
+   unproven in *this* renderer.)
+2. **What href shape arrives?** 11a's resolver was tested with a *hand-written relative* href.
+   But `load_spine` runs `PathRewrite::prefix("dioxus://index.html/epub/")` — **if rbook rewrites
+   `<a href>` too** (not just `img`/`link`), the click carries an absolute
+   `dioxus://index.html/epub/OEBPS/…` URL the resolver won't match.
+   **Answered by 11b-i (2026-06-30): yes, rbook rewrites `<a href>`.** The observed click
+   carried `dioxus://index.html/epub/OEBPS/5186027266282590649_1661-h-1.htm.xhtml#chap01` — an
+   absolute URL on the `dioxus://` scheme. So 11a's relative-resolution path never runs in the
+   real app, and 11b-ii switches the resolver to **Option A** (strip the route prefix, match the
+   remainder against `SpineDoc.href`) — see the re-derived 11b-ii below.
+
+### Step plan
+
+- **11b-i — prove the channel, observe the href.** Inject the bridge + `allow-scripts`, set up the
+  eval listener, and just **display the raw href that arrives**. No resolver wiring. De-risks both
+  unknowns; the *observed href shape* decides 11b-ii's resolver call.
+- **11b-ii — switch the resolver to Option A, then wire it.** The observed href is absolute
+  (`dioxus://index.html/epub/OEBPS/…`), so first **revise `resolve_internal_link`** to strip the
+  `dioxus://index.html/{EPUB_ROUTE}/` prefix and match the remainder against `SpineDoc.href`
+  directly (deleting the `://`-means-external check and the whole `resolve_relative` helper). Then
+  feed the received href + `current()` into it; on `Some(target)` set `current` and reset `page` to
+  `0`; drop the `#[allow(dead_code)]`.
+- **Deferred (later step) — scroll to the fragment** once the target document loads (needs script
+  *inside* the destination frame, which 11b-i's bridge makes possible).
+
+---
+
+### Step 11b-i — prove the iframe→Dioxus channel
+
+> **Status:** done — folded into the 11b commit `4b895f6` (see the 11b status above). Both unknowns
+> resolved: **#2** — the observed href was absolute (`dioxus://index.html/epub/OEBPS/…h-1.htm.xhtml#chap01`),
+> confirming rbook rewrites `<a href>`; **#1** — `postMessage` does cross the opaque `data:` origin
+> into the parent `document::eval` listener (navigation works). The debug `last_link` readout proved
+> the channel, then was removed once 11b-ii navigated for real.
+
+#### Runnable check (`dx serve` — eyeball)
+
+Pure webview interop, so eyeball, not a unit test. Add a debug readout to the chrome (a
+`use_signal(String)` rendered somewhere visible). Then under `dx serve`:
+
+- Navigate to the **contents/TOC document** (spine 1 in the Sherlock book) — it has real in-book
+  links.
+- **Click a TOC entry.** The page must **not** navigate or blank out (the click is cancelled).
+- The debug readout **shows the clicked link's href.** Note its exact shape — relative
+  (`…1661-h-1.htm.xhtml#chap01`) or absolute (`dioxus://index.html/epub/OEBPS/…`). **That
+  observation is the deliverable** — it decides 11b-ii's resolver call.
+- `cargo clippy` clean.
+
+If nothing appears, the channel itself is the bug (sandbox flags, XHTML well-formedness of the
+injected script, or the eval listener) — which is exactly why this is isolated from the resolver.
+
+#### Minimal implementation (sketch — you write it)
+
+1. **Bridge-injection helper** in `src/epub.rs`, next to `inject_pagination_css` (same
+   before-encode seam):
+
+   ```rust
+   pub(crate) fn inject_link_bridge(xhtml: &str) -> String {
+       // Served as application/xhtml+xml → parsed as XML, so the script body must be
+       // well-formed XML. CDATA-wrap it so a stray `<`/`>`/`&` in JS can't break the parse.
+       let script = r#"<script type="text/javascript">
+   //<![CDATA[
+   document.addEventListener('click', function (e) {
+       var a = e.target.closest && e.target.closest('a[href]');
+       if (!a) return;
+       e.preventDefault();
+       window.parent.postMessage(
+           { kind: 'ook-link', raw: a.getAttribute('href'), resolved: a.href },
+           '*'
+       );
+   });
+   //]]>
+   </script>"#;
+       xhtml.replacen("</head>", &format!("{script}</head>"), 1)
+   }
+   ```
+
+   Sending **both** `raw` (attribute, possibly relative) and `resolved` (browser-absolute) is what
+   answers unknown #2 — you see the difference.
+
+2. **Inject before `to_xhtml_data_url`**, alongside the pagination injection:
+
+   ```rust
+   let paged = epub::inject_pagination_css(&docs[current()].xhtml, page());
+   let bridged = epub::inject_link_bridge(&paged);
+   let iframe_src = epub::to_xhtml_data_url(&bridged);
+   ```
+
+3. **Loosen the sandbox** so the injected script runs:
+
+   ```rust
+   sandbox: "allow-same-origin allow-scripts",
+   ```
+
+4. **Dioxus-side listener**, set up **once** so it persists (`use_future`, or `use_hook` + `spawn`):
+
+   ```rust
+   let mut last_link = use_signal(String::new); // the debug readout
+
+   use_future(move || async move {
+       let mut bridge = document::eval(
+           r#"
+           window.addEventListener('message', (e) => {
+               if (e.data && e.data.kind === 'ook-link') {
+                   dioxus.send(e.data.raw + "  |  " + e.data.resolved);
+               }
+           });
+           "#,
+       );
+       loop {
+           match bridge.recv::<String>().await {
+               Ok(msg) => last_link.set(msg), // 11b-i: just observe
+               Err(_) => break,
+           }
+       }
+   });
+   ```
+
+   Confirm exact spellings against Dioxus 0.7 (`dioxus::document::eval`, the `dioxus.send` /
+   `dioxus.recv` JS names, `eval.recv::<T>()`) — same hedge used for rbook calls. The *shape* (eval
+   installs a `message` listener → `dioxus.send` → Rust `recv` loop) is the stable part.
+
+#### Why it works
+
+- **The injection seam is the data-URL seam.** Anything the XHTML parser must see — pagination CSS
+  (Step 10), this bridge now — goes in **before** `to_xhtml_data_url` encodes the bytes. Reusing
+  Step 10's mechanism exactly.
+- **CDATA matters here and didn't in HTML.** `text/html` tolerates raw `<`/`&` in a `<script>`;
+  `application/xhtml+xml` is XML, where an unescaped `i < 5` is a parse error that blanks the page.
+  The `//<![CDATA[ … //]]>` wrapper lets JS hold XML-special characters. (None in this snippet, but
+  the habit is the lesson.)
+- **`allow-scripts` is a real loosening — name it.** It re-enables *all* scripts in the frame,
+  including any the book ships, undoing the "book JS stays inert" property Step 7 chose. Gutenberg
+  books carry none, so the risk is ~nil, but it's a deliberate trade. Hardening (strip book
+  `<script>`s, inject only the bridge) is later. Note `allow-scripts` + `allow-same-origin` together
+  is discouraged for *untrusted* content — acceptable for a semi-trusted local book, worth a comment.
+- **`postMessage` crosses the opaque origin on purpose.** It's the one channel designed to work
+  *regardless* of origin — why it beats any other way of reaching a `data:` document. The parent's
+  `message` listener reads `event.data` structurally; no origin handshake needed child→parent.
+- **Set the listener up once, or it leaks.** Installing `addEventListener` every render stacks
+  duplicate listeners; `use_future`/`use_hook` running it once keeps exactly one bridge alive. The
+  loop reads no reactive signal, so it won't restart — the property you'll protect in 11b-ii by
+  reading `current` with `.peek()` (so the future doesn't re-subscribe and restart).
+
+#### Scope note
+
+11b-i **only observes** — proves the click escapes and reveals the href shape. It does **not** call
+`resolve_internal_link`, move `current`, or scroll to the fragment. Wiring the resolver is
+**11b-ii**; fragment scrolling is a later step (needs script *inside* the destination frame, which
+this bridge now enables).
+
+> **Alternative channel if `postMessage` is blocked:** the script could
+> `fetch("dioxus://index.html/epub/__nav/…")` — a *subresource* request that bypasses the nav guard
+> and reaches the asset handler (the same asymmetry that let Step 7's images load). But bridging the
+> handler (a `'static` `Rc<Epub>` closure off the UI thread) back into a signal needs its own
+> channel, so `postMessage`+`eval` is the idiomatic default. Back-pocket option for debugging, not
+> a thing to build preemptively.
+
+---
+
+### Step 11b-ii — switch the resolver to Option A, then wire it
+
+> **Status:** done — committed in `4b895f6` with 11b-i (7 tests green; clippy clean). The resolver
+> dropped the `://`-means-external check and `resolve_relative` for a single
+> `strip_prefix("dioxus://index.html/{EPUB_ROUTE}/")?`; the `use_future` listener calls it with
+> `*current.peek()` and, on `Some(target)`, sets `current` + resets `page`. Wiring lessons recorded
+> below: the `FnMut` future needs `docs` cloned in its body, and the `current` read must be a
+> `let idx = *current.peek();` snapshot *before* the `if let` so its borrow guard is dropped before
+> `current.set()` (else E0502 — a scrutinee temporary lives for the whole `if let` body).
+
+#### The crux
+
+11a built `resolve_internal_link` to take a *relative* href and walk it against the current
+document's directory (`base_dir` + `resolve_relative`). 11b-i proved that's the wrong input model:
+rbook rewrites `<a href>` the same way it rewrites `<img>`/`<link>`, so the click delivers a
+**fully-resolved absolute URL** — `dioxus://index.html/epub/OEBPS/…h-1.htm.xhtml#chap01`.
+
+rbook already did the relative-path resolution at load time. So the resolver's job collapses to:
+**strip the route prefix off the absolute URL and match the remainder against `SpineDoc.href`.**
+The prefix is the same contract string `load_spine` rewrites with —
+`dioxus://index.html/{EPUB_ROUTE}/` — so the stripped tail (`OEBPS/…h-1.htm.xhtml`) is already in
+the exact normalized shape `SpineDoc.href` stores. `resolve_relative` and the `base_dir` lookup
+become dead code; the `href.contains("://")` external check inverts into "must carry our prefix."
+
+This is **Option A**, and it makes the resolver *smaller*: the rewrite that complicated the input is
+also what removes the work.
+
+#### Runnable check (`cargo test`)
+
+Revise the two existing resolver tests in `src/epub.rs` to feed the **absolute** href the app
+actually produces (the relative-input tests describe a path the real renderer never takes):
+
+```rust
+#[test]
+fn resolves_contents_link_to_spine_doc_and_fragment() {
+    let docs = load_spine(crate::BOOK).expect("should open the bundled epub");
+
+    // The shape rbook actually rewrites an in-book <a href> to (confirmed in 11b-i),
+    // not the hand-written relative form 11a originally tested.
+    let target = resolve_internal_link(
+        &docs,
+        1,
+        "dioxus://index.html/epub/OEBPS/5186027266282590649_1661-h-1.htm.xhtml#chap01",
+    )
+    .expect("contents link should point at another spine item");
+
+    assert_eq!(target.spine_index, 2);
+    assert_eq!(target.fragment.as_deref(), Some("chap01"));
+}
+
+#[test]
+fn ignores_external_links() {
+    let docs = load_spine(crate::BOOK).expect("should open the bundled epub");
+
+    // No epub-route prefix → not spine navigation. (Still true; no change needed here,
+    // but it now passes via the prefix check rather than the `://` check.)
+    assert_eq!(
+        resolve_internal_link(&docs, 1, "https://www.gutenberg.org"),
+        None,
+    );
+}
+```
+
+Red first: the contents-link assertion fails against today's resolver, because the absolute URL
+trips the `href.contains("://")` guard and returns `None`. That failure *is* the proof the old
+input model was wrong.
+
+> **Confirm the `OEBPS/` segment against your book.** The expected stripped tail must equal
+> `docs[2].href`. If `manifest_entry().href()` stores a different folder (or none), adjust the test
+> URL to match what `load_spine` actually produced — the existing `loads_spine_in_reading_order`
+> test plus a one-off `dbg!(&docs[2].href)` tells you the truth rather than guessing.
+
+#### Minimal implementation sketch (you write it)
+
+Revise `resolve_internal_link` — split the fragment, keep the bare-`#frag` guard, then strip the
+prefix instead of resolving relatively:
+
+```rust
+pub(crate) fn resolve_internal_link(
+    docs: &[SpineDoc],
+    current_index: usize,
+    href: &str,
+) -> Option<LinkTarget> {
+    // Split "url#fragment"; either half may be empty.
+    let (path, fragment) = match href.split_once('#') {
+        Some((path, frag)) => (path, Some(frag.to_string())),
+        None => (href, None),
+    };
+
+    // A bare "#frag" stays inside the document we're already showing. (rbook *may*
+    // rewrite even these to an absolute current-doc URL — if so this branch is just
+    // insurance and the prefix path below resolves it the same way.)
+    if path.is_empty() {
+        return Some(LinkTarget { spine_index: current_index, fragment });
+    }
+
+    // rbook rewrote in-book links to absolute `dioxus://index.html/epub/<zip-path>`.
+    // Anything without that prefix (https:, mailto:, tel:) isn't spine navigation.
+    // The stripped tail is already in SpineDoc.href's normalized shape.
+    let prefix = format!("dioxus://index.html/{EPUB_ROUTE}/");
+    let zip_path = path.strip_prefix(&prefix)?;
+
+    // Decode percent-escapes so this matches the decoded SpineDoc.href.
+    let zip_path = percent_encoding::percent_decode_str(zip_path).decode_utf8_lossy();
+
+    let spine_index = docs.iter().position(|doc| doc.href == zip_path)?;
+    Some(LinkTarget { spine_index, fragment })
+}
+```
+
+Then **delete `resolve_relative`** (now unused) and the `base_dir` lookup. Once `cargo test` is
+green, do the actual wiring from 11b-i's recv loop: replace `last_link.set(msg)` with a call into
+`resolve_internal_link(&docs, current(), &raw)`, and on `Some(target)` `current.set(target.spine_index)`
++ `page.set(0)`. Drop the `#[allow(dead_code)]` on the resolver. Send only `raw` over the bridge now
+that `resolved` has served its diagnostic purpose (or keep both — your call).
+
+#### Why it works
+
+- **The rewrite is the resolver.** rbook resolved every relative link against its document's
+  location at load time; stripping the known prefix recovers a key that matches `SpineDoc.href`
+  one-to-one. Re-deriving the relative path in Rust would just redo work rbook already did — and
+  `resolve_relative` was the part most likely to get a `..`/`.` edge case wrong, so deleting it
+  removes a whole class of bug.
+- **The external-link check inverts cleanly.** "Has our prefix?" is a stricter, more honest test
+  than "contains `://`": a `dioxus://…/epub/…` URL *does* contain `://` yet is internal, so the old
+  guard was actively wrong for the real input. `strip_prefix(&prefix)?` is both the classifier and
+  the extractor in one line.
+- **`current_index` survives for one reason.** It's no longer needed to resolve paths (they're
+  absolute), only to answer a bare `#fragment` link that means "this document." Keeping the param
+  costs nothing and keeps that case correct.
+
+#### Scope note
+
+This still doesn't **scroll to the fragment** once the destination loads — that needs a script
+*inside* the target frame and stays deferred (the 11b-i bridge makes it possible later). It also
+leaves external links inert (returned `None`), same policy as 11a. The `resolve_relative` deletion
+is a genuine simplification, not behavior loss: nothing in the real app ever fed it a relative
+href.
