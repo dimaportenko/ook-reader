@@ -85,16 +85,29 @@ pub(crate) fn inject_pagination_css(xhtml: &str, page: usize) -> String {
     xhtml.replacen("</head>", &format!("{css}</head>"), 1)
 }
 
-#[allow(dead_code)]
+pub(crate) fn inject_link_bridge(xhtml: &str) -> String {
+    let script = r#"<script type="text/javascript">
+    //<![CDATA[
+        document.addEventListener('click', function(e) {
+            var a = e.target.closest && e.target.closest('a[href]');
+            if (!a) return;
+            e.preventDefault();
+            window.parent.postMessage(
+                { kind: 'ook-link', raw: a.getAttribute('href'), resolved: a.href },
+                '*'
+            );
+        });
+    //]]>
+    </script>"#;
+
+    xhtml.replacen("</head>", &format!("{script}</head>"), 1)
+}
+
 pub(crate) fn resolve_internal_link(
     docs: &[SpineDoc],
     current_index: usize,
     href: &str,
 ) -> Option<LinkTarget> {
-    if href.contains("://") || href.starts_with("mailto:") || href.starts_with("tel:") {
-        return None;
-    }
-
     let (path, fragment) = match href.split_once('#') {
         Some((path, frag)) => (path, Some(frag.to_string())),
         None => (href, None),
@@ -107,43 +120,17 @@ pub(crate) fn resolve_internal_link(
         });
     }
 
-    let path = percent_encoding::percent_decode_str(path).decode_utf8_lossy();
+    let prefix = format!("dioxus://index.html/{EPUB_ROUTE}/");
+    let zip_path = path.strip_prefix(&prefix)?;
 
-    let base_dir = docs
-        .get(current_index)?
-        .href
-        .rsplit_once('/')
-        .map(|(dir, _file)| dir)
-        .unwrap_or("");
+    let zip_path = percent_encoding::percent_decode_str(zip_path).decode_utf8_lossy();
 
-    let resolved = resolve_relative(base_dir, &path);
-
-    let spine_index = docs.iter().position(|doc| doc.href == resolved)?;
+    let spine_index = docs.iter().position(|doc| doc.href == zip_path)?;
 
     Some(LinkTarget {
         spine_index,
         fragment,
     })
-}
-
-fn resolve_relative(base_dir: &str, relative: &str) -> String {
-    let base = if relative.starts_with('/') {
-        ""
-    } else {
-        base_dir
-    };
-
-    let mut segments: Vec<&str> = Vec::new();
-    for segment in base.split('/').chain(relative.split('/')) {
-        match segment {
-            "" | "." => {}
-            ".." => {
-                segments.pop();
-            }
-            other => segments.push(other),
-        }
-    }
-    segments.join("/")
 }
 
 #[cfg(test)]
@@ -221,18 +208,6 @@ mod test {
     }
 
     #[test]
-    fn resolves_contents_link_to_spine_doc_and_fragment() {
-        let docs = load_spine(crate::BOOK).expect("should open the bundled epub");
-
-        let target =
-            resolve_internal_link(&docs, 1, "5186027266282590649_1661-h-1.htm.xhtml#chap01")
-                .expect("contents link should point at another spine item");
-
-        assert_eq!(target.spine_index, 2);
-        assert_eq!(target.fragment.as_deref(), Some("chap01"));
-    }
-
-    #[test]
     fn ignores_external_links() {
         let docs = load_spine(crate::BOOK).expect("should open the bundled epub");
 
@@ -240,5 +215,20 @@ mod test {
             resolve_internal_link(&docs, 1, "https://www.gutenberg.org"),
             None
         );
+    }
+
+    #[test]
+    fn resolves_contents_link_to_doc_and_fragment() {
+        let docs = load_spine(crate::BOOK).expect("should open the bundled epub");
+
+        let target = resolve_internal_link(
+            &docs,
+            1,
+            "dioxus://index.html/epub/OEBPS/5186027266282590649_1661-h-1.htm.xhtml#chap01",
+        )
+        .expect("contents link should point at another spine item");
+
+        assert_eq!(target.spine_index, 2);
+        assert_eq!(target.fragment.as_deref(), Some("chap01"));
     }
 }

@@ -63,14 +63,38 @@ fn Reader() -> Element {
     let len = docs.len();
     let current_doc = &docs[current()];
     let paged_doc = epub::inject_pagination_css(&current_doc.xhtml, page());
-    let iframe_src = epub::to_xhtml_data_url(&paged_doc);
+    let bridged = epub::inject_link_bridge(&paged_doc);
+    let iframe_src = epub::to_xhtml_data_url(&bridged);
+
+    use_future(move || {
+        let docs = docs.clone();
+        async move {
+            let mut bridge = document::eval(
+                r#"
+            window.addEventListener('message', (e) => {
+                if (e.data && e.data.kind === 'ook-link') {
+                    dioxus.send(e.data.raw);
+                }
+            });
+            "#,
+            );
+
+            while let Ok(msg) = bridge.recv::<String>().await {
+                let idx = *current.peek();
+                if let Some(target) = epub::resolve_internal_link(&docs, idx, &msg) {
+                    current.set(target.spine_index);
+                    page.set(0);
+                }
+            }
+        }
+    });
 
     rsx! {
         div {
             style: "display: flex; flex-direction: column; height: 100vh;",
 
             iframe {
-                "sandbox": "allow-same-origin",
+                "sandbox": "allow-same-origin allow-scripts",
                 style: "flex: 1; width: 100%; border: none;",
                 src: "{iframe_src}",
             }
