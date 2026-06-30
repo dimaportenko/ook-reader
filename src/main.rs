@@ -62,7 +62,7 @@ fn Reader() -> Element {
     let mut page = use_signal(|| 0usize);
     let len = docs.len();
     let current_doc = &docs[current()];
-    let paged_doc = epub::inject_pagination_css(current_doc, page());
+    let paged_doc = epub::inject_pagination_css(&current_doc.xhtml, page());
     let iframe_src = epub::to_xhtml_data_url(&paged_doc);
 
     rsx! {

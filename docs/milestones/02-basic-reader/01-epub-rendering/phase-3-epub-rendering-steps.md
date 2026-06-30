@@ -102,8 +102,10 @@ Testable pure-Rust seams (Steps 4, 6) interleave with webview wiring eyeballed (
     before building the `data:application/xhtml+xml` URL, add a separate `page` signal, and use
     `translateX` to move through columns. Eyeball under `dx serve`; this is deliberately a spike
     with no page-count clamp yet. *(data-URL injection seam, CSS multicolumn, signal reset)*
-11. ⬜ **Intercept internal hyperlinks** — decide how XHTML links become Rust navigation events
-    now that the iframe document is a `data:` URL and plain `dioxus://` navigations are blocked.
+11. ⬜ **Intercept internal hyperlinks** — split this into: **11a** preserve each spine document's
+    EPUB path and resolve `href` strings to Rust `LinkTarget`s; **11b** choose/wire the iframe →
+    Dioxus event channel now that the iframe document is a `data:` URL and plain `dioxus://`
+    navigations are blocked.
 12. ⬜ **Bundle a small DRM-free sample `.epub` for testing** — make the fixture intentional and
     documented instead of relying on an ad-hoc local book path.
 13. ⬜ **Review & refactor the finished EPUB rendering phase** — final phase-ending cleanup after
@@ -1132,3 +1134,222 @@ Keep the changes small and local:
 This does **not** compute the number of pages, clamp Page + at the real end, preserve reading
 position, or handle internal links. It only proves that the current `data:application/xhtml+xml`
 iframe can be paginated by a reader-controlled injected CSS layer and driven by Dioxus signals.
+
+---
+
+## Step 11a — resolve internal link targets in Rust
+
+> **Status:** ⬜ planned.
+
+### The crux
+
+The iframe is now a `data:application/xhtml+xml` document, so letting the browser follow a book
+link is the wrong primitive: cross-document links resolve toward `dioxus://…`, and those iframe
+navigations are blocked by Dioxus's desktop navigation guard. Before wiring any click channel,
+Rust needs a deterministic translation from an EPUB `href` like
+`5186027266282590649_1661-h-1.htm.xhtml#chap01` into "spine index 2, fragment `chap01`."
+
+That means `Vec<String>` is no longer enough. The XHTML content is not the whole spine item; each
+item also needs its EPUB path, because relative links are resolved against the current document's
+location.
+
+### Runnable check (`cargo test`)
+
+Add this beside the existing `epub.rs` tests. It should fail first because `SpineDoc`,
+`LinkTarget`, and `resolve_internal_link` do not exist yet (and because `load_spine` still returns
+plain strings today).
+
+```rust
+#[test]
+fn resolves_contents_link_to_spine_doc_and_fragment() {
+    let docs = load_spine(crate::BOOK).expect("should open the bundled epub");
+
+    // In this Gutenberg book: spine 0 is the cover wrapper, spine 1 is the title/contents
+    // document, and spine 2 is "A Scandal in Bohemia".
+    let target = resolve_internal_link(
+        &docs,
+        1,
+        "5186027266282590649_1661-h-1.htm.xhtml#chap01",
+    )
+    .expect("contents link should point at another spine item");
+
+    assert_eq!(target.spine_index, 2);
+    assert_eq!(target.fragment.as_deref(), Some("chap01"));
+}
+
+#[test]
+fn ignores_external_links() {
+    let docs = load_spine(crate::BOOK).expect("should open the bundled epub");
+
+    assert_eq!(
+        resolve_internal_link(&docs, 1, "https://www.gutenberg.org"),
+        None,
+    );
+}
+```
+
+After the Rust tests pass, run `cargo clippy` too, because changing the `load_spine` return type
+will touch the Dioxus `Reader` component.
+
+### Minimal implementation sketch
+
+1. Give each loaded item identity as well as content:
+
+   ```rust
+   #[derive(Debug, Clone, PartialEq, Eq)]
+   pub(crate) struct SpineDoc {
+       pub(crate) href: String, // normalized EPUB path, e.g. "OEBPS/…h-1.htm.xhtml"
+       pub(crate) xhtml: String,
+   }
+   ```
+
+2. Change `load_spine` to return `Vec<SpineDoc>`. While iterating `epub.reader()`, keep the
+   `manifest_entry().href()` (normalize leading `/` away if rbook returns one) and the rewritten
+   XHTML from `read_str_with(&rewrite)`.
+
+   ```rust
+   pub(crate) fn load_spine(path: &str) -> Result<Vec<SpineDoc>, Box<dyn std::error::Error>> {
+       let epub = Epub::open(path)?;
+
+       let rewrite = EpubRewriteOptions::default().rewrite_paths(PathRewrite::prefix(
+           format!("dioxus://index.html/{EPUB_ROUTE}/"),
+       ));
+
+       epub.reader()
+           .map(|entry| {
+               let entry = entry?;
+               let manifest_entry = entry.manifest_entry();
+
+               // `href()` returns an `rbook::Href`, not a `&str`. Use `.decode()`
+               // (percent-decoded `Cow<str>`) so the stored path matches the
+               // decoded link href in `resolve_internal_link`. Also drop any
+               // leading "/" so "/OEBPS/…" == "OEBPS/…", the shape
+               // `resolve_relative` produces.
+               let href = manifest_entry
+                   .href()
+                   .decode()
+                   .trim_start_matches('/')
+                   .to_string();
+
+               let xhtml = manifest_entry.read_str_with(&rewrite)?;
+
+               Ok(SpineDoc { href, xhtml })
+           })
+           .collect()
+   }
+   ```
+
+   The `.map(...).collect()` over a `Vec<Result<_, _>>` still works because the
+   closure returns `Result<SpineDoc, Box<dyn Error>>` and `collect()` turns
+   `Iterator<Item = Result<T, E>>` into `Result<Vec<T>, E>` — the same shape Step 9
+   landed, just yielding a struct instead of a `String`. Confirm `href()`'s exact
+   spelling against your rbook (it may need the manifest entry, not the reader
+   item) and whether it returns a leading slash — the `trim_start_matches('/')` is
+   the cheap insurance either way.
+
+3. Add the target type and resolver:
+
+   ```rust
+   #[derive(Debug, Clone, PartialEq, Eq)]
+   pub(crate) struct LinkTarget {
+       pub(crate) spine_index: usize,
+       pub(crate) fragment: Option<String>,
+   }
+   ```
+
+   `resolve_internal_link(docs, current_index, href)` should:
+
+   - return `None` for `http://`, `https://`, `mailto:`, etc.;
+   - split the `#fragment` from the path;
+   - treat `#only-a-fragment` as a link within the current spine item;
+   - resolve a relative path against the current document's directory;
+   - find the matching `SpineDoc.href` and return its index + fragment.
+
+   In code (one way to satisfy those bullets — write your own and compare):
+
+   ```rust
+   pub(crate) fn resolve_internal_link(
+       docs: &[SpineDoc],
+       current_index: usize,
+       href: &str,
+   ) -> Option<LinkTarget> {
+       // External targets aren't spine navigation — leave them be for now.
+       if href.contains("://") || href.starts_with("mailto:") || href.starts_with("tel:") {
+           return None;
+       }
+
+       // Split "path#fragment"; either half may be empty.
+       let (path, fragment) = match href.split_once('#') {
+           Some((path, frag)) => (path, Some(frag.to_string())),
+           None => (href, None),
+       };
+
+       // A bare "#frag" stays inside the document we're already showing.
+       if path.is_empty() {
+           return Some(LinkTarget { spine_index: current_index, fragment });
+       }
+
+       // Decode percent-escapes so this matches the decoded `SpineDoc.href`
+       // (rbook's `Href::decode` is the same `percent_decode_str` call).
+       let path = percent_encoding::percent_decode_str(path).decode_utf8_lossy();
+
+       // Resolve `path` against the *current document's* directory, then collapse
+       // "." / ".." so it can be matched against a normalized SpineDoc.href.
+       let base_dir = docs
+           .get(current_index)?
+           .href
+           .rsplit_once('/')
+           .map(|(dir, _file)| dir)
+           .unwrap_or(""); // current doc sits at the zip root
+
+       let resolved = resolve_relative(base_dir, &path);
+
+       let spine_index = docs.iter().position(|doc| doc.href == resolved)?;
+       Some(LinkTarget { spine_index, fragment })
+   }
+
+   /// Join `relative` onto `base_dir` and collapse `.`/`..` segments, URL-style.
+   fn resolve_relative(base_dir: &str, relative: &str) -> String {
+       // A leading "/" means "from the zip root", so it ignores base_dir.
+       let base = if relative.starts_with('/') { "" } else { base_dir };
+
+       let mut segments: Vec<&str> = Vec::new();
+       for segment in base.split('/').chain(relative.split('/')) {
+           match segment {
+               "" | "." => {}                  // skip empty + current-dir markers
+               ".." => { segments.pop(); }     // step up one directory
+               other => segments.push(other),
+           }
+       }
+       segments.join("/")
+   }
+   ```
+
+   The one fact this leans on: `SpineDoc.href` must be stored in the **same
+   normalized shape** `resolve_relative` produces — no leading `/`, no `..` left
+   in it, and **percent-decoded** — or the `doc.href == resolved` match silently
+   fails and every link resolves to `None`. That's why the loader uses `.decode()`
+   and the resolver runs `percent_decode_str` on the incoming path: both sides
+   have to agree on the spelling *and* the encoding. (For the Sherlock book the
+   hrefs are plain ASCII, so the test passes either way — but decoding both sides
+   is what makes links with spaces or Unicode resolve.)
+
+4. Update existing call sites/tests from `doc.contains(...)` to `doc.xhtml.contains(...)`, and in
+   `Reader` build pagination from `&docs[current()].xhtml`.
+
+### Why it works
+
+- The browser's default navigation cannot be the source of truth in this renderer, so Rust needs a
+  small, testable model of "where would this EPUB link go?" before any UI event is involved.
+- Carrying `href` next to `xhtml` preserves the context needed for relative links. Without the
+  source document path, `chapter2.xhtml#x` is just a string; with it, you can resolve it exactly the
+  way EPUB packaging expects.
+- Returning `Option<LinkTarget>` keeps the policy explicit: internal spine links become reader
+  navigation; external links are deliberately ignored for now instead of half-opening a browser.
+
+### Scope note
+
+This step does **not** intercept clicks inside the iframe yet and does not scroll to the fragment
+once the target document loads. It only creates the pure Rust navigation target that the next UI
+step can call. Step 11b will choose the iframe-to-Dioxus event channel and reset `page` to `0` when
+an internal link changes spine item.

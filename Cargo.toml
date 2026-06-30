@@ -10,6 +10,7 @@ edition = "2021"
 dioxus = { version = "0.7.1", features = [] }
 rbook = "0.7"
 base64 = "0.22"
+percent-encoding = "2.3.2"
 
 [features]
 default = ["desktop"]

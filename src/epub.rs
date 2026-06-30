@@ -4,6 +4,18 @@ use rbook::Epub;
 
 pub(crate) const EPUB_ROUTE: &str = "epub";
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SpineDoc {
+    pub(crate) href: String,
+    pub(crate) xhtml: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LinkTarget {
+    pub(crate) spine_index: usize,
+    pub(crate) fragment: Option<String>,
+}
+
 pub(crate) fn content_type_for(path: &str) -> &'static str {
     let ext = path.rsplit('.').next().unwrap_or("");
     match ext {
@@ -24,7 +36,7 @@ pub(crate) fn to_xhtml_data_url(xhtml: &str) -> String {
     )
 }
 
-pub(crate) fn load_spine(path: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+pub(crate) fn load_spine(path: &str) -> Result<Vec<SpineDoc>, Box<dyn std::error::Error>> {
     let epub = Epub::open(path)?;
 
     let rewrite = EpubRewriteOptions::default().rewrite_paths(PathRewrite::prefix(format!(
@@ -32,7 +44,19 @@ pub(crate) fn load_spine(path: &str) -> Result<Vec<String>, Box<dyn std::error::
     )));
 
     epub.reader()
-        .map(|entry| Ok(entry?.manifest_entry().read_str_with(&rewrite)?))
+        .map(|entry| {
+            let entry = entry?;
+            let manifest_entry = entry.manifest_entry();
+
+            let href = manifest_entry
+                .href()
+                .decode()
+                .trim_start_matches('/')
+                .to_string();
+            let xhtml = manifest_entry.read_str_with(&rewrite)?;
+
+            Ok(SpineDoc { href, xhtml })
+        })
         .collect()
 }
 
@@ -61,6 +85,67 @@ pub(crate) fn inject_pagination_css(xhtml: &str, page: usize) -> String {
     xhtml.replacen("</head>", &format!("{css}</head>"), 1)
 }
 
+#[allow(dead_code)]
+pub(crate) fn resolve_internal_link(
+    docs: &[SpineDoc],
+    current_index: usize,
+    href: &str,
+) -> Option<LinkTarget> {
+    if href.contains("://") || href.starts_with("mailto:") || href.starts_with("tel:") {
+        return None;
+    }
+
+    let (path, fragment) = match href.split_once('#') {
+        Some((path, frag)) => (path, Some(frag.to_string())),
+        None => (href, None),
+    };
+
+    if path.is_empty() {
+        return Some(LinkTarget {
+            spine_index: current_index,
+            fragment,
+        });
+    }
+
+    let path = percent_encoding::percent_decode_str(path).decode_utf8_lossy();
+
+    let base_dir = docs
+        .get(current_index)?
+        .href
+        .rsplit_once('/')
+        .map(|(dir, _file)| dir)
+        .unwrap_or("");
+
+    let resolved = resolve_relative(base_dir, &path);
+
+    let spine_index = docs.iter().position(|doc| doc.href == resolved)?;
+
+    Some(LinkTarget {
+        spine_index,
+        fragment,
+    })
+}
+
+fn resolve_relative(base_dir: &str, relative: &str) -> String {
+    let base = if relative.starts_with('/') {
+        ""
+    } else {
+        base_dir
+    };
+
+    let mut segments: Vec<&str> = Vec::new();
+    for segment in base.split('/').chain(relative.split('/')) {
+        match segment {
+            "" | "." => {}
+            ".." => {
+                segments.pop();
+            }
+            other => segments.push(other),
+        }
+    }
+    segments.join("/")
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -71,12 +156,13 @@ mod test {
         assert_eq!(docs.len(), 15);
 
         assert!(
-            docs.iter().any(|d| d.contains("A Scandal in Bohemia")),
+            docs.iter()
+                .any(|d| d.xhtml.contains("A Scandal in Bohemia")),
             "expected the first story's text somewhere in the spine",
         );
 
         assert!(
-            !docs[0].contains("A Scandal in Bohemia"),
+            !docs[0].xhtml.contains("A Scandal in Bohemia"),
             "index 0 should be the cover, not story one"
         );
     }
@@ -132,5 +218,27 @@ mod test {
         assert!(paged.contains("column-width: 100vw"));
         assert!(paged.find("--ook-page: 2").unwrap() < paged.find("</head>").unwrap());
         assert!(paged.contains("<p>Hello</p>"));
+    }
+
+    #[test]
+    fn resolves_contents_link_to_spine_doc_and_fragment() {
+        let docs = load_spine(crate::BOOK).expect("should open the bundled epub");
+
+        let target =
+            resolve_internal_link(&docs, 1, "5186027266282590649_1661-h-1.htm.xhtml#chap01")
+                .expect("contents link should point at another spine item");
+
+        assert_eq!(target.spine_index, 2);
+        assert_eq!(target.fragment.as_deref(), Some("chap01"));
+    }
+
+    #[test]
+    fn ignores_external_links() {
+        let docs = load_spine(crate::BOOK).expect("should open the bundled epub");
+
+        assert_eq!(
+            resolve_internal_link(&docs, 1, "https://www.gutenberg.org"),
+            None
+        );
     }
 }
