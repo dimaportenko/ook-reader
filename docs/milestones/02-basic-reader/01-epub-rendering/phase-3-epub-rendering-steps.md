@@ -102,10 +102,10 @@ Testable pure-Rust seams (Steps 4, 6) interleave with webview wiring eyeballed (
     before building the `data:application/xhtml+xml` URL, add a separate `page` signal, and use
     `translateX` to move through columns. Eyeball under `dx serve`; this is deliberately a spike
     with no page-count clamp yet. *(data-URL injection seam, CSS multicolumn, signal reset)*
-11. ⬜ **Intercept internal hyperlinks** — split this into: **11a** preserve each spine document's
-    EPUB path and resolve `href` strings to Rust `LinkTarget`s; **11b** choose/wire the iframe →
-    Dioxus event channel now that the iframe document is a `data:` URL and plain `dioxus://`
-    navigations are blocked.
+11. ⬜ **Intercept internal hyperlinks** — split this into: **11a** ✅ preserve each spine
+    document's EPUB path and resolve `href` strings to Rust `LinkTarget`s; **11b** ⬜ choose/wire
+    the iframe → Dioxus event channel now that the iframe document is a `data:` URL and plain
+    `dioxus://` navigations are blocked.
 12. ⬜ **Bundle a small DRM-free sample `.epub` for testing** — make the fixture intentional and
     documented instead of relying on an ad-hoc local book path.
 13. ⬜ **Review & refactor the finished EPUB rendering phase** — final phase-ending cleanup after
@@ -1139,7 +1139,15 @@ iframe can be paginated by a reader-controlled injected CSS layer and driven by 
 
 ## Step 11a — resolve internal link targets in Rust
 
-> **Status:** ⬜ planned.
+> **Status:** done — committed in `bf70e44` (7 tests green; `cargo clippy
+> --all-targets` clean). `load_spine` now returns `Vec<SpineDoc>` (href + xhtml);
+> `resolve_internal_link` + `resolve_relative` translate an EPUB `href` to a
+> `LinkTarget` (spine index + fragment), `#[allow(dead_code)]` until Step 11b
+> wires it into the UI. Lint lesson recorded below: this code is used only by
+> tests, so `#[expect(dead_code)]` fails under `cargo clippy --all-targets` (the
+> test unit fulfils it, the bin unit doesn't) — `#[allow(dead_code)]` is the
+> right tool, and annotating the entry point silences its transitively-dead
+> callees too.
 
 ### The crux
 
