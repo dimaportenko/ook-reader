@@ -110,7 +110,7 @@ Testable pure-Rust seams (Steps 4, 6) interleave with webview wiring eyeballed (
     to the `#fragment` anchor inside the destination document (deferred from 11b).
 12. ✅ **Bundle a small DRM-free sample `.epub` for testing** — make the fixture intentional and
     documented instead of relying on an ad-hoc local book path.
-13. ⬜ **Review & refactor the finished EPUB rendering phase** — final phase-ending cleanup after
+13. ✅ **Review & refactor the finished EPUB rendering phase** — final phase-ending cleanup after
     pagination, links, and sample-book packaging land.
 
 > **Sequencing 8 and 9.** Land **Step 8 (8a then 8b) to green first** (feature), then run
@@ -2031,8 +2031,12 @@ There's very little Rust here; the substance is file moves + a doc + one constan
 
 ## Step 13 — review & refactor the finished EPUB rendering phase
 
-> **Status:** planned — the phase-ending review-and-refactor pass. Baseline before starting:
-> **9 tests green, `cargo clippy --all-targets` clean.**
+> **Status:** done — committed in `2d63663` (11 tests green: the 9 baseline plus
+> `url_prefix_embeds_the_route` and `insert_before_head_close_is_a_noop_without_a_head`; clippy
+> clean; `dx serve` visual confirmed — both nav rows render correctly). Landed items **A–E** plus
+> the optional `NavRow` extraction. **Deferred by choice:** the crate-level
+> `#![allow(non_snake_case)]` was kept rather than scoped to `#[expect]` (item E.2's fallback), and
+> the inline `style:` strings stay until Phase 4 theming. With this, **Phase 3 is complete.**
 
 ### The discipline (this is a review, not a feature)
 

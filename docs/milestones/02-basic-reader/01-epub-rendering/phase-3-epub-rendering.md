@@ -1,6 +1,6 @@
 # Phase 3 — EPUB Rendering
 
-[← Feature: EPUB Rendering](README.md) · **Status:** 🚧 in progress (Slice 1 underway) ·
+[← Feature: EPUB Rendering](README.md) · **Status:** ✅ done ·
 build log: [`phase-3-epub-rendering-steps.md`](phase-3-epub-rendering-steps.md)
 
 ## Goal
@@ -52,8 +52,8 @@ XHTML in the webview, with working page turns.
 - [x] Bundle a small DRM-free sample `.epub` for testing — done as build-log **Step 12**
       (rename to `pg1661-…`, `CARGO_MANIFEST_DIR`-anchored `BOOK`, `book/README.md`, existence
       test); committed `56f2af3`
-- [ ] Review & refactor the finished EPUB rendering phase — build-log **Step 13** (the
-      phase-ending review-and-refactor pass)
+- [x] Review & refactor the finished EPUB rendering phase — build-log **Step 13** (the
+      phase-ending review-and-refactor pass); committed `2d63663`
 
 ## Known constraints (from research)
 
