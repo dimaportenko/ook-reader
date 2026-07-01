@@ -69,13 +69,13 @@ pub(crate) fn inject_pagination_css(xhtml: &str, page: usize) -> String {
             width: 100vw !important;
             height: 100vh !important;
             margin: 0 !important;
-            padding: 0 !important;
+            padding: 24px !important;
             box-sizing: border-box !important;
             max-width: none !important;
 
             overflow: visible;
-            column-width: 100vw;
-            column-gap: 0 !important;
+            column-width: calc(100vw - 48px) !important;
+            column-gap: 48px !important;
             column-fill: auto;
             transform: translateX(calc(var(--ook-page) * -100vw));
         }}
