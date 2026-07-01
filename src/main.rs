@@ -60,11 +60,16 @@ fn Reader() -> Element {
     let docs = use_hook(|| epub::load_spine(BOOK).expect("bundled epub should load"));
     let mut current = use_signal(|| 0usize);
     let mut page = use_signal(|| 0usize);
+    let mut pending_fragment = use_signal(|| None::<String>);
     let len = docs.len();
     let current_doc = &docs[current()];
     let paged_doc = epub::inject_pagination_css(&current_doc.xhtml, page());
     let bridged = epub::inject_link_bridge(&paged_doc);
-    let iframe_src = epub::to_xhtml_data_url(&bridged);
+    let prepared = match pending_fragment() {
+        Some(frag) => epub::inject_fragment_scroll(&bridged, &frag),
+        None => bridged,
+    };
+    let iframe_src = epub::to_xhtml_data_url(&prepared);
 
     use_future(move || {
         let docs = docs.clone();
@@ -72,18 +77,30 @@ fn Reader() -> Element {
             let mut bridge = document::eval(
                 r#"
             window.addEventListener('message', (e) => {
-                if (e.data && e.data.kind === 'ook-link') {
-                    dioxus.send(e.data.raw);
+                if (!e.data) return;
+                if (e.data.kind === 'ook-link') {
+                    dioxus.send("link:" + e.data.raw);
+                }
+                if (e.data.kind === 'ook-scroll') {
+                    dioxus.send("scroll:" + e.data.page);
                 }
             });
             "#,
             );
 
             while let Ok(msg) = bridge.recv::<String>().await {
-                let idx = *current.peek();
-                if let Some(target) = epub::resolve_internal_link(&docs, idx, &msg) {
-                    current.set(target.spine_index);
-                    page.set(0);
+                if let Some(href) = msg.strip_prefix("link:") {
+                    let idx = *current.peek();
+                    if let Some(target) = epub::resolve_internal_link(&docs, idx, href) {
+                        current.set(target.spine_index);
+                        page.set(0);
+                        pending_fragment.set(target.fragment);
+                    }
+                } else if let Some(p) = msg.strip_prefix("scroll:") {
+                    if let Ok(p) = p.parse::<usize>() {
+                        page.set(p);
+                        pending_fragment.set(None);
+                    }
                 }
             }
         }

@@ -133,6 +133,24 @@ pub(crate) fn resolve_internal_link(
     })
 }
 
+pub(crate) fn inject_fragment_scroll(xhtml: &str, fragment: &str) -> String {
+    let script = format!(
+        r#"<script type="text/javascript">
+        //<![CDATA[
+            window.addEventListener('load', function() {{
+                var el = document.getElementById("{fragment}");
+                if (!el) return;
+                var page = Math.round(el.offsetLeft / window.innerWidth);
+                window.parent.postMessage({{ kind: 'ook-scroll', page: page }}, '*');
+            }});
+
+        //]]>
+        </script>"#,
+    );
+
+    xhtml.replacen("</head>", &format!("{script}</head>"), 1)
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -230,5 +248,21 @@ mod test {
 
         assert_eq!(target.spine_index, 2);
         assert_eq!(target.fragment.as_deref(), Some("chap01"));
+    }
+
+    #[test]
+    fn injects_fragment_scroll_before_head_close() {
+        let xhtml = r#"<html xmlns="http://www.w3.org/1999/xhtml"><head><title>T</title></head><body><p id="x">Hi</p></body></html>"#;
+
+        let out = inject_fragment_scroll(xhtml, "chap02");
+
+        // The script targets the requested anchor id …
+        assert!(out.contains(r#"getElementById("chap02")"#));
+        // … reports back over the bridge under a distinct message kind …
+        assert!(out.contains("ook-scroll"));
+        // … is injected into the head (so it parses before the body it measures) …
+        assert!(out.find("ook-scroll").unwrap() < out.find("</head>").unwrap());
+        // … and leaves the original document intact.
+        assert!(out.contains(r#"<p id="x">Hi</p>"#));
     }
 }
