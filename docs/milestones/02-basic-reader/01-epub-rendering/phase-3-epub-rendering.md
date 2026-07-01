@@ -46,7 +46,9 @@ XHTML in the webview, with working page turns.
       [ADR-0003](../../../adr/0003-reader-controlled-theming-injected-layer.md).
 - [x] Page turns: start with continuous vertical scroll; spike CSS multi-column +
       `translateX` for true pagination
-- [ ] Intercept internal hyperlinks → navigation events (next/prev spine item)
+- [x] Intercept internal hyperlinks → navigation events (next/prev spine item) — done as build-log
+      Steps 11a/11b/11c (resolve targets in Rust → iframe↔Dioxus `postMessage` bridge → scroll to the
+      `#fragment`); committed `bf70e44` / `4b895f6` / `3b5aee5`
 - [ ] Bundle a small DRM-free sample `.epub` for testing
 - [ ] Review & refactor the finished EPUB rendering phase
 

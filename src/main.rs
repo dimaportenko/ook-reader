@@ -10,7 +10,8 @@ mod epub;
 
 const FAVICON: Asset = asset!("/assets/favicon.ico");
 const MAIN_CSS: Asset = asset!("/assets/main.css");
-pub(crate) const BOOK: &str = "book/The Adventures of Sherlock Holmes by Arthur Conan Doyle.epub";
+pub(crate) const BOOK: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/book/pg1661-adventures-of-sherlock-holmes.epub");
 
 fn main() {
     dioxus::launch(App);

@@ -1880,3 +1880,149 @@ A deliberately rough first cut, matching the Step 10 spike it builds on:
   containing a `"` would break the string. Escaping is deferred — note it, don't solve it now.
 - **Does not** revisit external links or change the resolver; it only consumes the `fragment` the
   resolver already returns.
+
+---
+
+## Step 12 — make the sample `.epub` fixture intentional and documented
+
+> **Status:** done — committed in `56f2af3` (9 tests green).
+
+### The crux
+
+The phase checklist calls this "bundle a small DRM-free sample `.epub`," but the twist is that the
+book is **already committed** — `git ls-files` shows
+`book/The Adventures of Sherlock Holmes by Arthur Conan Doyle.epub` is tracked. So nothing needs
+"adding." What's ad-hoc is everything *around* the file:
+
+- **The path is a brittle, human title with spaces** hard-coded in `src/main.rs`
+  (`const BOOK: &str = "book/The Adventures of Sherlock Holmes by Arthur Conan Doyle.epub"`) and
+  echoed in four `src/epub.rs` tests via `crate::BOOK`.
+- **It sits next to a gitignored scratch dir** (`book/unzipped/`), so "what in `book/` is the real
+  fixture" isn't obvious to a fresh reader.
+- **Nothing records its provenance or licence.** The whole phase asserts "DRM-free EPUBs only," yet
+  nothing *documents* that this file is public-domain, where it came from, or why it was chosen —
+  and the tests silently depend on its specific shape (15-item spine, "A Scandal in Bohemia" at
+  spine index 2, `#chap01` there, a JPEG/PNG cover).
+
+So this step is deliberately **not** a feature step and **not** much Rust — it's *intentional-izing*
+a fixture: give it a stable name that encodes its identity, write down its provenance + licence +
+why-this-book, make the load path robust to the working directory, and pin "the fixture is actually
+bundled" with a test so a future gitignore slip fails loudly instead of as a cryptic `Epub::open`
+error. **Keep the Sherlock Holmes book** — it already exercises the entire render path (cover, CSS,
+images, TOC, internal links, 15 documents) and the whole suite is calibrated to it; swapping books
+would churn every test for no gain.
+
+### Runnable check
+
+Two checks, and be honest about what each is:
+
+#### 1. New pure-Rust test (`cargo test`) — pin "the fixture is bundled"
+
+The one genuinely new invariant this step adds is *the fixture exists at its committed path*. Today
+nothing guards that: if `book/` were gitignored or the file moved, every test would fail deep inside
+`Epub::open` with a vague error. A tiny existence test makes the failure name the real cause. Add it
+to `src/epub.rs`'s test module:
+
+```rust
+#[test]
+fn sample_epub_fixture_is_bundled() {
+    let path = std::path::Path::new(crate::BOOK);
+    assert!(
+        path.exists(),
+        "sample EPUB fixture missing at {BOOK} — is book/ gitignored or the file moved?",
+        BOOK = crate::BOOK,
+    );
+    // Non-trivial size = a real book, not a stray empty placeholder.
+    let bytes = std::fs::metadata(path).expect("fixture metadata").len();
+    assert!(bytes > 100_000, "fixture looks too small ({bytes} bytes)");
+}
+```
+
+Red first: it fails the instant `BOOK` points at a path that isn't there — which is exactly what you
+want it to catch after the rename below, until you `git mv` the file to match.
+
+#### 2. Safety net (`cargo test` + `cargo clippy`) — the rename changes nothing else
+
+Renaming the file + updating `BOOK` is a path change, not a behavior change, so the **entire existing
+suite must stay green, identically, before and after** — `loads_spine_in_reading_order` (15 docs,
+"A Scandal in Bohemia"), `reads_cover_image_bytes`, the resolver tests, all of it. That green suite
+*is* the proof the fixture is still intact under its new name. `cargo clippy` stays clean.
+
+### Minimal implementation sketch (you write it)
+
+There's very little Rust here; the substance is file moves + a doc + one constant.
+
+1. **Rename the file to a stable, identity-encoding name** with `git mv` (keeps history):
+
+   ```sh
+   git mv "book/The Adventures of Sherlock Holmes by Arthur Conan Doyle.epub" \
+          "book/pg1661-adventures-of-sherlock-holmes.epub"
+   ```
+
+   `pg1661` ties it to its source (Project Gutenberg ebook #1661) and drops the spaces that make the
+   path awkward to type and quote.
+
+2. **Point `BOOK` at the new name — and make it robust to the working directory.** Today `BOOK` is a
+   path *relative to the crate root* that only resolves because `cargo` happens to run from there
+   (flagged all the way back in Step 1). Anchor it to the crate root explicitly with the compile-time
+   `CARGO_MANIFEST_DIR` env var so it resolves no matter the CWD:
+
+   ```rust
+   // src/main.rs
+   pub(crate) const BOOK: &str =
+       concat!(env!("CARGO_MANIFEST_DIR"), "/book/pg1661-adventures-of-sherlock-holmes.epub");
+   ```
+
+   All the `crate::BOOK` call sites in `src/epub.rs` and `src/main.rs` pick up the new value for
+   free — that's the payoff of its already being one shared `const`.
+
+3. **Write `book/README.md`** — the actual deliverable of "documented." Record what a future you (or
+   a contributor) needs to trust and not accidentally break:
+
+   - **Source:** Project Gutenberg ebook #1661, *The Adventures of Sherlock Holmes* by Arthur Conan
+     Doyle (link the Gutenberg page).
+   - **Licence:** public domain in the US (Project Gutenberg terms); safe to commit and redistribute —
+     this is what satisfies the phase's "DRM-free only" constraint, made explicit.
+   - **Why this book:** it exercises the *whole* render path in one file — a cover image, the book's
+     own CSS, inline images, a real table-of-contents with in-book links, and a 15-document spine —
+     so the render/paging/link tests have something real to bite on.
+   - **Invariants the tests depend on:** spine length 15; "A Scandal in Bohemia" is spine index 2 and
+     carries `#chap01`; the cover is a JPEG/PNG. Changing the file breaks these tests on purpose.
+   - **Note `book/unzipped/` is gitignored** scratch (an unpacked copy for eyeballing), *not* the
+     fixture.
+
+4. **(Optional) confirm `.gitignore` can't swallow the fixture.** The ignore file lists
+   `book/unzipped/` (good — scratch only) and `*.db`; nothing there matches the `.epub`, so the file
+   stays tracked. Worth an eyeball, not an edit.
+
+### Why it works
+
+- **A name that encodes identity beats a title with spaces.** `pg1661-…` tells the next reader
+  *what this is and where it's from* at a glance, and a shell- and code-friendly path removes the
+  quoting friction the current name imposes on every `git mv`, test, and `dx serve`.
+- **`concat!(env!("CARGO_MANIFEST_DIR"), …)` is resolved at compile time**, so `BOOK` becomes an
+  absolute path baked into the binary — it no longer silently depends on *where* you launched
+  `cargo`/`dx`. `env!` reads the var at build time (it's set by Cargo); `concat!` glues the string
+  literals into one `&'static str`, so `BOOK` is still a plain `const` with no runtime cost. That's
+  the small, real Rust lesson riding inside this housekeeping step.
+- **The existence test converts a silent dependency into a named one.** "Fixture must be present" is
+  currently an *implicit* precondition of a dozen tests; making it its own assertion means a missing
+  or gitignored file fails with a message that says *why*, instead of a confusing parse error three
+  layers down.
+- **The README is the difference between "a book happens to be here" and "this is the fixture."** It
+  turns tribal knowledge (why this book, is it legal to ship, what the tests assume) into something a
+  contributor can read — which is the whole point of the step's word "documented."
+
+### Scope note
+
+- **This is not the phase's final refactor** — that's Step 13, and it runs *after* this, once the
+  fixture is intentional. This step deliberately touches only the fixture (name, path, docs, one
+  existence test); it does not rename `SpineList`/`Reader`, tidy the render path, or revisit the
+  `.body(…).unwrap()`/`#![allow(non_snake_case)]` items parked in Step 9's deferred list. Resist
+  folding those in here — keep the diff about the fixture so the review step has a clean baseline.
+- **No second fixture, no test-runner plumbing.** A single real book is enough for this phase; a
+  matrix of tiny synthetic EPUBs (empty spine, missing cover, malformed href) is a *later* concern
+  when error-handling gets its own steps — note it, don't build it now.
+- **The path is still hard-coded to one bundled book.** Opening an *arbitrary* user-chosen `.epub`
+  (a file picker, a library) is Milestone 2's later features, not this phase — `BOOK` staying a
+  `const` is correct for now.

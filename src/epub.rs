@@ -156,6 +156,19 @@ mod test {
     use super::*;
 
     #[test]
+    fn sample_epub_fixture_is_bundled() {
+        let path = std::path::Path::new(crate::BOOK);
+        assert!(
+            path.exists(),
+            "sample EPUB fixture missing at {BOOK} — is book/ gitignored or the file moved?",
+            BOOK = crate::BOOK,
+        );
+        // Non-trivial size = a real book, not a stray empty placeholder.
+        let bytes = std::fs::metadata(path).expect("fixture metadata").len();
+        assert!(bytes > 100_000, "fixture looks too small ({bytes} bytes)");
+    }
+
+    #[test]
     fn loads_spine_in_reading_order() {
         let docs = load_spine(crate::BOOK).expect("should open the bundled epub");
         assert_eq!(docs.len(), 15);
@@ -220,7 +233,7 @@ mod test {
         let paged = inject_pagination_css(xhtml, 2);
 
         assert!(paged.contains("--ook-page: 2"));
-        assert!(paged.contains("column-width: 100vw"));
+        assert!(paged.contains("column-width: calc(100vw"));
         assert!(paged.find("--ook-page: 2").unwrap() < paged.find("</head>").unwrap());
         assert!(paged.contains("<p>Hello</p>"));
     }
