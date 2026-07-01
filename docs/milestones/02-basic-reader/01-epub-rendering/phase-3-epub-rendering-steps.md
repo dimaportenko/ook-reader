@@ -106,7 +106,8 @@ Testable pure-Rust seams (Steps 4, 6) interleave with webview wiring eyeballed (
     document's EPUB path and resolve `href` strings to Rust `LinkTarget`s; **11b** ✅ wire the
     iframe → Dioxus event channel (injected bridge → `postMessage` → `document::eval` listener)
     and, after 11b-i observed the absolute rewritten href, switch the resolver to **Option A**
-    (strip the route prefix, match `SpineDoc.href`) and navigate by spine index.
+    (strip the route prefix, match `SpineDoc.href`) and navigate by spine index. **11c** ✅ scroll
+    to the `#fragment` anchor inside the destination document (deferred from 11b).
 12. ⬜ **Bundle a small DRM-free sample `.epub` for testing** — make the fixture intentional and
     documented instead of relying on an ad-hoc local book path.
 13. ⬜ **Review & refactor the finished EPUB rendering phase** — final phase-ending cleanup after
@@ -1700,3 +1701,182 @@ This still doesn't **scroll to the fragment** once the destination loads — tha
 leaves external links inert (returned `None`), same policy as 11a. The `resolve_relative` deletion
 is a genuine simplification, not behavior loss: nothing in the real app ever fed it a relative
 href.
+
+---
+
+## Step 11c — scroll to the link's fragment
+
+> **Status:** done — committed in `3b5aee5` (8 tests green). Deferred from 11b — the resolver
+> already returns `LinkTarget.fragment`; 11b just dropped it after navigating. This step *uses* it.
+
+### The crux
+
+11b navigates to the target spine document and resets to **page 0**. But a `#fragment` like
+`#chap02` can live *mid-document* — in a later CSS column — so page 0 isn't where the anchor is.
+Two things make "scroll to it" harder than it sounds in this renderer:
+
+- **The iframe loads asynchronously.** Setting `current` swaps the iframe's `data:` URL; the new
+  document isn't parsed *yet* when the listener returns, so you can't measure the anchor
+  synchronously after `current.set(...)`. The measurement has to happen **on load, inside the
+  frame**.
+- **There's no scrolling to hijack.** Step 10's layout is `html { overflow: hidden }` + a
+  `body` laid out in viewport-wide columns moved by `translateX`. So the browser's native
+  "scroll to `#frag`" does nothing — there's no scroll container. "Going to the anchor" means
+  **picking the page (column) the anchor sits in**, not scrolling.
+
+The unlock is the seam you already built twice: **inject a script before encoding.** Inject an
+on-load script that finds the element, computes which column it's in (`offsetLeft / innerWidth`),
+and reports that page back through the **same `postMessage` → `document::eval` bridge**. Dioxus
+sets `page`. The one trap is a **reload loop** — setting `page` re-encodes the `data:` URL and
+reloads the frame, which would re-run the measure script — so the pending fragment is **consumed
+once** and cleared, and the reload carries no scroll script.
+
+### Runnable check
+
+Two checks, same split as Steps 10 and 11b.
+
+#### 1. Pure Rust helper (`cargo test`)
+
+`inject_fragment_scroll` is another pure string injector like `inject_pagination_css` /
+`inject_link_bridge`, so it gets the same kind of test:
+
+```rust
+#[test]
+fn injects_fragment_scroll_before_head_close() {
+    let xhtml = r#"<html xmlns="http://www.w3.org/1999/xhtml"><head><title>T</title></head><body><p id="x">Hi</p></body></html>"#;
+
+    let out = inject_fragment_scroll(xhtml, "chap02");
+
+    // The script targets the requested anchor id …
+    assert!(out.contains(r#"getElementById("chap02")"#));
+    // … reports back over the bridge under a distinct message kind …
+    assert!(out.contains("ook-scroll"));
+    // … is injected into the head (so it parses before the body it measures) …
+    assert!(out.find("ook-scroll").unwrap() < out.find("</head>").unwrap());
+    // … and leaves the original document intact.
+    assert!(out.contains(r#"<p id="x">Hi</p>"#));
+}
+```
+
+Red first: no `inject_fragment_scroll` yet.
+
+#### 2. UI wiring (`dx serve` + `cargo clippy`)
+
+Under `dx serve`:
+
+- Open the contents/TOC document and click a link whose anchor is **mid-document** (not a
+  chapter-top). The reader lands on the **page showing that anchor**, not page 0.
+- Page +/- still work from there; chapter Next/Prev still reset to page 0.
+- Clicking a link whose anchor is at the document top still lands on page 0 (unchanged).
+- `cargo clippy` clean.
+
+> **Pick the test link deliberately.** If every TOC anchor in this book sits at the top of its
+> document, page 0 already shows it and this step is a no-op to the eye — confirm with one
+> `dbg!`/`console.log` of the computed page that the measurement runs, and note in the commit
+> that mid-document anchors are the case it really serves.
+
+### Minimal implementation sketch (you write it)
+
+1. **The injector**, next to the others in `src/epub.rs`:
+
+   ```rust
+   pub(crate) fn inject_fragment_scroll(xhtml: &str, fragment: &str) -> String {
+       // Runs once the frame's document has parsed, so the element exists and the
+       // column layout is settled. offsetLeft is the element's *pre-transform* layout
+       // x, so dividing by the viewport width gives its column index regardless of the
+       // current translateX. Reports the page back over the same bridge as a click.
+       let script = format!(
+           r#"<script type="text/javascript">
+       //<![CDATA[
+           window.addEventListener('load', function() {{
+               var el = document.getElementById("{fragment}");
+               if (!el) return;
+               var page = Math.round(el.offsetLeft / window.innerWidth);
+               window.parent.postMessage({{ kind: 'ook-scroll', page: page }}, '*');
+           }});
+       //]]>
+       </script>"#,
+       );
+       xhtml.replacen("</head>", &format!("{script}</head>"), 1)
+   }
+   ```
+
+2. **Remember the pending fragment** in `Reader`:
+
+   ```rust
+   let mut pending_fragment = use_signal(|| None::<String>);
+   ```
+
+3. **Inject it only when one is pending**, after the link bridge, before encoding:
+
+   ```rust
+   let bridged = epub::inject_link_bridge(&paged_doc);
+   let prepared = match pending_fragment() {
+       Some(frag) => epub::inject_fragment_scroll(&bridged, &frag),
+       None => bridged,
+   };
+   let iframe_src = epub::to_xhtml_data_url(&prepared);
+   ```
+
+4. **Carry the fragment through the click branch, and handle the new report.** The bridge now
+   speaks two message kinds, so tag them in the eval listener and branch in Rust:
+
+   ```js
+   // in the document::eval listener:
+   window.addEventListener('message', (e) => {
+       if (!e.data) return;
+       if (e.data.kind === 'ook-link')   dioxus.send("link:" + e.data.raw);
+       if (e.data.kind === 'ook-scroll') dioxus.send("scroll:" + e.data.page);
+   });
+   ```
+
+   ```rust
+   while let Ok(msg) = bridge.recv::<String>().await {
+       if let Some(href) = msg.strip_prefix("link:") {
+           let idx = *current.peek();
+           if let Some(target) = epub::resolve_internal_link(&docs, idx, href) {
+               current.set(target.spine_index);
+               page.set(0);
+               pending_fragment.set(target.fragment); // may be None — that's fine
+           }
+       } else if let Some(p) = msg.strip_prefix("scroll:") {
+           if let Ok(p) = p.parse::<usize>() {
+               page.set(p);
+               pending_fragment.set(None); // consume once → reload carries no scroll script
+           }
+       }
+   }
+   ```
+
+### Why it works
+
+- **On-load is the only correct moment.** The element doesn't exist until the new `data:`
+  document parses; `window.addEventListener('load', …)` fires after that, so `getElementById`
+  finds it and the column layout is final. Measuring right after `current.set()` in Rust would
+  race the load and find nothing.
+- **`offsetLeft / innerWidth` is the page.** In the multicolumn body each column is one viewport
+  wide, so an element's layout x divided by the viewport width *is* its column index. `offsetLeft`
+  is the pre-transform layout position, so it's correct no matter what `--ook-page`/`translateX`
+  is showing when the script runs.
+- **Consume-once breaks the reload loop.** `page.set(p)` re-encodes the `data:` URL (it carries
+  `--ook-page`), so the frame reloads. Clearing `pending_fragment` in the same handler means the
+  reload's document is built *without* the scroll script, so it doesn't measure-and-report again.
+  Without that clear, every fragment jump would ping-pong forever.
+- **Tagging keeps one channel.** Rather than a second `eval` listener, the existing bridge gains a
+  `"scroll:"` message alongside `"link:"`; `strip_prefix` is the same classify-and-extract move the
+  resolver uses. One transport, two messages.
+
+### Scope note
+
+A deliberately rough first cut, matching the Step 10 spike it builds on:
+
+- **Page granularity, not pixel-perfect.** It lands on the right *page*; it does not fine-position
+  vertically within a column. Fine for chapter/section anchors.
+- **A brief page-0 flash** before the report arrives and `page` jumps. Acceptable for the spike;
+  smoothing it (compute before first paint) is later.
+- **No deep-link on first load** — only fragments arriving via an in-app click are handled, not a
+  fragment present when the book first opens.
+- **The fragment id is interpolated raw into JS.** Gutenberg ids are plain (`chap02`); an id
+  containing a `"` would break the string. Escaping is deferred — note it, don't solve it now.
+- **Does not** revisit external links or change the resolver; it only consumes the `fragment` the
+  resolver already returns.
