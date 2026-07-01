@@ -108,7 +108,7 @@ Testable pure-Rust seams (Steps 4, 6) interleave with webview wiring eyeballed (
     and, after 11b-i observed the absolute rewritten href, switch the resolver to **Option A**
     (strip the route prefix, match `SpineDoc.href`) and navigate by spine index. **11c** ✅ scroll
     to the `#fragment` anchor inside the destination document (deferred from 11b).
-12. ⬜ **Bundle a small DRM-free sample `.epub` for testing** — make the fixture intentional and
+12. ✅ **Bundle a small DRM-free sample `.epub` for testing** — make the fixture intentional and
     documented instead of relying on an ad-hoc local book path.
 13. ⬜ **Review & refactor the finished EPUB rendering phase** — final phase-ending cleanup after
     pagination, links, and sample-book packaging land.
@@ -2026,3 +2026,241 @@ There's very little Rust here; the substance is file moves + a doc + one constan
 - **The path is still hard-coded to one bundled book.** Opening an *arbitrary* user-chosen `.epub`
   (a file picker, a library) is Milestone 2's later features, not this phase — `BOOK` staying a
   `const` is correct for now.
+
+---
+
+## Step 13 — review & refactor the finished EPUB rendering phase
+
+> **Status:** planned — the phase-ending review-and-refactor pass. Baseline before starting:
+> **9 tests green, `cargo clippy --all-targets` clean.**
+
+### The discipline (this is a review, not a feature)
+
+The feature arc is done: the reader opens the book, renders each chapter faithfully as XHTML,
+paginates in columns, and follows internal links to the right page. Steps 4–8 got their own
+scoped review (Step 9); this is the **whole-phase** pass the repo convention ends every phase
+with — make the landed code *idiomatic and well-organized*, not just working.
+
+**The safety net is the spec, not the target.** The 9 tests + clippy are green now; they must be
+green *identically* after each change. A refactor that needs a test to change isn't a refactor —
+it's a feature, and it doesn't belong in this step. New tests are fair game only to lock down
+behavior that's currently implicit (e.g. the `</head>`-insertion helper in item **B**). Run
+`cargo test && cargo clippy --all-targets` before and after every item.
+
+The hard rule still holds: **I propose, you edit.** Exact before/after snippets are fine in a
+review step — but the diff lands in `src/` by your hand.
+
+### The punch-list (highest-leverage first)
+
+#### A. Centralize the `dioxus://index.html/{EPUB_ROUTE}/` prefix — the one real drift risk
+
+The absolute-URL prefix is computed in **two** places that *must* agree, or internal links
+silently resolve to `None`:
+
+- `src/epub.rs:42` — `load_spine` rewrites in-book URLs with
+  `PathRewrite::prefix(format!("dioxus://index.html/{EPUB_ROUTE}/"))`.
+- `src/epub.rs:123` — `resolve_internal_link` strips
+  `format!("dioxus://index.html/{EPUB_ROUTE}/")` back off.
+
+These are the *same contract* (the write side and the read side of the link round-trip) written
+twice. Step 9 already lifted the bare `/epub` route into `EPUB_ROUTE`; this is the remaining
+half — the `dioxus://index.html/` host literal. Because the whole value is known at compile
+time, make it a `&'static str` **const** (not a runtime `format!` — that would allocate a fresh
+`String` in `resolve_internal_link` on every link click), next to `EPUB_ROUTE`:
+
+```rust
+// src/epub.rs, near EPUB_ROUTE
+pub(crate) const EPUB_ROUTE: &str = "epub";
+pub(crate) const EPUB_URL_PREFIX: &str = "dioxus://index.html/epub/"; // must embed EPUB_ROUTE
+```
+
+Then both sites use the const directly: `resolve_internal_link` does
+`path.strip_prefix(EPUB_URL_PREFIX)?` (no allocation now), and `load_spine` hands
+`EPUB_URL_PREFIX` to `PathRewrite::prefix`.
+
+Two plain adjacent consts keep this dead-simple and readable — but they each still spell `epub`,
+so guard them from drifting apart with a **dedicated test**. That's what buys back the
+single-source safety without reaching for a macro, and it's a legitimate new test for a refactor
+step because it locks down a currently-*implicit* invariant (the comment "must embed
+EPUB_ROUTE") rather than changing behavior:
+
+```rust
+#[test]
+fn url_prefix_embeds_the_route() {
+    // The asset handler registers under EPUB_ROUTE; the rewrite/resolve prefix must carry that
+    // same route as a path segment, or in-book links silently resolve to None. This fails the
+    // instant the two literals drift apart.
+    assert!(
+        EPUB_URL_PREFIX.contains(&format!("/{EPUB_ROUTE}/")),
+        "EPUB_URL_PREFIX ({EPUB_URL_PREFIX}) must contain the /{EPUB_ROUTE}/ segment",
+    );
+}
+```
+
+**Why:** the write and read sides drifting apart is the single bug that would break *all* link
+navigation at once while every unit test using a hard-coded URL still passed. The two consts make
+the value obvious and allocation-free; the drift-guard test converts "must embed EPUB_ROUTE" from
+a hopeful comment into an enforced invariant. It also puts the macOS-specific
+`dioxus://index.html/` host (a known platform coupling, per Step 8) in one documented spot
+instead of scattered string literals.
+
+> **Note — two new tests in a refactor step.** This drift-guard and item B's
+> `insert_before_head_close` no-op test both *lock down implicit behavior* rather than assert new
+> behavior, so they're consistent with this step's "safety net is the spec" rule. Everything else
+> here leaves the assertion set untouched.
+
+#### B. Collapse the three `inject_*` helpers' shared `</head>` insertion
+
+`inject_pagination_css`, `inject_link_bridge`, and `inject_fragment_scroll` each end with the
+identical line (`src/epub.rs:85`, `:103`, `:151`):
+
+```rust
+xhtml.replacen("</head>", &format!("{snippet}</head>"), 1)
+```
+
+Three copies of the same "insert this before `</head>`" move — and three copies of the same
+latent fragility (if a document has no `</head>`, or odd casing, the snippet is silently
+dropped). Extract one helper:
+
+```rust
+/// Insert `snippet` immediately before the first `</head>`. If there is none, the
+/// document is returned unchanged — the injected feature just no-ops for that doc.
+fn insert_before_head_close(xhtml: &str, snippet: &str) -> String {
+    xhtml.replacen("</head>", &format!("{snippet}</head>"), 1)
+}
+```
+
+and have each injector build its snippet, then call it. **Why:** the three injectors are the
+data-URL injection seam this whole renderer is built on; naming the shared mechanism once means
+the "what if `</head>` is missing" question has *one* answer to harden later instead of three to
+keep in sync. This is the one place a **new test** is justified — it locks down the currently
+implicit no-op-on-missing-`</head>` behavior:
+
+```rust
+#[test]
+fn insert_before_head_close_is_a_noop_without_a_head() {
+    let out = insert_before_head_close("<html><body>x</body></html>", "<style/>");
+    assert_eq!(out, "<html><body>x</body></html>");
+}
+```
+
+#### C. Lift the iframe-src injection pipeline out of `Reader` into `epub.rs`
+
+`Reader` (`src/main.rs:66–73`) inlines the whole document-preparation pipeline:
+
+```rust
+let current_doc = &docs[current()];
+let paged_doc = epub::inject_pagination_css(&current_doc.xhtml, page());
+let bridged = epub::inject_link_bridge(&paged_doc);
+let prepared = match pending_fragment() {
+    Some(frag) => epub::inject_fragment_scroll(&bridged, &frag),
+    None => bridged,
+};
+let iframe_src = epub::to_xhtml_data_url(&prepared);
+```
+
+That's five lines of **EPUB/render-document logic** (the pagination → bridge → fragment → encode
+*order* is a domain fact) living inside a UI component. Pull it into one named function in
+`epub.rs`:
+
+```rust
+pub(crate) fn render_document_url(
+    doc: &SpineDoc,
+    page: usize,
+    fragment: Option<&str>,
+) -> String {
+    let paged = inject_pagination_css(&doc.xhtml, page);
+    let bridged = inject_link_bridge(&paged);
+    let prepared = match fragment {
+        Some(frag) => inject_fragment_scroll(&bridged, frag),
+        None => bridged,
+    };
+    to_xhtml_data_url(&prepared)
+}
+```
+
+so the component reads `let iframe_src = epub::render_document_url(current_doc, page(), pending_fragment().as_deref());`.
+**Why:** the component should be about *reader state* (which chapter, which page, is a scroll
+pending) — how a document gets turned into a `data:` URL is domain logic, and the injection
+*order* matters (the parser must see pagination + scripts before it's encoded). Naming it once
+makes that order a single reviewable, testable thing, and shrinks `Reader` to the state it
+actually owns. It also makes the ordering assertion unit-testable if you ever want it (all four
+injections present, in order) — though don't add that test unless it earns its keep.
+
+#### D. Drop the dead `resolved` payload from the link bridge
+
+`inject_link_bridge` still posts both fields (`src/epub.rs:96`):
+
+```js
+window.parent.postMessage(
+    { kind: 'ook-link', raw: a.getAttribute('href'), resolved: a.href },
+    '*'
+);
+```
+
+but the Rust side only ever consumes `raw` (`src/main.rs:83`: `dioxus.send("link:" + e.data.raw)`).
+`resolved` was 11b-i's *diagnostic* — it existed to reveal the absolute-URL shape, which it did,
+and 11b-ii's finding is now baked into the resolver. It's dead payload. Delete `resolved:
+a.href,` from the message. **Why:** dead scaffolding tells the next reader "this matters" when it
+doesn't — and here it actively misleads, implying the Rust side chooses between raw and resolved
+when it settled that question three steps ago. (Its removal changes no test — the bridge is
+eyeball-verified.)
+
+#### E. Land Step 9's three deferred polish items — this is the review they were deferred to
+
+Step 9 explicitly parked these "optional polish, no churn risk" items for the phase's *final*
+review. This is it:
+
+1. **`.body(…).unwrap()` → `.expect(…)`** (`src/main.rs:36`, `:40`). `Response::builder().body(…)`
+   only errors on an invalid header/status set earlier — impossible here — so an `.expect`
+   documents *why* it can't fail: `.expect("response with a valid content-type header")` and
+   `.expect("empty 404 body is always valid")`. **Why:** a bare `unwrap()` says "I didn't think
+   about this"; an `expect` says "I did, here's the invariant."
+2. **Crate-level `#![allow(non_snake_case)]` → scoped `#[expect]`** (`src/main.rs:1`). The blanket
+   allow silences the *whole crate* to accommodate two PascalCase Dioxus components (`App`,
+   `Reader`). Narrow it to the two spots that need it:
+   ```rust
+   #[expect(non_snake_case, reason = "Dioxus components are PascalCase by convention")]
+   #[component]
+   fn App() -> Element { … }
+   ```
+   **Why:** `#[expect]` *fails* if the lint stops firing (so a stray future `snake_case` fn isn't
+   silently un-linted), and scoping it means the rest of the crate keeps normal naming
+   enforcement instead of a crate-wide blind spot. *(Confirm `#[expect]` sits cleanly with
+   `#[component]`; if the macro expansion fights it, fall back to a scoped
+   `#[allow(non_snake_case)]` on each `fn` with the same reason in a comment — the point is
+   *scoped*, not crate-wide.)*
+3. **Wire or delete `MAIN_CSS`** — it's now genuinely *used* (`src/main.rs:12`, `:51–54` mount it
+   as a stylesheet `document::Link`), so Step 9's "dead scaffolding" note is already resolved.
+   Just confirm `assets/main.css` isn't empty/stale; nothing to do if it's real.
+
+### Optional — cut any of these to keep the pass light
+
+- **Chapter/page index conventions disagree.** The chrome shows `"Chapter {current()}"` (0-indexed
+  — the cover reads "Chapter 0", `src/main.rs:131`) but `"Page {page() + 1}"` (1-indexed,
+  `:151`). Pick one for the display (1-indexed reads more naturally to a human;
+  `"Chapter {current() + 1}"`). Display-only — no test asserts this text — but confirm under
+  `dx serve`. *Watch:* this is a UI-label tweak, not renderer behavior; if it starts to feel like
+  "what does chapter 1 mean for a cover," that's a real question for a later navigation/TOC step,
+  not this refactor.
+- **The two nav rows are near-identical** "Prev / label / Next" triples (`src/main.rs:120–158`).
+  A tiny `NavRow` component (or a helper returning the `rsx!`) would deduplicate them — but two
+  instances is borderline, and the click handlers differ (chapter resets `page`, page clamps).
+  Extract only if it reads cleaner to you; skip it otherwise.
+- **Inline `style:` strings** scattered through the rsx could move to `assets/main.css` classes —
+  but styling the app chrome is really **Phase 4 (theming)** territory, so leave the inline styles
+  for now rather than half-doing a theming refactor here. Noted, deferred on purpose.
+
+### Commit shape
+
+A single `refactor:` commit is natural since none of this changes behavior (the 9 tests stay
+green throughout). If you'd rather, split the *pure-Rust* moves (A–C, E) from the *JS/bridge*
+cleanup (D) — but one `refactor:` reads fine here. Per repo convention: no co-author /
+AI-attribution trailer. `lbb:commit` handles it and writes the done-status marker back here.
+
+### Why this closes the phase
+
+After Step 13 the render path has: one definition of the URL contract (A), one document-injection
+mechanism (B) and one document-preparation pipeline (C), no diagnostic dead weight (D), and the
+error-handling / lint polish Step 9 deferred (E) — so the code a future you re-reads is
+*idiomatic and organized*, and the phase can be marked ✅ done in the phase doc and the roadmap.

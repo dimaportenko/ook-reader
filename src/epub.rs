@@ -3,6 +3,7 @@ use rbook::epub::rewrite::{EpubRewriteOptions, PathRewrite};
 use rbook::Epub;
 
 pub(crate) const EPUB_ROUTE: &str = "epub";
+pub(crate) const EPUB_URL_PREFIX: &str = "dioxus://index.html/epub/"; // must embed EPUB_ROUTE
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SpineDoc {
@@ -39,9 +40,7 @@ pub(crate) fn to_xhtml_data_url(xhtml: &str) -> String {
 pub(crate) fn load_spine(path: &str) -> Result<Vec<SpineDoc>, Box<dyn std::error::Error>> {
     let epub = Epub::open(path)?;
 
-    let rewrite = EpubRewriteOptions::default().rewrite_paths(PathRewrite::prefix(format!(
-        "dioxus://index.html/{EPUB_ROUTE}/"
-    )));
+    let rewrite = EpubRewriteOptions::default().rewrite_paths(PathRewrite::prefix(EPUB_URL_PREFIX));
 
     epub.reader()
         .map(|entry| {
@@ -82,7 +81,7 @@ pub(crate) fn inject_pagination_css(xhtml: &str, page: usize) -> String {
         </style>"#,
     );
 
-    xhtml.replacen("</head>", &format!("{css}</head>"), 1)
+    insert_before_head_close(xhtml, &css)
 }
 
 pub(crate) fn inject_link_bridge(xhtml: &str) -> String {
@@ -93,14 +92,14 @@ pub(crate) fn inject_link_bridge(xhtml: &str) -> String {
             if (!a) return;
             e.preventDefault();
             window.parent.postMessage(
-                { kind: 'ook-link', raw: a.getAttribute('href'), resolved: a.href },
+                { kind: 'ook-link', raw: a.getAttribute('href') },
                 '*'
             );
         });
     //]]>
     </script>"#;
 
-    xhtml.replacen("</head>", &format!("{script}</head>"), 1)
+    insert_before_head_close(xhtml, script)
 }
 
 pub(crate) fn resolve_internal_link(
@@ -120,8 +119,8 @@ pub(crate) fn resolve_internal_link(
         });
     }
 
-    let prefix = format!("dioxus://index.html/{EPUB_ROUTE}/");
-    let zip_path = path.strip_prefix(&prefix)?;
+    let prefix = EPUB_URL_PREFIX;
+    let zip_path = path.strip_prefix(prefix)?;
 
     let zip_path = percent_encoding::percent_decode_str(zip_path).decode_utf8_lossy();
 
@@ -148,12 +147,40 @@ pub(crate) fn inject_fragment_scroll(xhtml: &str, fragment: &str) -> String {
         </script>"#,
     );
 
-    xhtml.replacen("</head>", &format!("{script}</head>"), 1)
+    insert_before_head_close(xhtml, &script)
+}
+
+pub(crate) fn insert_before_head_close(xhtml: &str, snippet: &str) -> String {
+    xhtml.replacen("</head>", &format!("{snippet}</head>"), 1)
+}
+
+pub(crate) fn render_document_url(doc: &SpineDoc, page: usize, fragment: Option<&str>) -> String {
+    let paged = inject_pagination_css(&doc.xhtml, page);
+    let bridged = inject_link_bridge(&paged);
+    let prepared = match fragment {
+        Some(frag) => inject_fragment_scroll(&bridged, frag),
+        None => bridged,
+    };
+    to_xhtml_data_url(&prepared)
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn url_prefix_embeds_the_route() {
+        assert!(
+            EPUB_URL_PREFIX.contains(&format!("/{EPUB_ROUTE}/")),
+            "EPUB_URL_PREFIX ({EPUB_URL_PREFIX}) must contain the /{EPUB_ROUTE}/ segment",
+        );
+    }
+
+    #[test]
+    fn insert_before_head_close_is_a_noop_without_a_head() {
+        let out = insert_before_head_close("<html><body>x</body></html>", "<style/>");
+        assert_eq!(out, "<html><body>x</body></html>");
+    }
 
     #[test]
     fn sample_epub_fixture_is_bundled() {

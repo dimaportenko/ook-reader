@@ -10,8 +10,11 @@ mod epub;
 
 const FAVICON: Asset = asset!("/assets/favicon.ico");
 const MAIN_CSS: Asset = asset!("/assets/main.css");
-pub(crate) const BOOK: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/book/pg1661-adventures-of-sherlock-holmes.epub");
+
+pub(crate) const BOOK: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/book/pg1661-adventures-of-sherlock-holmes.epub"
+);
 
 fn main() {
     dioxus::launch(App);
@@ -33,11 +36,14 @@ fn App() -> Element {
                 let body = Response::builder()
                     .header("Content-Type", epub::content_type_for(path))
                     .body(bytes)
-                    .unwrap();
+                    .expect("response with a valid content-type header");
                 responder.respond(body);
             }
             Err(_) => {
-                let not_found = Response::builder().status(404).body(Vec::new()).unwrap();
+                let not_found = Response::builder()
+                    .status(404)
+                    .body(Vec::new())
+                    .expect("empty 404 body is always valid");
                 responder.respond(not_found);
             }
         }
@@ -57,6 +63,32 @@ fn App() -> Element {
 }
 
 #[component]
+fn NavRow(
+    label: String,
+    on_next: EventHandler<MouseEvent>,
+    on_prev: EventHandler<MouseEvent>,
+) -> Element {
+    rsx! {
+        div {
+            style: "display: flex; gap: 8px; padding: 8px; justify-content: center;",
+            button {
+                onclick: move |e| on_prev.call(e),
+                "Prev"
+            }
+
+            span {
+                "{label}"
+            }
+
+            button {
+                onclick: move |e| on_next.call(e),
+                "Next"
+            }
+        }
+    }
+}
+
+#[component]
 fn Reader() -> Element {
     let docs = use_hook(|| epub::load_spine(BOOK).expect("bundled epub should load"));
     let mut current = use_signal(|| 0usize);
@@ -64,13 +96,7 @@ fn Reader() -> Element {
     let mut pending_fragment = use_signal(|| None::<String>);
     let len = docs.len();
     let current_doc = &docs[current()];
-    let paged_doc = epub::inject_pagination_css(&current_doc.xhtml, page());
-    let bridged = epub::inject_link_bridge(&paged_doc);
-    let prepared = match pending_fragment() {
-        Some(frag) => epub::inject_fragment_scroll(&bridged, &frag),
-        None => bridged,
-    };
-    let iframe_src = epub::to_xhtml_data_url(&prepared);
+    let iframe_src = epub::render_document_url(current_doc, page(), pending_fragment().as_deref());
 
     use_future(move || {
         let docs = docs.clone();
@@ -117,44 +143,22 @@ fn Reader() -> Element {
                 src: "{iframe_src}",
             }
 
-            div {
-                style: "display: flex; gap: 8px; padding: 8px; justify-content: center;",
-                button {
-                    onclick: move |_| {
-                        page.set(0);
-                        current.set(prev_index(current()));
-                    },
-                    "Prev"
-                }
-
-                span {
-                    "Chapter {current()}"
-                }
-
-                button {
-                    onclick: move |_| {
-                        page.set(0);
-                        current.set(next_index(current(), len));
-                    },
-                    "Next"
-                }
+            NavRow {
+                on_prev: move |_| {
+                    page.set(0);
+                    current.set(prev_index(current()));
+                },
+                on_next: move |_| {
+                    page.set(0);
+                    current.set(next_index(current(), len));
+                },
+                label: "Chapter {current()}",
             }
 
-            div {
-                style: "display: flex; gap: 8px; padding: 8px; justify-content: center;",
-                button {
-                    onclick: move |_| page.set(page().saturating_sub(1)),
-                    "Prev"
-                }
-
-                span {
-                    "Page {page() + 1}"
-                }
-
-                button {
-                    onclick: move |_| page.set(page() + 1),
-                    "Next"
-                }
+            NavRow {
+                on_prev: move |_| page.set(page().saturating_sub(1)),
+                on_next: move |_| page.set(page() + 1),
+                label: "Page {page() + 1}",
             }
         }
     }

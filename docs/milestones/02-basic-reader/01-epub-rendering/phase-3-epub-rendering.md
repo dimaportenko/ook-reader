@@ -49,8 +49,11 @@ XHTML in the webview, with working page turns.
 - [x] Intercept internal hyperlinks → navigation events (next/prev spine item) — done as build-log
       Steps 11a/11b/11c (resolve targets in Rust → iframe↔Dioxus `postMessage` bridge → scroll to the
       `#fragment`); committed `bf70e44` / `4b895f6` / `3b5aee5`
-- [ ] Bundle a small DRM-free sample `.epub` for testing
-- [ ] Review & refactor the finished EPUB rendering phase
+- [x] Bundle a small DRM-free sample `.epub` for testing — done as build-log **Step 12**
+      (rename to `pg1661-…`, `CARGO_MANIFEST_DIR`-anchored `BOOK`, `book/README.md`, existence
+      test); committed `56f2af3`
+- [ ] Review & refactor the finished EPUB rendering phase — build-log **Step 13** (the
+      phase-ending review-and-refactor pass)
 
 ## Known constraints (from research)
 
