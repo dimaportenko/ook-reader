@@ -157,11 +157,30 @@ pub(crate) fn insert_before_head_close(xhtml: &str, snippet: &str) -> String {
 pub(crate) fn render_document_url(doc: &SpineDoc, page: usize, fragment: Option<&str>) -> String {
     let paged = inject_pagination_css(&doc.xhtml, page);
     let bridged = inject_link_bridge(&paged);
+    let probed = inject_page_count_probe(&bridged);
     let prepared = match fragment {
-        Some(frag) => inject_fragment_scroll(&bridged, frag),
-        None => bridged,
+        Some(frag) => inject_fragment_scroll(&probed, frag),
+        None => probed,
     };
     to_xhtml_data_url(&prepared)
+}
+
+pub(crate) fn inject_page_count_probe(xhtml: &str) -> String {
+    let script = r#"<script type="text/javascript">
+    //<![CDATA[
+        const report = function() {
+            var count = Math.max(
+                1,
+                Math.ceil(document.body.scrollWidth / window.innerWidth)
+            );
+            window.parent.postMessage({ kind: 'ook-pages', count: count }, '*');
+        };
+        window.addEventListener('load', report);
+        window.addEventListener('resize', report);
+    //]]>
+    </script>"#;
+
+    insert_before_head_close(xhtml, script)
 }
 
 #[cfg(test)]
@@ -304,5 +323,22 @@ mod test {
         assert!(out.find("ook-scroll").unwrap() < out.find("</head>").unwrap());
         // … and leaves the original document intact.
         assert!(out.contains(r#"<p id="x">Hi</p>"#));
+    }
+
+    #[test]
+    fn injects_page_count_probe_before_head_close() {
+        let xhtml = r#"<html xmlns="http://www.w3.org/1999/xhtml"><head><title>T</title></head><body><p>Hi</p></body></html>"#;
+
+        let out = inject_page_count_probe(xhtml);
+
+        // reports back over the bridge under its own message kind …
+        assert!(out.contains("ook-pages"));
+        // … derives the count from the laid-out width vs the viewport …
+        assert!(out.contains("scrollWidth"));
+        assert!(out.contains("innerWidth"));
+        // … is injected into the head so it parses before the body it measures …
+        assert!(out.find("ook-pages").unwrap() < out.find("</head>").unwrap());
+        // … and leaves the original document intact.
+        assert!(out.contains("<p>Hi</p>"));
     }
 }
