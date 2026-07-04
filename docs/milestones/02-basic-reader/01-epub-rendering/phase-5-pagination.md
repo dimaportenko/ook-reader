@@ -1,6 +1,6 @@
 # Phase 5 — Pagination (page count per chapter)
 
-[← Feature: EPUB Rendering](README.md) · **Status:** 🚧 in progress ·
+[← Feature: EPUB Rendering](README.md) · **Status:** ✅ done ·
 build log: [`phase-5-pagination-steps.md`](phase-5-pagination-steps.md)
 
 ## Goal
@@ -37,8 +37,17 @@ together; see the [build log](phase-5-pagination-steps.md) for the as-built plan
       decider (`on_next`/`on_prev`) that clamps to the count *and* spills across chapter
       edges, with a `#[test]`. (Merges the originally-separate "clamp" and optional
       "roll-over" steps, since they were built together.)
-- [ ] **Step 3 — Review & refactor** the pagination phase (mandatory phase-closing pass) —
-      consolidate the reader's signals into a `Copy` `ReaderState`.
+- [x] **Step 3 — Review & refactor** the pagination phase (mandatory phase-closing pass) —
+      consolidate the reader's signals into a `Copy` `ReaderState`. *(committed in `9787cf1`)*
+- [x] **Step 4 — Model the inbound bridge protocol** as a `BridgeMsg` enum with a pure,
+      unit-tested `parse`, leaving the future's loop as pure dispatch. *(committed in `6c619fd`)*
+- [x] **Step 5 — Relocate** the nav cluster into `src/nav.rs` and land three glue tidies
+      (`BRIDGE_JS` const, `use_bridge` hook, `epub::use_register_asset_handler`). *(committed
+      in `a1f3aaf` + `6e2861f`)*
+
+> **Phase closed.** All steps done, 14 tests green. Steps 4–5 were added to the plan during
+> the build (as follow-on refactors after the Step-3 review) and are recorded in full in the
+> [build log](phase-5-pagination-steps.md); this checklist was reconciled to match.
 
 ## Known constraints
 

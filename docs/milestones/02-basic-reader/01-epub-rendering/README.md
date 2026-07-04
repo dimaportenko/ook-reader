@@ -5,14 +5,14 @@
 **Goal:** parse an EPUB with `rbook` and display a chapter's content in the webview,
 with paging — the core rendering loop everything else builds on.
 
-**Status:** ⬜ planned
+**Status:** ✅ done
 
 ## Phases
 
 | Phase | Outcome | Status |
 |---|---|---|
 | [Phase 3 — EPUB Rendering](phase-3-epub-rendering.md) | Open an `.epub` → render a spine item → turn pages | ✅ |
-| [Phase 5 — Pagination](phase-5-pagination.md) | Page count per chapter → `Page X / N` → clamp Page-Next | 🚧 |
+| [Phase 5 — Pagination](phase-5-pagination.md) | Page count per chapter → `Page X / N` → clamp Page-Next | ✅ |
 
 ## Reference
 
