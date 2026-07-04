@@ -30,7 +30,7 @@ a JS-reported number. Page-count is that same move with a new message kind.
 3. **Review & refactor** the pagination phase — consolidate the reader's five signals into a
    single `Copy` `ReaderState` that owns every state transition (`page_next`, `chapter_prev`,
    `follow_link`, `on_pages`, …), retiring the three-signal threading left by Step 2's
-   `Nav::apply`. *(planned — Step 3)*
+   `Nav::apply`. *(done — Step 3)*
 
 ---
 
@@ -566,6 +566,8 @@ none of the `(self.page)()` field-call ambiguity a raw `Signal` field forces.
   delivered it; the store is the move when you want *one home* for all reader state — it pays
   off right as the next piece arrives (a bookmark, a scroll-restore target).
 
+> **Status:** done — committed in `9787cf1` (13 tests green; deciders unchanged).
+
 ---
 
 ## Step 4 — model the bridge protocol as a `BridgeMsg` enum with a pure parser
@@ -661,6 +663,9 @@ Step 5's `const`.
   string is untouched here — see Step 5.
 - **`resolve_internal_link` stays in the loop**, not the parser — it needs `docs`, and keeping
   the parser signal-free and arg-free is the whole point of the split.
+
+> **Status:** done — committed in `6c619fd` (14 tests green, incl. the new
+> `bridge_parses_each_message_kind`).
 
 ---
 
