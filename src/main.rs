@@ -2,7 +2,6 @@
 
 use std::rc::Rc;
 
-use dioxus::desktop::{use_asset_handler, wry::http::Response};
 use dioxus::prelude::*;
 use rbook::Epub;
 
@@ -13,6 +12,20 @@ use nav::*;
 
 const FAVICON: Asset = asset!("/assets/favicon.ico");
 const MAIN_CSS: Asset = asset!("/assets/main.css");
+const BRIDGE_JS: &str = r#"
+            window.addEventListener('message', (e) => {
+                if (!e.data) return;
+                if (e.data.kind === 'ook-link') {
+                    dioxus.send("link:" + e.data.raw);
+                }
+                if (e.data.kind === 'ook-scroll') {
+                    dioxus.send("scroll:" + e.data.page);
+                }
+                if (e.data.kind === 'ook-pages') {
+                    dioxus.send("pages:" + e.data.count);
+                }
+            });
+            "#;
 
 pub(crate) const BOOK: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -48,30 +61,7 @@ fn main() {
 fn App() -> Element {
     let epub = use_hook(|| Rc::new(Epub::open(BOOK).expect("should open the bundled epub")));
 
-    use_asset_handler(epub::EPUB_ROUTE, move |request, responder| {
-        let path = request
-            .uri()
-            .path()
-            .strip_prefix(&format!("/{}", epub::EPUB_ROUTE))
-            .unwrap_or_default();
-
-        match epub.read_resource_bytes(path) {
-            Ok(bytes) => {
-                let body = Response::builder()
-                    .header("Content-Type", epub::content_type_for(path))
-                    .body(bytes)
-                    .expect("response with a valid content-type header");
-                responder.respond(body);
-            }
-            Err(_) => {
-                let not_found = Response::builder()
-                    .status(404)
-                    .body(Vec::new())
-                    .expect("empty 404 body is always valid");
-                responder.respond(not_found);
-            }
-        }
-    });
+    epub::use_register_asset_handler(epub);
 
     rsx! {
         document::Link {
@@ -125,41 +115,7 @@ fn Reader() -> Element {
     let page_label = format!("Page {} of {}", page() + 1, page_count());
     let chapter_label = format!("Chapter {} of {}", chapter() + 1, state.chapter_count);
 
-    use_future(move || {
-        let docs = docs.clone();
-        async move {
-            let mut bridge = document::eval(
-                r#"
-            window.addEventListener('message', (e) => {
-                if (!e.data) return;
-                if (e.data.kind === 'ook-link') {
-                    dioxus.send("link:" + e.data.raw);
-                }
-                if (e.data.kind === 'ook-scroll') {
-                    dioxus.send("scroll:" + e.data.page);
-                }
-                if (e.data.kind === 'ook-pages') {
-                    dioxus.send("pages:" + e.data.count);
-                }
-            });
-            "#,
-            );
-
-            while let Ok(msg) = bridge.recv::<String>().await {
-                match BridgeMsg::parse(&msg) {
-                    Some(BridgeMsg::Link(href)) => {
-                        let idx = *state.data.chapter().peek();
-                        if let Some(target) = epub::resolve_internal_link(&docs, idx, &href) {
-                            state.follow_link(target);
-                        }
-                    }
-                    Some(BridgeMsg::Scroll(page)) => state.on_scroll(page),
-                    Some(BridgeMsg::Pages(p_count)) => state.on_pages(p_count),
-                    None => {}
-                }
-            }
-        }
-    });
+    use_bridge(state, docs);
 
     rsx! {
         div {
@@ -184,6 +140,29 @@ fn Reader() -> Element {
             }
         }
     }
+}
+
+fn use_bridge(state: ReaderState, docs: Vec<epub::SpineDoc>) {
+    use_future(move || {
+        let docs = docs.clone();
+        async move {
+            let mut bridge = document::eval(BRIDGE_JS);
+
+            while let Ok(msg) = bridge.recv::<String>().await {
+                match BridgeMsg::parse(&msg) {
+                    Some(BridgeMsg::Link(href)) => {
+                        let idx = *state.data.chapter().peek();
+                        if let Some(target) = epub::resolve_internal_link(&docs, idx, &href) {
+                            state.follow_link(target);
+                        }
+                    }
+                    Some(BridgeMsg::Scroll(page)) => state.on_scroll(page),
+                    Some(BridgeMsg::Pages(p_count)) => state.on_pages(p_count),
+                    None => {}
+                }
+            }
+        }
+    });
 }
 
 #[cfg(test)]

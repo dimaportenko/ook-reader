@@ -1,4 +1,7 @@
+use std::rc::Rc;
+
 use base64::{engine::general_purpose::STANDARD, Engine};
+use dioxus::desktop::{use_asset_handler, wry::http::Response};
 use rbook::epub::rewrite::{EpubRewriteOptions, PathRewrite};
 use rbook::Epub;
 
@@ -181,6 +184,33 @@ pub(crate) fn inject_page_count_probe(xhtml: &str) -> String {
     </script>"#;
 
     insert_before_head_close(xhtml, script)
+}
+
+pub(crate) fn use_register_asset_handler(epub: Rc<Epub>) {
+    use_asset_handler(EPUB_ROUTE, move |request, responder| {
+        let path = request
+            .uri()
+            .path()
+            .strip_prefix(&format!("/{}", EPUB_ROUTE))
+            .unwrap_or_default();
+
+        match epub.read_resource_bytes(path) {
+            Ok(bytes) => {
+                let body = Response::builder()
+                    .header("Content-Type", content_type_for(path))
+                    .body(bytes)
+                    .expect("response with a valid content-type header");
+                responder.respond(body);
+            }
+            Err(_) => {
+                let not_found = Response::builder()
+                    .status(404)
+                    .body(Vec::new())
+                    .expect("empty 404 body is always valid");
+                responder.respond(not_found);
+            }
+        }
+    })
 }
 
 #[cfg(test)]
