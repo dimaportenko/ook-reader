@@ -1,5 +1,19 @@
 [application]
 
+# Packaging config for `dx bundle` (installable .app/.dmg/.exe/...).
+# `icon` is a list of source images; the bundler picks the right one per
+# platform: .icns for macOS, .ico for Windows, the PNGs for Linux.
+[bundle]
+identifier = "com.dimaportenko.ook-reader"
+publisher = "Dima Portenko"
+icon = [
+    "assets/icons/32x32.png",
+    "assets/icons/128x128.png",
+    "assets/icons/128x128@2x.png",
+    "assets/icons/icon.icns",
+    "assets/icons/icon.ico",
+]
+
 [web.app]
 
 # HTML title tag content
