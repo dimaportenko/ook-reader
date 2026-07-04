@@ -29,14 +29,46 @@ enum Nav {
     Chapter { index: usize, seek: Seek },
 }
 
-impl Nav {
-    fn apply(
-        self,
-        mut page: Signal<usize>,
-        mut chapter: Signal<usize>,
-        mut pending_last: Signal<bool>,
-    ) {
-        match self {
+#[derive(Store, Default)]
+struct ReaderData {
+    chapter: usize,
+    page: usize,
+    page_count: usize,
+    pending_fragment: Option<String>,
+    pending_last: bool,
+}
+
+#[derive(Clone, Copy)]
+struct ReaderState {
+    data: Store<ReaderData>,
+    chapter_count: usize,
+}
+
+fn use_reader_state(chapter_count: usize) -> ReaderState {
+    ReaderState {
+        data: use_store(ReaderData::default),
+        chapter_count,
+    }
+}
+
+impl ReaderState {
+    fn page_prev(self) {
+        let (page, chapter) = (self.data.page(), self.data.chapter());
+        self.apply(on_prev(page(), chapter()));
+    }
+
+    fn page_next(self) {
+        let (page, page_count, chapter) = (
+            self.data.page(),
+            self.data.page_count(),
+            self.data.chapter(),
+        );
+        self.apply(on_next(page(), page_count(), chapter(), self.chapter_count));
+    }
+
+    fn apply(self, nav: Nav) {
+        let (mut page, mut chapter) = (self.data.page(), self.data.chapter());
+        match nav {
             Nav::Stay => {}
             Nav::Page(p) => page.set(p),
             Nav::Chapter {
@@ -51,8 +83,40 @@ impl Nav {
                 seek: Seek::Last,
             } => {
                 chapter.set(index);
-                pending_last.set(true);
+                self.data.pending_last().set(true);
             }
+        }
+    }
+
+    fn chapter_prev(self) {
+        let mut chapter = self.data.chapter();
+        self.data.page().set(0);
+        chapter.set(prev_index(chapter()));
+    }
+
+    fn chapter_next(self) {
+        let mut chapter = self.data.chapter();
+        self.data.page().set(0);
+        chapter.set(next_index(chapter(), self.chapter_count));
+    }
+
+    fn follow_link(self, target: epub::LinkTarget) {
+        self.data.chapter().set(target.spine_index);
+        self.data.page().set(0);
+        self.data.pending_fragment().set(target.fragment);
+    }
+
+    fn on_scroll(self, p: usize) {
+        self.data.page().set(p);
+        self.data.pending_fragment().set(None);
+    }
+
+    fn on_pages(self, pages: usize) {
+        let (mut page, mut pending_last) = (self.data.page(), self.data.pending_last());
+        self.data.page_count().set(pages);
+        if pending_last() {
+            page.set(pages.saturating_sub(1));
+            pending_last.set(false);
         }
     }
 }
@@ -158,14 +222,15 @@ fn NavRow(
 #[component]
 fn Reader() -> Element {
     let docs = use_hook(|| epub::load_spine(BOOK).expect("bundled epub should load"));
-    let mut chapter = use_signal(|| 0usize);
-    let mut page = use_signal(|| 0usize);
-    let mut page_count = use_signal(|| 0usize);
-    let mut pending_fragment = use_signal(|| None::<String>);
-    let mut pending_last = use_signal(|| false);
-    let chapter_count = docs.len();
+    let state = use_reader_state(docs.len());
+    let chapter = state.data.chapter();
+    let pending_fragment = state.data.pending_fragment();
+    let (page, page_count) = (state.data.page(), state.data.page_count());
     let current_doc = &docs[chapter()];
     let iframe_src = epub::render_document_url(current_doc, page(), pending_fragment().as_deref());
+
+    let page_label = format!("Page {} of {}", page() + 1, page_count());
+    let chapter_label = format!("Chapter {} of {}", chapter() + 1, state.chapter_count);
 
     use_future(move || {
         let docs = docs.clone();
@@ -191,22 +256,15 @@ fn Reader() -> Element {
                 if let Some(href) = msg.strip_prefix("link:") {
                     let idx = *chapter.peek();
                     if let Some(target) = epub::resolve_internal_link(&docs, idx, href) {
-                        chapter.set(target.spine_index);
-                        page.set(0);
-                        pending_fragment.set(target.fragment);
+                        state.follow_link(target);
                     }
                 } else if let Some(p) = msg.strip_prefix("scroll:") {
                     if let Ok(p) = p.parse::<usize>() {
-                        page.set(p);
-                        pending_fragment.set(None);
+                        state.on_scroll(p);
                     }
                 } else if let Some(pages) = msg.strip_prefix("pages:") {
                     if let Ok(pages) = pages.parse::<usize>() {
-                        page_count.set(pages);
-                        if pending_last() {
-                            page.set(pages.saturating_sub(1));
-                            pending_last.set(false);
-                        }
+                        state.on_pages(pages);
                     }
                 }
             }
@@ -224,24 +282,15 @@ fn Reader() -> Element {
             }
 
             NavRow {
-                on_prev: move |_| {
-                    page.set(0);
-                    chapter.set(prev_index(chapter()));
-                },
-                on_next: move |_| {
-                    page.set(0);
-                    chapter.set(next_index(chapter(), chapter_count));
-                },
-                label: "Chapter {chapter() + 1} of {chapter_count}",
+                on_prev: move |_| state.chapter_prev(),
+                on_next: move |_| state.chapter_next(),
+                label: chapter_label,
             }
 
             NavRow {
-                on_prev: move |_| on_prev(page(), chapter()).apply(page, chapter, pending_last),
-                on_next: move |_| {
-                    on_next(page(), page_count(), chapter(), chapter_count)
-                        .apply(page, chapter, pending_last)
-                },
-                label: "Page {page() + 1} of {page_count}",
+                on_prev: move |_| state.page_prev(),
+                on_next: move |_| state.page_next(),
+                label: page_label,
             }
         }
     }
