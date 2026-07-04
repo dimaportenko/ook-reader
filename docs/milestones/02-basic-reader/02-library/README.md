@@ -4,15 +4,17 @@
 
 **Goal:** let the user add `.epub` files and see their books in a list.
 
-**Status:** ⬜ planned
+**Status:** 🚧 in progress
 
-## Phases / steps
+## Phases
 
-| Step | Focus | Status |
+| Phase | Outcome | Status |
 |---|---|---|
-| Import | Native file dialog (`rfd`) to add `.epub` files into app storage | ⬜ |
-| Library list | Dioxus list of imported books with title + cover (`rbook` metadata/cover) | ⬜ |
-| Open | Click a book → route to the reader (Phase 3 renderer) | ⬜ |
+| [Phase 6 — Library & Import](phase-6-library.md) | Add `.epub` files → list them (title/author/cover) → open one in the reader | 🚧 |
+
+Planned as one phase (build log: [`phase-6-library-steps.md`](phase-6-library-steps.md)),
+built data-first in six steps: metadata extraction → `rusqlite` store → `rfd` import →
+list view → open (drop the `const BOOK`) → review & refactor.
 
 ## Notes
 
