@@ -121,6 +121,27 @@ impl ReaderState {
     }
 }
 
+#[derive(Debug, PartialEq)]
+enum BridgeMsg {
+    Link(String),
+    Scroll(usize),
+    Pages(usize),
+}
+
+impl BridgeMsg {
+    fn parse(msg: &str) -> Option<BridgeMsg> {
+        if let Some(href) = msg.strip_prefix("link:") {
+            Some(BridgeMsg::Link(href.to_string()))
+        } else if let Some(page) = msg.strip_prefix("scroll:") {
+            page.parse().ok().map(BridgeMsg::Scroll)
+        } else if let Some(page_count) = msg.strip_prefix("pages:") {
+            page_count.parse().ok().map(BridgeMsg::Pages)
+        } else {
+            None
+        }
+    }
+}
+
 fn on_next(page: usize, page_count: usize, chapter: usize, chapter_count: usize) -> Nav {
     if page_count > 0 && page + 1 < page_count {
         Nav::Page(page + 1)
@@ -253,19 +274,16 @@ fn Reader() -> Element {
             );
 
             while let Ok(msg) = bridge.recv::<String>().await {
-                if let Some(href) = msg.strip_prefix("link:") {
-                    let idx = *chapter.peek();
-                    if let Some(target) = epub::resolve_internal_link(&docs, idx, href) {
-                        state.follow_link(target);
+                match BridgeMsg::parse(&msg) {
+                    Some(BridgeMsg::Link(href)) => {
+                        let idx = *state.data.chapter().peek();
+                        if let Some(target) = epub::resolve_internal_link(&docs, idx, &href) {
+                            state.follow_link(target);
+                        }
                     }
-                } else if let Some(p) = msg.strip_prefix("scroll:") {
-                    if let Ok(p) = p.parse::<usize>() {
-                        state.on_scroll(p);
-                    }
-                } else if let Some(pages) = msg.strip_prefix("pages:") {
-                    if let Ok(pages) = pages.parse::<usize>() {
-                        state.on_pages(pages);
-                    }
+                    Some(BridgeMsg::Scroll(page)) => state.on_scroll(page),
+                    Some(BridgeMsg::Pages(p_count)) => state.on_pages(p_count),
+                    None => {}
                 }
             }
         }
@@ -351,5 +369,18 @@ mod test {
                 seek: Seek::First
             }
         );
+    }
+
+    #[test]
+    fn bridge_parses_each_message_kind() {
+        assert_eq!(BridgeMsg::parse("scroll:3"), Some(BridgeMsg::Scroll(3)));
+        assert_eq!(BridgeMsg::parse("pages:12"), Some(BridgeMsg::Pages(12)));
+        assert_eq!(
+            BridgeMsg::parse("link:chapter2.xhtml#s3"),
+            Some(BridgeMsg::Link("chapter2.xhtml#s3".to_string()))
+        );
+        // unknown prefixes and malformed numbers decode to None, never panic
+        assert_eq!(BridgeMsg::parse("scroll:notanumber"), None);
+        assert_eq!(BridgeMsg::parse("bogus:1"), None);
     }
 }
