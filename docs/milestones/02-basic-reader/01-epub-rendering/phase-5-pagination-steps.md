@@ -716,6 +716,9 @@ near-identical commits.
 - **Stop early if `main.rs` still reads fine.** This is a "the file got crowded" step; if it
   hasn't, defer it. Relocation with no behavior change is the easiest work to postpone.
 
-> **Status:** in progress — move 1 of 4 (nav cluster → `src/nav.rs`) committed in
-> `a1f3aaf` (14 tests green, no test edits; deciders now run as `nav::test::*`). Moves 2–4
-> (`BRIDGE_JS` const, `use_bridge` hook, asset handler → `epub`) still pending.
+> **Status:** done — move 1 (nav cluster → `src/nav.rs`) committed in `a1f3aaf`; moves 2–4
+> (`BRIDGE_JS` const, `use_bridge` hook, `epub::use_register_asset_handler`) committed in
+> `6e2861f`. 14 tests green throughout, no test edits — pure relocation. `main.rs` is now
+> `main`/`App`/`NavRow`/`Reader` + the `BridgeMsg` protocol, with nav in `nav`, EPUB serving
+> in `epub`, and the JS blob named. `use_register_asset_handler` and `use_bridge` carry the
+> `use_` prefix since each calls a hook.
