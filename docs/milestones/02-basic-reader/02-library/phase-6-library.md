@@ -41,7 +41,10 @@ and the list are thin glue over a core that's already tested.
   same file idempotent. (A content hash or the EPUB's `dc:identifier` would dedupe copies at
   different paths — deferred; the path is the pragmatic key.)
 - **`rusqlite`, per [`RESEARCH.md`](../../../../RESEARCH.md) §4** — already the recorded
-  choice; bundled feature so there's no system SQLite dependency.
+  choice; bundled feature so there's no system SQLite dependency. Full reasoning vs the
+  alternatives (redb, a JSON file), the libSQL/Turso sync path, and why the WASM/tokio
+  constraint doesn't affect this step:
+  [ADR-0004](../../../adr/0004-local-store-rusqlite-with-libsql-sync-path.md).
 
 ## Planned steps
 
