@@ -213,6 +213,26 @@ pub(crate) fn use_register_asset_handler(epub: Rc<Epub>) {
     })
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct BookMeta {
+    pub(crate) title: String,
+    pub(crate) author: Option<String>,
+}
+
+pub(crate) fn read_metadata(path: &str) -> Result<BookMeta, Box<dyn std::error::Error>> {
+    let epub = Epub::open(path)?;
+    let metadata = epub.metadata();
+
+    let title = metadata
+        .title()
+        .map(|t| t.value().to_string())
+        .unwrap_or_else(|| "Untitled".to_string());
+
+    let author = metadata.creators().next().map(|c| c.value().to_string());
+
+    Ok(BookMeta { title, author })
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -370,5 +390,22 @@ mod test {
         assert!(out.find("ook-pages").unwrap() < out.find("</head>").unwrap());
         // … and leaves the original document intact.
         assert!(out.contains("<p>Hi</p>"));
+    }
+
+    #[test]
+    fn reads_title_and_author_from_metadata() {
+        let meta = read_metadata(crate::BOOK).expect("bundled epub metadata should read");
+
+        assert!(
+            meta.title.contains("Sherlock Holmes"),
+            "expected the book's title, got {:#?}",
+            meta.title,
+        );
+
+        assert!(
+            meta.author.as_deref().unwrap_or("").contains("Doyle"),
+            "expected Conan Doyle as the author, got {:#?}",
+            meta.author,
+        );
     }
 }
