@@ -19,7 +19,7 @@ list. **Data first, UI last**, exactly like the EPUB layer.
 ## Step plan
 
 1. **Extract a book's metadata** — pure `epub::read_metadata(path) -> BookMeta { title,
-   author }` via `rbook`; `#[test]` against the bundled book. *(pending)*
+   author }` via `rbook`; `#[test]` against the bundled book. *(done)*
 2. **A persistent library store** — `rusqlite` `Library` with `add`/`list` and a `Book` row
    type; round-trip `#[test]` against a temp/in-memory DB. *(pending)*
 3. **Import via a native dialog** — `rfd` picker → path → `read_metadata` → `library.add`;
@@ -120,5 +120,6 @@ bring into scope.
   title/author) decoupled from rendering (which needs the spine). Fold them only if it ever
   shows up as slow.
 
-> **Status:** pending.
+> **Status:** done — committed in `623a997` (15 tests green). Landed in `src/epub.rs`
+> (not a separate file), keeping every `rbook` read in one module as the crux describes.
 </content>
