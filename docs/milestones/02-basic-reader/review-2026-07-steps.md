@@ -1,6 +1,6 @@
 # Codebase review (July 2026) — refactor backlog & build log
 
-[← Milestone 2](README.md) · **Status:** 🚧 in progress (R1, R2 done) ·
+[← Milestone 2](README.md) · **Status:** 🚧 in progress (R1, R2, R4 done) ·
 relates to: [Phase 6 — Library & Import](02-library/phase-6-library.md)
 
 Findings from a full-codebase review (all 15 tests green, clippy clean at the time).
@@ -32,7 +32,7 @@ holes (R6). Most of these are cheapest to fix **before** Phase 6 builds on top o
       un-hardcodes `BOOK`)*
 - [ ] **R3 — A real error type (`thiserror`).** Replace `Box<dyn Error>` + `expect` on the
       open path. *(pairs naturally with Phase 6 Step 6's "tidy error handling")*
-- [ ] **R4 — Route chapter buttons through the `Nav` state machine.** One `apply` path for
+- [x] **R4 — Route chapter buttons through the `Nav` state machine.** One `apply` path for
       all navigation; fixes a real quirk on the last chapter.
 - [ ] **R5 — Turn pages without reloading the iframe.** postMessage the new page into the
       injected listener instead of regenerating `iframe.src`. *(biggest step; defer until
@@ -262,7 +262,9 @@ sites — and changeable in one line if you ever decide otherwise.
 a surprise page reset) — everything else is identical, which the untouched existing tests
 confirm.
 
-> **Status:** pending.
+> **Status:** done — committed in `d4ef259` (15 tests green). The `on_chapter_next` guard
+> is written `index + 1 < length` (not `length - 1 > index`) so an empty spine can't
+> underflow — hardening for the user-supplied files Phase 6 introduces.
 
 ---
 
