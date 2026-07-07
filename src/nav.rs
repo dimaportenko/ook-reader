@@ -75,15 +75,13 @@ impl ReaderState {
     }
 
     pub(crate) fn chapter_prev(self) {
-        let mut chapter = self.data.chapter();
-        self.data.page().set(0);
-        chapter.set(prev_index(chapter()));
+        let chapter = self.data.chapter();
+        self.apply(on_chapter_prev(chapter()));
     }
 
     pub(crate) fn chapter_next(self) {
-        let mut chapter = self.data.chapter();
-        self.data.page().set(0);
-        chapter.set(next_index(chapter(), self.chapter_count));
+        let chapter = self.data.chapter();
+        self.apply(on_chapter_next(chapter(), self.chapter_count));
     }
 
     pub(crate) fn follow_link(self, target: epub::LinkTarget) {
@@ -133,30 +131,31 @@ fn on_prev(page: usize, chapter: usize) -> Nav {
     }
 }
 
-fn prev_index(chapter: usize) -> usize {
-    chapter.saturating_sub(1)
+fn on_chapter_next(index: usize, length: usize) -> Nav {
+    if index + 1 < length {
+        Nav::Chapter {
+            index: index + 1,
+            seek: Seek::First,
+        }
+    } else {
+        Nav::Stay
+    }
 }
 
-fn next_index(chapter: usize, len: usize) -> usize {
-    (chapter + 1).min(len.saturating_sub(1))
+fn on_chapter_prev(index: usize) -> Nav {
+    if index > 0 {
+        Nav::Chapter {
+            index: index - 1,
+            seek: Seek::First,
+        }
+    } else {
+        Nav::Stay
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-
-    #[test]
-    fn paging_clamps_at_both_ends() {
-        let len = 15;
-
-        assert_eq!(next_index(0, len), 1);
-
-        assert_eq!(next_index(len - 1, len), len - 1);
-
-        assert_eq!(prev_index(5), 4);
-
-        assert_eq!(prev_index(0), 0);
-    }
 
     #[test]
     fn page_nav_rolls_over_chapter_boundaries() {
@@ -185,6 +184,41 @@ mod test {
             on_next(0, 0, 0, 15),
             Nav::Chapter {
                 index: 1,
+                seek: Seek::First
+            }
+        );
+    }
+
+    #[test]
+    fn chapter_nav_steps_and_clamps() {
+        assert_eq!(
+            on_chapter_next(0, 15),
+            Nav::Chapter {
+                index: 1,
+                seek: Seek::First
+            }
+        );
+        assert_eq!(
+            on_chapter_prev(5),
+            Nav::Chapter {
+                index: 4,
+                seek: Seek::First
+            }
+        );
+        // At the edges nothing happens — including no page reset on the last chapter.
+        assert_eq!(on_chapter_next(14, 15), Nav::Stay);
+        assert_eq!(
+            on_chapter_next(13, 15),
+            Nav::Chapter {
+                index: 14,
+                seek: Seek::First
+            }
+        );
+        assert_eq!(on_chapter_prev(0), Nav::Stay);
+        assert_eq!(
+            on_chapter_prev(1),
+            Nav::Chapter {
+                index: 0,
                 seek: Seek::First
             }
         );
