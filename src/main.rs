@@ -60,6 +60,7 @@ fn main() {
 #[component]
 fn App() -> Element {
     let epub = use_hook(|| Rc::new(Epub::open(BOOK).expect("should open the bundled epub")));
+    use_context_provider(|| epub.clone());
 
     epub::use_register_asset_handler(epub);
 
@@ -104,7 +105,8 @@ fn NavRow(
 
 #[component]
 fn Reader() -> Element {
-    let docs = use_hook(|| epub::load_spine(BOOK).expect("bundled epub should load"));
+    let epub = use_context::<Rc<Epub>>();
+    let docs = use_hook(|| Rc::new(epub::load_spine(&epub).expect("bundled epub should load")));
     let state = nav::use_reader_state(docs.len());
     let chapter = state.data.chapter();
     let pending_fragment = state.data.pending_fragment();
@@ -142,7 +144,7 @@ fn Reader() -> Element {
     }
 }
 
-fn use_bridge(state: ReaderState, docs: Vec<epub::SpineDoc>) {
+fn use_bridge(state: ReaderState, docs: Rc<Vec<epub::SpineDoc>>) {
     use_future(move || {
         let docs = docs.clone();
         async move {

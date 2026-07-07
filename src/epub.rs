@@ -40,9 +40,7 @@ pub(crate) fn to_xhtml_data_url(xhtml: &str) -> String {
     )
 }
 
-pub(crate) fn load_spine(path: &str) -> Result<Vec<SpineDoc>, Box<dyn std::error::Error>> {
-    let epub = Epub::open(path)?;
-
+pub(crate) fn load_spine(epub: &Epub) -> Result<Vec<SpineDoc>, Box<dyn std::error::Error>> {
     let rewrite = EpubRewriteOptions::default().rewrite_paths(PathRewrite::prefix(EPUB_URL_PREFIX));
 
     epub.reader()
@@ -219,8 +217,7 @@ pub(crate) struct BookMeta {
     pub(crate) author: Option<String>,
 }
 
-pub(crate) fn read_metadata(path: &str) -> Result<BookMeta, Box<dyn std::error::Error>> {
-    let epub = Epub::open(path)?;
+pub(crate) fn read_metadata(epub: &Epub) -> Result<BookMeta, Box<dyn std::error::Error>> {
     let metadata = epub.metadata();
 
     let title = metadata
@@ -266,7 +263,8 @@ mod test {
 
     #[test]
     fn loads_spine_in_reading_order() {
-        let docs = load_spine(crate::BOOK).expect("should open the bundled epub");
+        let epub = Rc::new(Epub::open(crate::BOOK).expect("open fixture book"));
+        let docs = load_spine(&epub).expect("should open the bundled epub");
         assert_eq!(docs.len(), 15);
 
         assert!(
@@ -336,7 +334,8 @@ mod test {
 
     #[test]
     fn ignores_external_links() {
-        let docs = load_spine(crate::BOOK).expect("should open the bundled epub");
+        let epub = Rc::new(Epub::open(crate::BOOK).expect("open fixture book"));
+        let docs = load_spine(&epub).expect("should open the bundled epub");
 
         assert_eq!(
             resolve_internal_link(&docs, 1, "https://www.gutenberg.org"),
@@ -346,7 +345,8 @@ mod test {
 
     #[test]
     fn resolves_contents_link_to_doc_and_fragment() {
-        let docs = load_spine(crate::BOOK).expect("should open the bundled epub");
+        let epub = Rc::new(Epub::open(crate::BOOK).expect("open fixture book"));
+        let docs = load_spine(&epub).expect("should open the bundled epub");
 
         let target = resolve_internal_link(
             &docs,
@@ -394,7 +394,8 @@ mod test {
 
     #[test]
     fn reads_title_and_author_from_metadata() {
-        let meta = read_metadata(crate::BOOK).expect("bundled epub metadata should read");
+        let epub = Rc::new(Epub::open(crate::BOOK).expect("open fixture book"));
+        let meta = read_metadata(&epub).expect("bundled epub metadata should read");
 
         assert!(
             meta.title.contains("Sherlock Holmes"),
