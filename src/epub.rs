@@ -60,12 +60,11 @@ pub(crate) fn load_spine(epub: &Epub) -> Result<Vec<SpineDoc>, Box<dyn std::erro
         .collect()
 }
 
-pub(crate) fn inject_pagination_css(xhtml: &str, page: usize) -> String {
-    let css = format!(
-        r#"<style type="text/css">
-        :root {{ --ook-page: {page}; }}
-        html {{ width: 100vw; height: 100vh; overflow: hidden; }}
-        body {{
+pub(crate) fn inject_pagination_css(xhtml: &str) -> String {
+    let css = r#"<style type="text/css">
+        :root { --ook-page: 0; }
+        html { width: 100vw; height: 100vh; overflow: hidden; }
+        body {
             width: 100vw !important;
             height: 100vh !important;
             margin: 0 !important;
@@ -78,11 +77,10 @@ pub(crate) fn inject_pagination_css(xhtml: &str, page: usize) -> String {
             column-gap: 48px !important;
             column-fill: auto;
             transform: translateX(calc(var(--ook-page) * -100vw));
-        }}
-        </style>"#,
-    );
+        }
+        </style>"#;
 
-    insert_before_head_close(xhtml, &css)
+    insert_before_head_close(xhtml, css)
 }
 
 pub(crate) fn inject_link_bridge(xhtml: &str) -> String {
@@ -155,15 +153,32 @@ pub(crate) fn insert_before_head_close(xhtml: &str, snippet: &str) -> String {
     xhtml.replacen("</head>", &format!("{snippet}</head>"), 1)
 }
 
-pub(crate) fn render_document_url(doc: &SpineDoc, page: usize, fragment: Option<&str>) -> String {
-    let paged = inject_pagination_css(&doc.xhtml, page);
-    let bridged = inject_link_bridge(&paged);
+pub(crate) fn render_document_url(doc: &SpineDoc, fragment: Option<&str>) -> String {
+    let paged = inject_pagination_css(&doc.xhtml);
+    let page_listener = injects_page_listener(&paged);
+    let bridged = inject_link_bridge(&page_listener);
     let probed = inject_page_count_probe(&bridged);
     let prepared = match fragment {
         Some(frag) => inject_fragment_scroll(&probed, frag),
         None => probed,
     };
     to_xhtml_data_url(&prepared)
+}
+
+pub(crate) fn injects_page_listener(xhtml: &str) -> String {
+    let script = r#"<script type="text/javascript">
+    //<![CDATA[
+        window.addEventListener('message', function(e) {
+            if (!e.data || e.data.kind !== 'ook-set-page') {
+                return;
+            }
+            document.documentElement.style.setProperty('--ook-page', e.data.page);
+
+        });
+    //]]>
+    </script>"#;
+
+    insert_before_head_close(xhtml, script)
 }
 
 pub(crate) fn inject_page_count_probe(xhtml: &str) -> String {
@@ -324,11 +339,11 @@ mod test {
     fn injects_pagination_css_before_head_close() {
         let xhtml = r#"<html xmlns="http://wwww.w3.org/1999/xhtml"><head><title>T</title></head><body><p>Hello</p></body></html>"#;
 
-        let paged = inject_pagination_css(xhtml, 2);
+        let paged = inject_pagination_css(xhtml);
 
-        assert!(paged.contains("--ook-page: 2"));
+        assert!(paged.contains("--ook-page: 0"));
         assert!(paged.contains("column-width: calc(100vw"));
-        assert!(paged.find("--ook-page: 2").unwrap() < paged.find("</head>").unwrap());
+        assert!(paged.find("--ook-page: 0").unwrap() < paged.find("</head>").unwrap());
         assert!(paged.contains("<p>Hello</p>"));
     }
 
@@ -408,5 +423,17 @@ mod test {
             "expected Conan Doyle as the author, got {:#?}",
             meta.author,
         );
+    }
+
+    #[test]
+    fn injects_page_listener_before_head_close() {
+        let xhtml = r#"<html xmlns="http://www.w3.org/1999/xhtml"><head><title>T</title></head><body><p>Hi</p></body></html>"#;
+
+        let out = injects_page_listener(xhtml);
+
+        assert!(out.contains("ook-set-page"));
+        assert!(out.contains(r#"setProperty('--ook-page'"#));
+        assert!(out.find("ook-set-page").unwrap() < out.find("</head>").unwrap());
+        assert!(out.contains("<p>Hi</p>"));
     }
 }

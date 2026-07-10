@@ -111,11 +111,31 @@ fn Reader() -> Element {
     let chapter = state.data.chapter();
     let pending_fragment = state.data.pending_fragment();
     let (page, page_count) = (state.data.page(), state.data.page_count());
-    let current_doc = &docs[chapter()];
-    let iframe_src = epub::render_document_url(current_doc, page(), pending_fragment().as_deref());
+    let docs_for_iframe = docs.clone();
+    let iframe_src = use_memo(move || {
+        let current_doc = &docs_for_iframe[chapter()];
+        epub::render_document_url(current_doc, pending_fragment().as_deref())
+    });
 
     let page_label = format!("Page {} of {}", page() + 1, page_count());
     let chapter_label = format!("Chapter {} of {}", chapter() + 1, state.chapter_count);
+
+    use_effect(move || {
+        let page_number = page();
+        let script = format!(
+            r#"
+            const iframe = document.getElementById("reader-frame");
+            if (iframe && iframe.contentWindow) {{
+                iframe.contentWindow.postMessage(
+                    {{ kind: "ook-set-page", page: {} }},
+                    "*"
+                );
+            }}
+        "#,
+            page_number
+        );
+        document::eval(&script);
+    });
 
     use_bridge(state, docs);
 
@@ -124,6 +144,7 @@ fn Reader() -> Element {
             style: "display: flex; flex-direction: column; height: 100vh;",
 
             iframe {
+                id: "reader-frame",
                 "sandbox": "allow-same-origin allow-scripts",
                 style: "flex: 1; width: 100%; border: none;",
                 src: "{iframe_src}",
