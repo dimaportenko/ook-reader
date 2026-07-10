@@ -324,7 +324,12 @@ term (recorded here, not part of this step): serving chapters through the existi
 `use_asset_handler` route instead of base64 data URLs would shrink memory and make
 relative links/images resolve for free.
 
-> **Status:** pending.
+> **Status:** done — committed in `67ccd47` (16 tests green). Landed as sketched: `page`
+> dropped from `inject_pagination_css`/`render_document_url`, a new `injects_page_listener`
+> injection, `iframe_src` moved into a `use_memo` keyed on chapter/fragment, and a
+> `use_effect` that postMessages the current page. `dx serve` confirmed instant page turns
+> with no flash, chapter changes still reload, TOC fragments land, and paging backwards
+> across a chapter boundary still lands on the last page.
 
 ---
 
