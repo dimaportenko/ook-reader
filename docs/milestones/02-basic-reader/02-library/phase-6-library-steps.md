@@ -299,4 +299,165 @@ impl Library {
 > **Status:** done — committed in `a1d6822` (17 tests green, including
 > `library::test::add_then_list_round_trips_books`; `cargo clippy` completed with the
 > expected pre-UI dead-code warnings).
+
+---
+
+## Step 3 — import through a native file dialog
+
+Steps 1–2 built the two tested halves: an open `Epub` can yield `BookMeta`, and a `Library`
+can persist that metadata. This step joins them at the desktop boundary: choose a path,
+open the EPUB once, extract metadata, and add it to a **file-backed** library. There is
+still no library list and choosing a book does not change the reader; a short status line is
+the visible proof that import completed.
+
+**The crux.** The picker returns a runtime `PathBuf`, while SQLite needs a stable location
+that survives app restarts. Keep those responsibilities at the boundary: `rfd` supplies the
+book path, `directories::ProjectDirs` supplies the OS-appropriate app-data directory, and
+`Library` only knows how to open the database path it is given. The `Rc<Library>` provided
+through Dioxus context keeps one connection alive and cheaply shareable with Step 4's list.
+
+### Runnable check first
+
+This step has one automated persistence check and one desktop eyeball check.
+
+1. Add a `library.rs` test using a `tempfile::tempdir()` database. Open the file-backed
+   library, add a book, drop the connection, reopen the same file, and add the same path
+   again. Assert that there is still exactly one row and that its id is unchanged:
+
+   ```rust
+   #[test]
+   fn file_backed_library_survives_reopen_and_reimport_is_idempotent() {
+       let dir = tempfile::tempdir().expect("temp dir");
+       let db_path = dir.path().join("library.sqlite3");
+       let meta = BookMeta {
+           title: "The Adventures of Sherlock Holmes".to_string(),
+           author: Some("Arthur Conan Doyle".to_string()),
+       };
+
+       let library = Library::open(&db_path).expect("file database opens");
+       let first = library.add("/books/holmes.epub", &meta).expect("first add");
+       drop(library);
+
+       let library = Library::open(&db_path).expect("database reopens");
+       let second = library.add("/books/holmes.epub", &meta).expect("reimport");
+       let books = library.list().expect("list succeeds");
+
+       assert_eq!(second.id, first.id);
+       assert_eq!(books, vec![second]);
+   }
+   ```
+
+   Add `tempfile = "3"` under `[dev-dependencies]`, then run `cargo test`. The new test
+   should fail first because `Library::open` does not exist; after adding it, it should
+   expose the second failure: the current plain `INSERT` rejects a duplicate path.
+
+2. Run `dx serve --platform desktop` and verify this exact flow:
+   - an **Import EPUB** button opens the native picker filtered to `.epub` files;
+   - cancelling leaves the app unchanged;
+   - selecting the bundled Sherlock Holmes EPUB shows `Imported: The Adventures of
+     Sherlock Holmes` (or equivalent) without crashing;
+   - selecting it again still succeeds rather than reporting a UNIQUE-constraint error;
+   - stop and restart `dx serve`, import it once more, and confirm it still succeeds — this
+     proves the app is using the on-disk DB rather than the test-only in-memory DB.
+
+   Finish with `cargo clippy`. Step 4 will make the persisted row itself visible.
+
+### Minimal implementation
+
+1. Add the desktop dependencies:
+
+   ```toml
+   [dependencies]
+   directories = "6"
+   rfd = "0.17"
+
+   [dev-dependencies]
+   tempfile = "3"
+   ```
+
+2. In `src/library.rs`, add the file-backed constructor next to `open_in_memory`; both
+   continue to share the existing private `init`:
+
+   ```rust
+   pub(crate) fn open(path: impl AsRef<std::path::Path>) -> rusqlite::Result<Self> {
+       Self::init(Connection::open(path)?)
+   }
+   ```
+
+   Make `add` enforce the phase's “identity = absolute path” decision by changing the plain
+   insert to an upsert and reading the row id returned by SQLite:
+
+   ```sql
+   INSERT INTO books (path, title, author)
+   VALUES (?1, ?2, ?3)
+   ON CONFLICT(path) DO UPDATE SET
+       title = excluded.title,
+       author = excluded.author
+   RETURNING id
+   ```
+
+   Execute that statement with `query_row` and use the returned id when constructing
+   `Book`. Reimport now updates changed metadata while retaining the row's identity, which
+   makes the persistence test pass.
+
+3. In `src/main.rs`, add a small startup helper that:
+   - calls `ProjectDirs::from("com", "dmitriyportenko", "Ook Reader")`;
+   - creates `project_dirs.data_dir()` with `std::fs::create_dir_all`;
+   - opens `data_dir().join("library.sqlite3")` with `Library::open`.
+
+   Initialize it once in `App`, wrap it in `Rc`, and provide a clone through context, just
+   as `App` already does for `Rc<Epub>`:
+
+   ```text
+   use_hook → Rc<Library::open(real database path)>
+       ↓
+   use_context_provider(|| library.clone())
+       ↓
+   ImportButton reads use_context::<Rc<Library>>()
+   ```
+
+4. Add a tiny `ImportButton` component above `Reader`. It owns a
+   `Signal<Option<String>>` status and its `onclick` follows this pipeline:
+
+   ```text
+   FileDialog::new().add_filter("EPUB", &["epub"]).pick_file()
+       → None: do nothing (the user cancelled)
+       → Some(path): Epub::open(&path)
+           → epub::read_metadata(&epub)
+           → library.add(&path.to_string_lossy(), &meta)
+           → status.set(Some(format!("Imported: {}", book.title)))
+       → any error: status.set(Some(format!("Import failed: {error}")))
+   ```
+
+   Render the button and, only when present, the status text. Keep this component separate
+   from `Reader`: import changes library data, not reading position, and Step 4 can extend
+   this small library-facing component without rerendering or rewiring the iframe.
+
+### Why it works
+
+- `ProjectDirs` selects the platform's durable application-data directory; creating that
+  directory before `Connection::open` matters because SQLite creates the database file but
+  not missing parent directories.
+- `use_hook` opens the connection once for the component's lifetime. `Rc` makes the same
+  single-threaded handle available through context without reopening SQLite or trying to
+  clone `Connection` itself.
+- `Epub::open(&path)` happens at the boundary and `read_metadata(&epub)` borrows that open
+  value, preserving R2's “open once, borrow inward” design.
+- `ON CONFLICT(path) DO UPDATE … RETURNING id` makes reimport idempotent while keeping the
+  existing row id. It also refreshes title/author if metadata extraction improves later.
+- The status signal is local UI state: reading it subscribes `ImportButton`; setting it in
+  the click handler schedules only the needed rerender.
+
+### Scope note
+
+- **No list yet.** The status text proves import; Step 4 reads `library.list()` and renders
+  all rows.
+- **No reader switch yet.** The bundled `BOOK` still drives `Reader`; Step 5 replaces it
+  with the selected library path.
+- **Errors are displayed as strings for now.** R3 / Phase 6 Step 6 introduces a matchable
+  `thiserror` type and cleans up the remaining startup `expect` path.
+- **Paths remain strings in the schema.** `to_string_lossy()` is acceptable for this
+  desktop MVP; preserving arbitrary non-UTF-8 Unix paths is deferred.
+
+> **Status:** pending.
 </content>

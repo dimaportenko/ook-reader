@@ -15,6 +15,11 @@ reading position remembered between launches. The minimum viable reader to build
 | 2 | [Library & Import](02-library/README.md) | Add `.epub` files; list books with covers | ⬜ |
 | 3 | [Reading Position](03-reading-position/README.md) | Persist & restore where you stopped | ⬜ |
 
+## Cross-cutting
+
+A July 2026 full-codebase review produced a six-item refactor backlog that rides alongside
+the feature phases: [`review-2026-07-steps.md`](review-2026-07-steps.md).
+
 ## Exit criteria
 
 - [ ] Import an `.epub` and see it in a library list
