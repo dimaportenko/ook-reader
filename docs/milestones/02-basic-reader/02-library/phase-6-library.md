@@ -50,9 +50,9 @@ and the list are thin glue over a core that's already tested.
 
 *(smallest-first; the last step is the mandatory review-and-refactor pass)*
 
-- [ ] **Step 1 — Extract a book's metadata.** Pure `epub::read_metadata(path) -> BookMeta
+- [x] **Step 1 — Extract a book's metadata.** Pure `epub::read_metadata(path) -> BookMeta
       { title, author }` via `rbook`; `#[test]` against the bundled book. No store, no UI.
-- [ ] **Step 2 — A persistent library store.** `rusqlite`-backed `Library` with `add` and
+- [x] **Step 2 — A persistent library store.** `rusqlite`-backed `Library` with `add` and
       `list`; schema + row type (`Book`); round-trip `#[test]` against a temp/in-memory DB.
 - [ ] **Step 3 — Import via a native dialog.** `rfd` file picker → path → `read_metadata` →
       `library.add`; app locates the real DB via `directories::ProjectDirs`. Eyeball.
@@ -61,9 +61,13 @@ and the list are thin glue over a core that's already tested.
 - [ ] **Step 5 — Open a book → reader renders it.** Selecting a row opens *that* path; the
       reader drops `const BOOK` and keys the spine + asset handler off the choice. End-to-end
       eyeball: import → list → open → page.
-- [ ] **Step 6 — Review & refactor** (mandatory phase-closer): lift the library types into
-      `src/library.rs`, tidy error handling, and delete the dead single-book `BOOK`
-      scaffolding.
+- [ ] **Step 6 — Review & refactor** (mandatory phase-closer): review the library module
+      boundary, tidy error handling, and delete the dead single-book `BOOK` scaffolding.
+
+> **Related:** a July 2026 codebase review produced a parallel refactor backlog
+> ([`review-2026-07-steps.md`](../review-2026-07-steps.md)). Two items interact with this
+> phase: **R2** (pass `&Epub`, not paths) is best landed *before* Step 5, and **R3** (a
+> `thiserror` error type) pairs with Step 6's "tidy error handling."
 
 ## Known constraints
 

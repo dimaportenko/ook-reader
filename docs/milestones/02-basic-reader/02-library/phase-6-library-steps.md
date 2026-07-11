@@ -21,7 +21,7 @@ list. **Data first, UI last**, exactly like the EPUB layer.
 1. **Extract a book's metadata** — pure `epub::read_metadata(path) -> BookMeta { title,
    author }` via `rbook`; `#[test]` against the bundled book. *(done)*
 2. **A persistent library store** — `rusqlite` `Library` with `add`/`list` and a `Book` row
-   type; round-trip `#[test]` against a temp/in-memory DB. *(pending)*
+   type; round-trip `#[test]` against a temp/in-memory DB. *(done)*
 3. **Import via a native dialog** — `rfd` picker → path → `read_metadata` → `library.add`;
    real DB path via `directories::ProjectDirs`. Eyeball. *(pending)*
 4. **Render the library list** — Dioxus view over `library.list()` (title + author). Eyeball.
@@ -296,5 +296,7 @@ impl Library {
   still review the boundary once the import and UI callers reveal what should remain
   `pub(crate)`.
 
-> **Status:** pending.
+> **Status:** done — committed in `a1d6822` (17 tests green, including
+> `library::test::add_then_list_round_trips_books`; `cargo clippy` completed with the
+> expected pre-UI dead-code warnings).
 </content>
