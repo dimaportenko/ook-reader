@@ -1,14 +1,14 @@
 # Codebase review (July 2026) — refactor backlog & build log
 
-[← Milestone 2](README.md) · **Status:** 🚧 in progress (R1, R2, R4 done) ·
+[← Milestone 2](README.md) · **Status:** 🚧 in progress (R1, R2, R4, R5 done) ·
 relates to: [Phase 6 — Library & Import](02-library/phase-6-library.md)
 
 Findings from a full-codebase review (all 15 tests green, clippy clean at the time).
 Each finding is written as a normal learn-by-building step — runnable check first, minimal
 implementation sketch, why it works — to be picked up **independently and in any order**,
 except where the "when to do it" note says otherwise. These are refactors and hardening,
-not features: they ride *alongside* Phase 6, whose next feature step (Step 2, the
-`rusqlite` store) stays the main line of work.
+not features: they ride *alongside* Phase 6, whose next feature step (Step 3, native
+import) stays the main line of work.
 
 ## The crux
 
@@ -34,9 +34,9 @@ holes (R6). Most of these are cheapest to fix **before** Phase 6 builds on top o
       open path. *(pairs naturally with Phase 6 Step 6's "tidy error handling")*
 - [x] **R4 — Route chapter buttons through the `Nav` state machine.** One `apply` path for
       all navigation; fixes a real quirk on the last chapter.
-- [ ] **R5 — Turn pages without reloading the iframe.** postMessage the new page into the
-      injected listener instead of regenerating `iframe.src`. *(biggest step; defer until
-      after Phase 6 lands — split with `lbb:refine` when picked up)*
+- [x] **R5 — Turn pages without reloading the iframe.** postMessage the new page into the
+      injected listener instead of regenerating `iframe.src`. *(done early; the isolated
+      reader path was validated before Phase 6 UI wiring)*
 - [ ] **R6 — Hygiene batch.** Fragment sanitization, case-insensitive content types, the
       "Page 1 of 0" label. *(three small test-first fixes in one sitting)*
 
