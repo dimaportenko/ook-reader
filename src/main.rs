@@ -6,6 +6,7 @@ use dioxus::prelude::*;
 use rbook::Epub;
 
 mod epub;
+mod library;
 mod nav;
 
 use nav::*;
