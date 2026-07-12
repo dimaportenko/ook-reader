@@ -196,11 +196,12 @@ fn Reader() -> Element {
 
 #[component]
 fn LibraryBooks() -> Element {
-    let books = use_context::<Signal<Vec<library::Book>>>();
+    let library = use_context::<Rc<Library>>();
+    let mut books = use_context::<Signal<Vec<library::Book>>>();
 
     rsx! {
         ul {
-            for book in books.iter() {
+            for book in books() {
                 li {
                     key: "{book.id}",
                     "{book.title}"
@@ -208,6 +209,21 @@ fn LibraryBooks() -> Element {
                         span {
                             " - {author} "
                         }
+                    }
+                    button {
+                        onclick: {
+                            let library = Rc::clone(&library);
+                            let id = book.id;
+
+                            move |_| {
+                                if library.remove(id).is_ok() {
+                                    if let Ok(list) = library.list() {
+                                        books.set(list);
+                                    }
+                                }
+                            }
+                        },
+                        "Remove"
                     }
                 }
             }

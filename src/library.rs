@@ -15,7 +15,8 @@ pub(crate) struct Library {
 }
 
 impl Library {
-    pub(crate) fn open_in_memory() -> rusqlite::Result<Self> {
+    #[cfg(test)]
+    fn open_in_memory() -> rusqlite::Result<Self> {
         Self::init(Connection::open_in_memory()?)
     }
 
@@ -53,6 +54,13 @@ impl Library {
             title: meta.title.clone(),
             author: meta.author.clone(),
         })
+    }
+
+    pub(crate) fn remove(&self, id: i64) -> rusqlite::Result<bool> {
+        let n = self
+            .conn
+            .execute("DELETE FROM books WHERE id = ?1", params![id])?;
+        Ok(n > 0)
     }
 
     pub(crate) fn list(&self) -> rusqlite::Result<Vec<Book>> {
@@ -130,5 +138,39 @@ mod test {
 
         assert_eq!(second.id, first.id);
         assert_eq!(books, vec![second]);
+    }
+
+    #[test]
+    fn remove_drops_the_row_and_is_a_noop_for_unknown_ids() {
+        let library = Library::open_in_memory().expect("in-memory db opens");
+
+        let holmes = BookMeta {
+            title: "The Adventures of Sherlock Holmes".to_string(),
+            author: Some("Arthur Conan Doyle".to_string()),
+        };
+        let beowulf = BookMeta {
+            title: "Beowulf".to_string(),
+            author: None,
+        };
+        let added = library
+            .add("/books/holmes.epub", &holmes)
+            .expect("add holmes");
+        library
+            .add("/books/beowulf.epub", &beowulf)
+            .expect("add beowulf");
+
+        // Remove by the DB-assigned id, not by path.
+        let removed = library.remove(added.id).expect("remove succeeds");
+        assert!(removed, "expected an existing row to report true");
+
+        let books = library.list().expect("list succeeds");
+        assert_eq!(books.len(), 1);
+        assert_eq!(books[0].title, "Beowulf");
+        assert_ne!(books[0].id, added.id);
+
+        // Unknown id: no error, no change, reports false.
+        let removed_again = library.remove(added.id).expect("missing id is Ok(false)");
+        assert!(!removed_again);
+        assert_eq!(library.list().expect("list still one").len(), 1);
     }
 }
