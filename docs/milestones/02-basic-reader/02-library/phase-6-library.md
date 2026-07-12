@@ -59,7 +59,7 @@ and the list are thin glue over a core that's already tested.
 - [x] **Step 3 — Import via Dioxus file input.** `<input type="file" accept=".epub">` →
       desktop `FileData::path()` → `read_metadata` → `library.add`; app locates the real DB
       via `directories::ProjectDirs`. Eyeball.
-- [ ] **Step 4 — Render the library list.** A Dioxus view listing `library.list()` rows
+- [x] **Step 4 — Render the library list.** A Dioxus view listing `library.list()` rows
       (title + author). Eyeball. *(Cover thumbnails deferred — see scope note.)*
 - [ ] **Step 5 — Open a book → reader renders it.** Selecting a row opens *that* path; the
       reader drops `const BOOK` and keys the spine + asset handler off the choice. End-to-end

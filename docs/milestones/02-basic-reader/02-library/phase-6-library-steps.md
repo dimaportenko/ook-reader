@@ -26,7 +26,7 @@ list. **Data first, UI last**, exactly like the EPUB layer.
    `FileData::path()` → `read_metadata` → `library.add`; real DB path via
    `directories::ProjectDirs`. Eyeball. *(done)*
 4. **Render the library list** — Dioxus view over `library.list()` (title + author). Eyeball.
-   *(pending)*
+   *(done)*
 5. **Open a book → reader renders it** — the row selection drives the reader; `const BOOK`
    comes out. End-to-end eyeball. *(pending)*
 6. **Review & refactor** — tidy module boundaries and errors, then delete the single-book
@@ -547,3 +547,49 @@ This step has one automated persistence check and one desktop eyeball check.
 > **Status:** done — committed in `d47ecb6` (18 tests green, including
 > `file_backed_library_survives_reopen_and_reimport_is_idempotent`; desktop eyeball
 > confirmed for import, cancel, reimport, and restart).
+
+---
+
+## Step 4 — render the library list
+
+A Dioxus list over `library.list()` (title + optional author). The first cut loaded the
+rows once with a local hook and never refreshed after import; the fix was to lift a shared
+`Signal<Vec<Book>>` into `App` so import and list stay in sync.
+
+**Runnable check.** Desktop eyeball with `dx serve --platform desktop`:
+
+1. Startup shows existing library rows (title + author when present).
+2. Import an EPUB → status updates **and** a new row appears without restart.
+3. Reimport the same path → row count stays stable (upsert path).
+4. Restart the app → rows still come from the file-backed DB.
+
+**Minimal implementation.**
+
+- `App` creates `books = use_signal(|| library.list().unwrap_or(vec![]))` and provides it
+  via `use_context_provider` next to `Rc<Library>`.
+- `LibraryBooks` reads `use_context::<Signal<Vec<library::Book>>>()` and renders with
+  `for book in books.iter()`, stable `key: "{book.id}"`, structured title/author markup.
+- `ImportControl` also takes that signal; on successful import it re-lists from SQLite and
+  `books.set(list)` so the UI follows the store (including `ORDER BY title`).
+
+### Why it works
+
+- `Rc<Library>` is a durable resource (SQLite), not UI state — it does not notify anyone
+  when rows change.
+- A shared `Signal<Vec<Book>>` is the UI snapshot. Reading it subscribes `LibraryBooks`;
+  `books.set(...)` after import schedules the rerender.
+- Re-listing after add keeps sort order and upsert identity consistent with the DB, instead
+  of hand-pushing the returned `Book` into a local vec.
+- Row keys use `book.id` so later selection (Step 5) can reconcile correctly.
+
+### Scope note
+
+- **No reader switch yet.** The bundled `BOOK` still drives `Reader`; Step 5 wires row
+  selection to the open path.
+- **List load errors still collapse to empty.** `unwrap_or(vec![])` on startup and a quiet
+  `if let Ok(list)` after import are acceptable for this eyeball step; R3 / Step 6 can make
+  failures matchable and visible.
+- **Cover thumbnails deferred** — title + author only, per the phase plan.
+
+> **Status:** done — committed in `80c709e` (18 tests green; desktop eyeball confirmed for
+> startup list and import-without-restart refresh).
