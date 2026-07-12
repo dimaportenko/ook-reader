@@ -24,7 +24,7 @@ list. **Data first, UI last**, exactly like the EPUB layer.
    type; round-trip `#[test]` against a temp/in-memory DB. *(done)*
 3. **Import via Dioxus file input** — `<input type="file" accept=".epub">` → desktop
    `FileData::path()` → `read_metadata` → `library.add`; real DB path via
-   `directories::ProjectDirs`. Eyeball. *(pending)*
+   `directories::ProjectDirs`. Eyeball. *(done)*
 4. **Render the library list** — Dioxus view over `library.list()` (title + author). Eyeball.
    *(pending)*
 5. **Open a book → reader renders it** — the row selection drives the reader; `const BOOK`
@@ -544,5 +544,6 @@ This step has one automated persistence check and one desktop eyeball check.
 - **Paths remain strings in the schema.** `to_string_lossy()` is acceptable for this
   desktop MVP; preserving arbitrary non-UTF-8 Unix paths is deferred.
 
-> **Status:** pending.
-</content>
+> **Status:** done — committed in `d47ecb6` (18 tests green, including
+> `file_backed_library_survives_reopen_and_reimport_is_idempotent`; desktop eyeball
+> confirmed for import, cancel, reimport, and restart).

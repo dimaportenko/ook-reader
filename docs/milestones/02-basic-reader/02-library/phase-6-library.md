@@ -56,7 +56,7 @@ and the list are thin glue over a core that's already tested.
       { title, author }` via `rbook`; `#[test]` against the bundled book. No store, no UI.
 - [x] **Step 2 — A persistent library store.** `rusqlite`-backed `Library` with `add` and
       `list`; schema + row type (`Book`); round-trip `#[test]` against a temp/in-memory DB.
-- [ ] **Step 3 — Import via Dioxus file input.** `<input type="file" accept=".epub">` →
+- [x] **Step 3 — Import via Dioxus file input.** `<input type="file" accept=".epub">` →
       desktop `FileData::path()` → `read_metadata` → `library.add`; app locates the real DB
       via `directories::ProjectDirs`. Eyeball.
 - [ ] **Step 4 — Render the library list.** A Dioxus view listing `library.list()` rows
@@ -83,5 +83,3 @@ and the list are thin glue over a core that's already tested.
 - **Dangling paths are a runtime error, not a schema one** — a stored path whose file has
   since moved fails at `Epub::open` time. Handle it where the book is opened (Step 5), not in
   the store.
-</content>
-</invoke>

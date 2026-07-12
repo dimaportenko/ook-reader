@@ -25,4 +25,3 @@ import → list view → open (drop the `const BOOK`) → review & refactor.
   `FileData::read_bytes()` because browsers do not expose absolute filesystem paths.
 
 > Detailed phase files will be added when this feature is planned in depth.
-</content>
