@@ -83,8 +83,11 @@ fn main() {
 fn App() -> Element {
     let library = use_hook(|| Rc::new(open_library()));
     let epub = use_hook(|| Rc::new(Epub::open(BOOK).expect("should open the bundled epub")));
+    let books = use_signal(|| library.list().unwrap_or(vec![]));
+
     use_context_provider(|| library.clone());
     use_context_provider(|| epub.clone());
+    use_context_provider(|| books);
 
     epub::use_register_asset_handler(epub);
 
@@ -97,7 +100,7 @@ fn App() -> Element {
             rel: "stylesheet",
             href: MAIN_CSS,
         }
-        LibraryList {}
+        LibraryBooks {}
         ImportControl {}
         Reader {}
     }
@@ -192,28 +195,23 @@ fn Reader() -> Element {
 }
 
 #[component]
-fn LibraryList() -> Element {
-    let library = use_context::<Rc<Library>>();
-    let lib_list = use_hook(|| Rc::new(library.list().unwrap_or(vec![])));
+fn LibraryBooks() -> Element {
+    let books = use_context::<Signal<Vec<library::Book>>>();
 
     rsx! {
         ul {
-            {
-                lib_list
-                    .iter()
-                    .map(|book| {
-                        let item = match book.author.clone() {
-                            Some(author) => format!("{} - {}", book.title, author),
-                            None => book.title.clone(),
-                        };
-
-                        rsx! {
-                            li {
-                                "{item}"
-                            }
+            for book in books.iter() {
+                li {
+                    key: "{book.id}",
+                    "{book.title}"
+                    if let Some(author) = book.author.as_deref() {
+                        span {
+                            " - {author} "
                         }
-                    })
+                    }
+                }
             }
+
         }
     }
 }
@@ -221,6 +219,7 @@ fn LibraryList() -> Element {
 #[component]
 fn ImportControl() -> Element {
     let library = use_context::<Rc<Library>>();
+    let mut books = use_context::<Signal<Vec<library::Book>>>();
     let mut status = use_signal(|| None::<String>);
 
     rsx! {
@@ -238,7 +237,12 @@ fn ImportControl() -> Element {
                             return;
                         };
                         match import_epub(&library, &file.path()) {
-                            Ok(book) => status.set(Some(format!("Imported: {}", book.title))),
+                            Ok(book) => {
+                                status.set(Some(format!("Imported: {}", book.title)));
+                                if let Ok(list) = library.list() {
+                                    books.set(list);
+                                }
+                            }
                             Err(error) => status.set(Some(format!("Import failed: {error}"))),
                         }
                     },
