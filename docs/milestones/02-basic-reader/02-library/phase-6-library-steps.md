@@ -27,9 +27,11 @@ list. **Data first, UI last**, exactly like the EPUB layer.
    `directories::ProjectDirs`. Eyeball. *(done)*
 4. **Render the library list** — Dioxus view over `library.list()` (title + author). Eyeball.
    *(done)*
-5. **Open a book → reader renders it** — the row selection drives the reader; `const BOOK`
+5. **Delete a book from the library** — `Library::remove(id)` + a Remove control per row that
+   refreshes the shared books signal. `#[test]` + eyeball. *(done)*
+6. **Open a book → reader renders it** — the row selection drives the reader; `const BOOK`
    comes out. End-to-end eyeball. *(pending)*
-6. **Review & refactor** — tidy module boundaries and errors, then delete the single-book
+7. **Review & refactor** — tidy module boundaries and errors, then delete the single-book
    scaffolding. *(pending)*
 
 ---
@@ -116,7 +118,7 @@ bring into scope.
   extractor doesn't care where the bytes came from.
 - **No cover here.** Cover *bytes* already have a proven read (`reads_cover_image_bytes` in
   Phase 3); surfacing a thumbnail is a Step 4 concern (image serving), not metadata.
-- **Re-opens the file just to read metadata.** `read_metadata` opens the EPUB, and Step 5 will
+- **Re-opens the file just to read metadata.** `read_metadata` opens the EPUB, and Step 6 will
   open it *again* to read the spine. Redundant but cheap, and it keeps import (which only needs
   title/author) decoupled from rendering (which needs the spine). Fold them only if it ever
   shows up as slow.
@@ -293,7 +295,7 @@ impl Library {
   decision "identity = the absolute path" is enforced.
 - **No positions/bookmarks/highlights.** One `books` table now; the related tables arrive
   later in the milestone as features need them.
-- **Dedicated module from the start.** `Book`/`Library` live in `src/library.rs`; Step 6 can
+- **Dedicated module from the start.** `Book`/`Library` live in `src/library.rs`; Step 7 can
   still review the boundary once the import and UI callers reveal what should remain
   `pub(crate)`.
 
@@ -534,9 +536,9 @@ This step has one automated persistence check and one desktop eyeball check.
 
 - **No list yet.** The status text proves import; Step 4 reads `library.list()` and renders
   all rows.
-- **No reader switch yet.** The bundled `BOOK` still drives `Reader`; Step 5 replaces it
+- **No reader switch yet.** The bundled `BOOK` still drives `Reader`; Step 6 replaces it
   with the selected library path.
-- **Errors are displayed as strings for now.** R3 / Phase 6 Step 6 introduces a matchable
+- **Errors are displayed as strings for now.** R3 / Phase 6 Step 7 introduces a matchable
   `thiserror` type and cleans up the remaining startup `expect` path.
 - **The persistence flow is desktop-only for now.** Browsers expose selected bytes, not an
   absolute path. A future web build can keep the same Dioxus input but use
@@ -580,16 +582,199 @@ rows once with a local hook and never refreshed after import; the fix was to lif
   `books.set(...)` after import schedules the rerender.
 - Re-listing after add keeps sort order and upsert identity consistent with the DB, instead
   of hand-pushing the returned `Book` into a local vec.
-- Row keys use `book.id` so later selection (Step 5) can reconcile correctly.
+- Row keys use `book.id` so later selection (Step 6) can reconcile correctly.
 
 ### Scope note
 
-- **No reader switch yet.** The bundled `BOOK` still drives `Reader`; Step 5 wires row
+- **No reader switch yet.** The bundled `BOOK` still drives `Reader`; Step 6 wires row
   selection to the open path.
 - **List load errors still collapse to empty.** `unwrap_or(vec![])` on startup and a quiet
-  `if let Ok(list)` after import are acceptable for this eyeball step; R3 / Step 6 can make
+  `if let Ok(list)` after import are acceptable for this eyeball step; R3 / Step 7 can make
   failures matchable and visible.
 - **Cover thumbnails deferred** — title + author only, per the phase plan.
+- **No delete yet.** Removing a row is Step 5 — store method first, then a control on each
+  list row.
 
 > **Status:** done — committed in `80c709e` (18 tests green; desktop eyeball confirmed for
 > startup list and import-without-restart refresh).
+
+---
+
+## Step 5 — delete a book from the library
+
+The list can grow but never shrink. Before wiring "open this book" (Step 6), close the
+CRUD loop on the library domain: **remove a row by id**, then expose it as a control on
+each list item that refreshes the same shared `Signal<Vec<Book>>` import already writes.
+Still no reader switch — the bundled `BOOK` keeps driving the iframe.
+
+**The crux.** Deleting is two layers, same shape as import:
+
+1. **Store:** a pure `Library::remove(id)` that issues `DELETE … WHERE id = ?1` and returns
+   whether a row was actually removed. Identity is the DB-assigned `id` (not the path) —
+   the list already keys rows by `book.id`, and Step 6 will select by the same id.
+2. **UI:** the button lives on the row (in `LibraryBooks`), not in `ImportControl`. On
+   click it calls `remove`, then re-lists and `books.set(list)` — the same "store is source
+   of truth, signal is the UI snapshot" pattern Step 4 established for import.
+
+One design choice to lock in now: **delete the library row, not the `.epub` on disk.** The
+phase stores *paths*, not copies (see phase design decisions). Removing a row is "forget
+this book from the library"; the original file stays where the user put it. Deleting the
+file itself is a later hardening concern, and not what a reader usually means by "remove
+from library."
+
+### Runnable check first
+
+Two checks — one automated store test, one desktop eyeball.
+
+1. A `#[test]` in `library.rs` next to the existing round-trip tests. Add two books, remove
+   one by id, assert the remaining list is exactly the other book; then remove a missing id
+   and assert that is a clean no-op (returns `false`, list unchanged):
+
+   ```rust
+   #[test]
+   fn remove_drops_the_row_and_is_a_noop_for_unknown_ids() {
+       let library = Library::open_in_memory().expect("in-memory db opens");
+
+       let holmes = BookMeta {
+           title: "The Adventures of Sherlock Holmes".to_string(),
+           author: Some("Arthur Conan Doyle".to_string()),
+       };
+       let beowulf = BookMeta {
+           title: "Beowulf".to_string(),
+           author: None,
+       };
+       let added = library.add("/books/holmes.epub", &holmes).expect("add holmes");
+       library.add("/books/beowulf.epub", &beowulf).expect("add beowulf");
+
+       // Remove by the DB-assigned id, not by path.
+       let removed = library.remove(added.id).expect("remove succeeds");
+       assert!(removed, "expected an existing row to report true");
+
+       let books = library.list().expect("list succeeds");
+       assert_eq!(books.len(), 1);
+       assert_eq!(books[0].title, "Beowulf");
+       assert_ne!(books[0].id, added.id);
+
+       // Unknown id: no error, no change, reports false.
+       let removed_again = library.remove(added.id).expect("missing id is Ok(false)");
+       assert!(!removed_again);
+       assert_eq!(library.list().expect("list still one").len(), 1);
+   }
+   ```
+
+   Run `cargo test remove_drops`. It should fail first with "no method named `remove`";
+   after the store method lands, both assertions above should pass. Assert on *values*
+   (remaining title, returned `bool`), not just `Ok` — a delete that silently no-ops on a
+   real id is exactly the bug a bare `.is_ok()` would wave through.
+
+2. Desktop eyeball with `dx serve --platform desktop`:
+   - Import two distinct EPUBs (or re-use whatever is already in the DB) so the list has
+     more than one row.
+   - Click **Remove** on one row → that row disappears immediately; the other stays.
+   - Restart the app → the removed book is still gone (file-backed DB, not just the signal).
+   - The `.epub` file on disk is untouched (open it in Finder / `ls` the original path).
+
+   Finish with `cargo clippy`.
+
+### Minimal implementation
+
+1. In `src/library.rs`, add `remove` next to `list`:
+
+   ```rust
+   /// Deletes the row with this id. Returns `true` if a row was removed,
+   /// `false` if no row had that id (idempotent no-op).
+   pub(crate) fn remove(&self, id: i64) -> rusqlite::Result<bool> {
+       let n = self
+           .conn
+           .execute("DELETE FROM books WHERE id = ?1", params![id])?;
+       Ok(n > 0)
+   }
+   ```
+
+   `Connection::execute` returns the number of rows affected. Mapping that to `bool` is
+   the whole API: callers that care (tests, a future "undo") get a clear answer; callers
+   that don't can ignore it. Parameter binding (`?1` via `params![id]`) stays the same
+   injection-safe pattern as `add`.
+
+2. In `LibraryBooks` (`src/main.rs`), pull `Rc<Library>` from context next to the books
+   signal, and put a Remove button on each row. On click: `library.remove(book.id)`, then
+   re-list and `books.set(...)` — mirror the import refresh, don't hand-filter the signal:
+
+   ```rust
+   #[component]
+   fn LibraryBooks() -> Element {
+       let library = use_context::<Rc<Library>>();
+       let mut books = use_context::<Signal<Vec<library::Book>>>();
+
+       rsx! {
+           ul {
+               for book in books() {
+                   li {
+                       key: "{book.id}",
+                       "{book.title}"
+                       if let Some(author) = book.author.as_deref() {
+                           span { " - {author} " }
+                       }
+                       button {
+                           // Capture a Copy id (i64) into the move closure — not the whole Book.
+                           onclick: move |_| {
+                               let id = book.id;
+                               if library.remove(id).is_ok() {
+                                   if let Ok(list) = library.list() {
+                                       books.set(list);
+                                   }
+                               }
+                           },
+                           "Remove"
+                       }
+                   }
+               }
+           }
+       }
+   }
+   ```
+
+   Notes on the shape:
+   - `books` must be `mut` so `books.set` compiles — same as in `ImportControl`.
+   - Prefer `for book in books()` (read the signal once into a `Vec` clone for this render)
+     over `books.iter()` if the `onclick` needs to capture `book.id` by value into a `move`
+     closure; `i64` is `Copy`, so `let id = book.id` is free. If `books.iter()` already
+     works with your current Dioxus version for this pattern, keep it — the important bit is
+     capturing the **id**, not a borrow of the row.
+   - Failures stay quiet for now (`if … is_ok()`), matching Step 4's "list errors collapse
+     to empty." A visible error status for delete can wait for R3 / Step 7.
+   - No confirm dialog. One click removes the row. A "are you sure?" prompt is polish for
+     later; the action is cheap to reverse (re-import the same path upserts it back).
+
+### Why it works
+
+- **`DELETE … WHERE id = ?1` is the dual of `INSERT`.** The schema already has `id` as
+  `INTEGER PRIMARY KEY`; using it as the delete key means two books at different paths can
+  never collide on remove, and the UI's `key: "{book.id}"` is the same value the store
+  understands.
+- **`execute` → row count → `bool`.** SQLite reports how many rows matched the `WHERE`.
+  Turning that into `Ok(true)` / `Ok(false)` keeps "row missing" out of the error channel —
+  a missing id is not a failure of the database, it's a no-op. Real failures (disk full,
+  locked DB) still come back as `Err`.
+- **Re-list after remove, don't filter the signal.** The DB is the source of truth
+  (`ORDER BY title`, upsert identity). Hand-removing one element from the `Vec` would
+  work today, but would drift the moment a future trigger (reimport, another window,
+  a migration) changes the list out of band. Import already re-lists; delete should too.
+- **Row-only, not file-system.** Because the library stores paths, not copies, `remove`
+  never touches the `.epub`. That matches the phase's "store the path" decision and keeps
+  this step a pure SQLite + signal change — no new I/O surface.
+
+### Scope note
+
+- **No reader switch yet.** `const BOOK` still drives `Reader`. If the user later opens a
+  book and then deletes it from the list, "what happens to the open reader" is a Step 6
+  concern (close / fall back), not this one.
+- **No confirm dialog, no undo, no toast.** One click, row gone. Re-import restores it via
+  the existing upsert path.
+- **Does not delete the file on disk.** Intentional; see the crux.
+- **Quiet on store errors.** Same honesty level as Step 4's list load; Step 7 / R3 can make
+  failures matchable and visible.
+- **No multi-select / bulk delete.** One row, one button, one idea.
+
+> **Status:** done — committed in `db5b79c` (19 tests green; desktop eyeball confirmed for
+> immediate removal, persistence across restart, and leaving the source EPUB untouched).

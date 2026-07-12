@@ -13,8 +13,8 @@
 | [Phase 6 — Library & Import](phase-6-library.md) | Add `.epub` files → list them (title/author/cover) → open one in the reader | 🚧 |
 
 Planned as one phase (build log: [`phase-6-library-steps.md`](phase-6-library-steps.md)),
-built data-first in six steps: metadata extraction → `rusqlite` store → Dioxus file-input
-import → list view → open (drop the `const BOOK`) → review & refactor.
+built data-first in seven steps: metadata extraction → `rusqlite` store → Dioxus file-input
+import → list view → delete → open (drop the `const BOOK`) → review & refactor.
 
 ## Notes
 

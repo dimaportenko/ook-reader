@@ -61,16 +61,19 @@ and the list are thin glue over a core that's already tested.
       via `directories::ProjectDirs`. Eyeball.
 - [x] **Step 4 — Render the library list.** A Dioxus view listing `library.list()` rows
       (title + author). Eyeball. *(Cover thumbnails deferred — see scope note.)*
-- [ ] **Step 5 — Open a book → reader renders it.** Selecting a row opens *that* path; the
+- [x] **Step 5 — Delete a book from the library.** `Library::remove(id)` drops the row (not
+      the `.epub` on disk); a Remove control on each list row refreshes the shared books
+      signal. `#[test]` + eyeball.
+- [ ] **Step 6 — Open a book → reader renders it.** Selecting a row opens *that* path; the
       reader drops `const BOOK` and keys the spine + asset handler off the choice. End-to-end
       eyeball: import → list → open → page.
-- [ ] **Step 6 — Review & refactor** (mandatory phase-closer): review the library module
+- [ ] **Step 7 — Review & refactor** (mandatory phase-closer): review the library module
       boundary, tidy error handling, and delete the dead single-book `BOOK` scaffolding.
 
 > **Related:** a July 2026 codebase review produced a parallel refactor backlog
 > ([`review-2026-07-steps.md`](../review-2026-07-steps.md)). Two items interact with this
-> phase: **R2** (pass `&Epub`, not paths) is best landed *before* Step 5, and **R3** (a
-> `thiserror` error type) pairs with Step 6's "tidy error handling."
+> phase: **R2** (pass `&Epub`, not paths) is best landed *before* Step 6 (open a book), and
+> **R3** (a `thiserror` error type) pairs with Step 7's "tidy error handling."
 
 ## Known constraints
 
@@ -81,5 +84,5 @@ and the list are thin glue over a core that's already tested.
   path; the future web target will use the same file-input event but consume
   `FileData::read_bytes()` and store/copy those bytes instead.
 - **Dangling paths are a runtime error, not a schema one** — a stored path whose file has
-  since moved fails at `Epub::open` time. Handle it where the book is opened (Step 5), not in
+  since moved fails at `Epub::open` time. Handle it where the book is opened (Step 6), not in
   the store.
