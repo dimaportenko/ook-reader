@@ -3,12 +3,14 @@
 use std::rc::Rc;
 
 use dioxus::prelude::*;
+use directories::ProjectDirs;
 use rbook::Epub;
 
 mod epub;
 mod library;
 mod nav;
 
+use library::Library;
 use nav::*;
 
 const FAVICON: Asset = asset!("/assets/favicon.ico");
@@ -32,6 +34,25 @@ pub(crate) const BOOK: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/book/pg1661-adventures-of-sherlock-holmes.epub"
 );
+
+fn open_library() -> Library {
+    let dirs = ProjectDirs::from("com", "dimaportenko", "ook-reader")
+        .expect("a home directory should exist");
+    let data_dir = dirs.data_dir();
+
+    std::fs::create_dir_all(data_dir).expect("app data dir should be creatable");
+    Library::open(data_dir.join("library.sqlite3")).expect("library db should open")
+}
+
+fn import_epub(
+    library: &Library,
+    path: &std::path::Path,
+) -> Result<library::Book, Box<dyn std::error::Error>> {
+    let epub = Epub::open(path)?;
+    let meta = epub::read_metadata(&epub)?;
+
+    Ok(library.add(&path.to_string_lossy(), &meta)?)
+}
 
 #[derive(Debug, PartialEq)]
 enum BridgeMsg {
@@ -60,7 +81,9 @@ fn main() {
 
 #[component]
 fn App() -> Element {
+    let library = use_hook(|| Rc::new(open_library()));
     let epub = use_hook(|| Rc::new(Epub::open(BOOK).expect("should open the bundled epub")));
+    use_context_provider(|| library.clone());
     use_context_provider(|| epub.clone());
 
     epub::use_register_asset_handler(epub);
@@ -74,6 +97,8 @@ fn App() -> Element {
             rel: "stylesheet",
             href: MAIN_CSS,
         }
+        LibraryList {}
+        ImportControl {}
         Reader {}
     }
 }
@@ -161,6 +186,69 @@ fn Reader() -> Element {
                 on_prev: move |_| state.page_prev(),
                 on_next: move |_| state.page_next(),
                 label: page_label,
+            }
+        }
+    }
+}
+
+#[component]
+fn LibraryList() -> Element {
+    let library = use_context::<Rc<Library>>();
+    let lib_list = use_hook(|| Rc::new(library.list().unwrap_or(vec![])));
+
+    rsx! {
+        ul {
+            {
+                lib_list
+                    .iter()
+                    .map(|book| {
+                        let item = match book.author.clone() {
+                            Some(author) => format!("{} - {}", book.title, author),
+                            None => book.title.clone(),
+                        };
+
+                        rsx! {
+                            li {
+                                "{item}"
+                            }
+                        }
+                    })
+            }
+        }
+    }
+}
+
+#[component]
+fn ImportControl() -> Element {
+    let library = use_context::<Rc<Library>>();
+    let mut status = use_signal(|| None::<String>);
+
+    rsx! {
+        div {
+            style: "padding: 8px; display: flex; gap: 8px; align-items: center;",
+
+            label {
+                "Import EPUB "
+
+                input {
+                    r#type: "file",
+                    accept: ".epub",
+                    onchange: move |event| {
+                        let Some(file) = event.files().into_iter().next() else {
+                            return;
+                        };
+                        match import_epub(&library, &file.path()) {
+                            Ok(book) => status.set(Some(format!("Imported: {}", book.title))),
+                            Err(error) => status.set(Some(format!("Import failed: {error}"))),
+                        }
+                    },
+                }
+            }
+
+            if let Some(message) = status() {
+                span {
+                    "{message}"
+                }
             }
         }
     }

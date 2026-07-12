@@ -22,8 +22,9 @@ list. **Data first, UI last**, exactly like the EPUB layer.
    author }` via `rbook`; `#[test]` against the bundled book. *(done)*
 2. **A persistent library store** — `rusqlite` `Library` with `add`/`list` and a `Book` row
    type; round-trip `#[test]` against a temp/in-memory DB. *(done)*
-3. **Import via a native dialog** — `rfd` picker → path → `read_metadata` → `library.add`;
-   real DB path via `directories::ProjectDirs`. Eyeball. *(pending)*
+3. **Import via Dioxus file input** — `<input type="file" accept=".epub">` → desktop
+   `FileData::path()` → `read_metadata` → `library.add`; real DB path via
+   `directories::ProjectDirs`. Eyeball. *(pending)*
 4. **Render the library list** — Dioxus view over `library.list()` (title + author). Eyeball.
    *(pending)*
 5. **Open a book → reader renders it** — the row selection drives the reader; `const BOOK`
@@ -302,7 +303,7 @@ impl Library {
 
 ---
 
-## Step 3 — import through a native file dialog
+## Step 3 — import through Dioxus's file input
 
 Steps 1–2 built the two tested halves: an open `Epub` can yield `BookMeta`, and a `Library`
 can persist that metadata. This step joins them at the desktop boundary: choose a path,
@@ -310,11 +311,14 @@ open the EPUB once, extract metadata, and add it to a **file-backed** library. T
 still no library list and choosing a book does not change the reader; a short status line is
 the visible proof that import completed.
 
-**The crux.** The picker returns a runtime `PathBuf`, while SQLite needs a stable location
-that survives app restarts. Keep those responsibilities at the boundary: `rfd` supplies the
-book path, `directories::ProjectDirs` supplies the OS-appropriate app-data directory, and
-`Library` only knows how to open the database path it is given. The `Rc<Library>` provided
-through Dioxus context keeps one connection alive and cheaply shareable with Step 4's list.
+**The crux.** Dioxus already abstracts file selection through
+`<input type="file">`: Desktop opens a native dialog internally and delivers a `FileData`
+in the form event. On desktop, `FileData::path()` is the selected runtime `PathBuf`; SQLite
+still needs a separate stable location that survives app restarts. Keep those
+responsibilities at the boundary: the Dioxus event supplies the book path,
+`directories::ProjectDirs` supplies the OS-appropriate app-data directory, and `Library`
+only knows how to open the database path it is given. The `Rc<Library>` provided through
+Dioxus context keeps one connection alive and cheaply shareable with Step 4's list.
 
 ### Runnable check first
 
@@ -352,8 +356,8 @@ This step has one automated persistence check and one desktop eyeball check.
    expose the second failure: the current plain `INSERT` rejects a duplicate path.
 
 2. Run `dx serve --platform desktop` and verify this exact flow:
-   - an **Import EPUB** button opens the native picker filtered to `.epub` files;
-   - cancelling leaves the app unchanged;
+   - an **Import EPUB** file input opens the native picker filtered to `.epub` files;
+   - cancelling produces no `onchange` work and leaves the app unchanged;
    - selecting the bundled Sherlock Holmes EPUB shows `Imported: The Adventures of
      Sherlock Holmes` (or equivalent) without crashing;
    - selecting it again still succeeds rather than reporting a UNIQUE-constraint error;
@@ -364,16 +368,19 @@ This step has one automated persistence check and one desktop eyeball check.
 
 ### Minimal implementation
 
-1. Add the desktop dependencies:
+1. Add only the storage-location and test dependencies:
 
    ```toml
    [dependencies]
    directories = "6"
-   rfd = "0.17"
 
    [dev-dependencies]
    tempfile = "3"
    ```
+
+   Do **not** add `rfd` directly. Dioxus Desktop already uses it internally to implement
+   file inputs; our code should depend on Dioxus's public form/file API rather than on that
+   renderer implementation detail.
 
 2. In `src/library.rs`, add the file-backed constructor next to `open_in_memory`; both
    continue to share the existing private `init`:
@@ -401,7 +408,10 @@ This step has one automated persistence check and one desktop eyeball check.
    makes the persistence test pass.
 
 3. In `src/main.rs`, add a small startup helper that:
-   - calls `ProjectDirs::from("com", "dmitriyportenko", "Ook Reader")`;
+   - calls `ProjectDirs::from("com", "dimaportenko", "ook-reader")` — these three parts
+     join into `com.dimaportenko.ook-reader`, matching the bundle `identifier` in
+     `Dioxus.toml`; macOS convention is for the `Application Support` folder name to equal
+     the bundle identifier, and keeping them identical means one app identity everywhere;
    - creates `project_dirs.data_dir()` with `std::fs::create_dir_all`;
    - opens `data_dir().join("library.sqlite3")` with `Library::open`.
 
@@ -413,40 +423,112 @@ This step has one automated persistence check and one desktop eyeball check.
        ↓
    use_context_provider(|| library.clone())
        ↓
-   ImportButton reads use_context::<Rc<Library>>()
+   ImportControl reads use_context::<Rc<Library>>()
    ```
 
-4. Add a tiny `ImportButton` component above `Reader`. It owns a
-   `Signal<Option<String>>` status and its `onclick` follows this pipeline:
+4. Add a tiny `ImportControl` component above `Reader`. It owns a
+   `Signal<Option<String>>` status and renders a Dioxus file input.
 
-   ```text
-   FileDialog::new().add_filter("EPUB", &["epub"]).pick_file()
-       → None: do nothing (the user cancelled)
-       → Some(path): Epub::open(&path)
-           → epub::read_metadata(&epub)
-           → library.add(&path.to_string_lossy(), &meta)
-           → status.set(Some(format!("Imported: {}", book.title)))
-       → any error: status.set(Some(format!("Import failed: {error}")))
+   Start with a plain helper function, not a component. The import pipeline crosses three
+   error types — `rbook`'s open error, `Box<dyn Error>` from `read_metadata`, and
+   `rusqlite::Error` from `add` — and all three implement `std::error::Error`, so `?`
+   coerces each into one `Box<dyn Error>` and the event handler stays a single `match`:
+
+   ```rust
+   /// Opens an EPUB from a picked file path, reads its metadata, and upserts
+   /// it into the library. One Result so the caller shows one status line.
+   fn import_epub(
+       library: &Library,
+       path: &std::path::Path,
+   ) -> Result<library::Book, Box<dyn std::error::Error>> {
+       let epub = Epub::open(path)?;
+       let meta = epub::read_metadata(&epub)?;
+       Ok(library.add(&path.to_string_lossy(), &meta)?)
+   }
    ```
 
-   Render the button and, only when present, the status text. Keep this component separate
-   from `Reader`: import changes library data, not reading position, and Step 4 can extend
-   this small library-facing component without rerendering or rewiring the iframe.
+   The component wraps that helper in the file input's `onchange`:
+
+   ```rust
+   #[component]
+   fn ImportControl() -> Element {
+       let library = use_context::<Rc<Library>>();
+       let mut status = use_signal(|| None::<String>);
+
+       rsx! {
+           div {
+               style: "padding: 8px; display: flex; gap: 8px; align-items: center;",
+
+               label {
+                   "Import EPUB "
+                   input {
+                       r#type: "file",
+                       accept: ".epub",
+                       onchange: move |event| {
+                           // Cancelling the picker yields no files; do nothing.
+                           let Some(file) = event.files().into_iter().next() else {
+                               return;
+                           };
+                           // FileData::path() is the real filesystem path on desktop.
+                           match import_epub(&library, &file.path()) {
+                               Ok(book) => status.set(Some(format!("Imported: {}", book.title))),
+                               Err(error) => status.set(Some(format!("Import failed: {error}"))),
+                           }
+                       },
+                   }
+               }
+
+               if let Some(message) = status() {
+                   span { "{message}" }
+               }
+           }
+       }
+   }
+   ```
+
+   Mount it in `App`'s `rsx!` directly above the reader:
+
+   ```rust
+   ImportControl {}
+   Reader {}
+   ```
+
+   Notes on the shape:
+   - `event.files()` returns `Vec<FileData>` in Dioxus 0.7; the input does not set
+     `multiple`, so `into_iter().next()` takes the only file, and `let … else { return }`
+     makes cancel a no-op — no work, no status change.
+   - the `move` closure captures the `Rc<Library>` from context: cheap to clone, and the
+     single SQLite connection stays shared instead of being reopened per import;
+   - errors become a status message instead of a panic — a bad pick must not crash the
+     reader;
+   - `if let Some(message) = status()` renders the status line only after an import
+     attempt, matching the "only when present" check.
+
+   Keep this component separate from `Reader`: import changes library data, not reading
+   position, and Step 4 can extend this small library-facing component without rerendering
+   or rewiring the iframe. Both `match` arms set only the status signal, and only
+   `ImportControl` reads it, so the iframe never reloads on import.
 
 ### Why it works
 
 - `ProjectDirs` selects the platform's durable application-data directory; creating that
   directory before `Connection::open` matters because SQLite creates the database file but
-  not missing parent directories.
+  not missing parent directories. The three arguments are a contract: they must stay
+  stable across releases (changing them strands the existing database in the old
+  directory) and, by macOS convention, should join into the same reverse-domain string as
+  the bundle identifier in `Dioxus.toml`.
 - `use_hook` opens the connection once for the component's lifetime. `Rc` makes the same
   single-threaded handle available through context without reopening SQLite or trying to
   clone `Connection` itself.
-- `Epub::open(&path)` happens at the boundary and `read_metadata(&epub)` borrows that open
-  value, preserving R2's “open once, borrow inward” design.
+- Dioxus Desktop translates the file input into a native picker and returns `FileData`, so
+  app code stays on Dioxus's renderer-neutral API instead of importing `rfd` directly.
+- `FileData::path()` provides the real desktop path. `Epub::open(&path)` happens at that
+  boundary and `read_metadata(&epub)` borrows the open value, preserving R2's “open once,
+  borrow inward” design.
 - `ON CONFLICT(path) DO UPDATE … RETURNING id` makes reimport idempotent while keeping the
   existing row id. It also refreshes title/author if metadata extraction improves later.
-- The status signal is local UI state: reading it subscribes `ImportButton`; setting it in
-  the click handler schedules only the needed rerender.
+- The status signal is local UI state: reading it subscribes `ImportControl`; setting it in
+  the change handler schedules only the needed rerender.
 
 ### Scope note
 
@@ -456,6 +538,9 @@ This step has one automated persistence check and one desktop eyeball check.
   with the selected library path.
 - **Errors are displayed as strings for now.** R3 / Phase 6 Step 6 introduces a matchable
   `thiserror` type and cleans up the remaining startup `expect` path.
+- **The persistence flow is desktop-only for now.** Browsers expose selected bytes, not an
+  absolute path. A future web build can keep the same Dioxus input but use
+  `FileData::read_bytes().await` and copy/store the EPUB instead.
 - **Paths remain strings in the schema.** `to_string_lossy()` is acceptable for this
   desktop MVP; preserving arbitrary non-UTF-8 Unix paths is deferred.
 

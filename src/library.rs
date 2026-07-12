@@ -19,6 +19,10 @@ impl Library {
         Self::init(Connection::open_in_memory()?)
     }
 
+    pub(crate) fn open(path: impl AsRef<std::path::Path>) -> rusqlite::Result<Self> {
+        Self::init(Connection::open(path)?)
+    }
+
     fn init(conn: Connection) -> rusqlite::Result<Self> {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS books (
@@ -33,12 +37,18 @@ impl Library {
     }
 
     pub(crate) fn add(&self, path: &str, meta: &BookMeta) -> rusqlite::Result<Book> {
-        self.conn.execute(
-            "INSERT INTO books (path, title, author) VALUES (?1, ?2, ?3)",
-            params![path, meta.title, meta.author],
+        let id = self.conn.query_row(
+            "INSERT INTO books (path, title, author) 
+                VALUES (?1, ?2, ?3) 
+                ON CONFLICT(path) DO UPDATE SET 
+                    title = excluded.title, 
+                    author = excluded.author 
+            RETURNING id",
+            params![path, &meta.title, meta.author.as_deref()],
+            |row| row.get(0),
         )?;
         Ok(Book {
-            id: self.conn.last_insert_rowid(),
+            id,
             path: path.to_string(),
             title: meta.title.clone(),
             author: meta.author.clone(),
@@ -97,5 +107,28 @@ mod test {
         assert_eq!(books[0].author, None);
         assert_eq!(books[1], added);
         assert_eq!(books[1].author.as_deref(), Some("Arthur Conan Doyle"));
+    }
+
+    #[test]
+    fn file_backed_library_survives_reopen_and_reimport_is_idempotent() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let db_path = dir.path().join("library.sqlite3");
+        let meta = BookMeta {
+            title: "The Adventures of Sherlock Holmes".to_string(),
+            author: Some("Arthur Conan Doyle".to_string()),
+        };
+
+        let library = Library::open(&db_path).expect("file database opens");
+        let first = library.add("/books/holmes.epub", &meta).expect("first add");
+        drop(library);
+
+        let library = Library::open(&db_path).expect("database reopnes");
+        let second = library
+            .add("/books/holmes.epub", &meta)
+            .expect("second add");
+        let books = library.list().expect("list succeeds");
+
+        assert_eq!(second.id, first.id);
+        assert_eq!(books, vec![second]);
     }
 }

@@ -13,15 +13,16 @@
 | [Phase 6 — Library & Import](phase-6-library.md) | Add `.epub` files → list them (title/author/cover) → open one in the reader | 🚧 |
 
 Planned as one phase (build log: [`phase-6-library-steps.md`](phase-6-library-steps.md)),
-built data-first in six steps: metadata extraction → `rusqlite` store → `rfd` import →
-list view → open (drop the `const BOOK`) → review & refactor.
+built data-first in six steps: metadata extraction → `rusqlite` store → Dioxus file-input
+import → list view → open (drop the `const BOOK`) → review & refactor.
 
 ## Notes
 
 - Store the library in **`rusqlite`** (bundled), DB located via the `directories` crate
   (`ProjectDirs::data_dir()`). See [`RESEARCH.md`](../../../../RESEARCH.md) §4.
-- File picking on desktop: the [`rfd`](https://crates.io/crates/rfd) native dialog crate.
-- Web target later needs a different import path (sandboxed file input) — abstract it.
+- File picking uses Dioxus's `<input type="file">` abstraction. Dioxus Desktop opens its
+  native dialog internally; a future web build can use the same event API but must consume
+  `FileData::read_bytes()` because browsers do not expose absolute filesystem paths.
 
 > Detailed phase files will be added when this feature is planned in depth.
 </content>
