@@ -30,6 +30,7 @@ const BRIDGE_JS: &str = r#"
             });
             "#;
 
+#[cfg(test)]
 pub(crate) const BOOK: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/book/pg1661-adventures-of-sherlock-holmes.epub"
@@ -52,6 +53,19 @@ fn import_epub(
     let meta = epub::read_metadata(&epub)?;
 
     Ok(library.add(&path.to_string_lossy(), &meta)?)
+}
+
+#[derive(Clone)]
+struct OpenBook {
+    id: i64,
+    title: String,
+    epub: Rc<Epub>,
+}
+
+impl PartialEq for OpenBook {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -82,14 +96,12 @@ fn main() {
 #[component]
 fn App() -> Element {
     let library = use_hook(|| Rc::new(open_library()));
-    let epub = use_hook(|| Rc::new(Epub::open(BOOK).expect("should open the bundled epub")));
     let books = use_signal(|| library.list().unwrap_or(vec![]));
+    let open_book = use_signal(|| None::<OpenBook>);
 
     use_context_provider(|| library.clone());
-    use_context_provider(|| epub.clone());
     use_context_provider(|| books);
-
-    epub::use_register_asset_handler(epub);
+    use_context_provider(|| open_book);
 
     rsx! {
         document::Link {
@@ -100,9 +112,16 @@ fn App() -> Element {
             rel: "stylesheet",
             href: MAIN_CSS,
         }
-        LibraryBooks {}
-        ImportControl {}
-        Reader {}
+
+        if let Some(book) = open_book() {
+            Reader {
+                key: "{book.id}",
+                book,
+            }
+        } else {
+            LibraryBooks {}
+            ImportControl {}
+        }
     }
 }
 
@@ -133,8 +152,11 @@ fn NavRow(
 }
 
 #[component]
-fn Reader() -> Element {
-    let epub = use_context::<Rc<Epub>>();
+fn Reader(book: OpenBook) -> Element {
+    epub::use_register_asset_handler(book.epub.clone());
+
+    let mut open_book = use_context::<Signal<Option<OpenBook>>>();
+    let epub = book.epub;
     let docs = use_hook(|| Rc::new(epub::load_spine(&epub).expect("bundled epub should load")));
     let state = nav::use_reader_state(docs.len());
     let chapter = state.data.chapter();
@@ -171,12 +193,25 @@ fn Reader() -> Element {
     rsx! {
         div {
             style: "display: flex; flex-direction: column; height: 100vh;",
+            p {
+                style: "text-align: center",
+                "{book.title}"
+            }
 
             iframe {
                 id: "reader-frame",
                 "sandbox": "allow-same-origin allow-scripts",
                 style: "flex: 1; width: 100%; border: none;",
                 src: "{iframe_src}",
+            }
+
+            div {
+                style: "position: absolute; top: 8px; left: 8px;",
+                button {
+                    onclick: move |_| open_book.set(None),
+
+                    "Close"
+                }
             }
 
             NavRow {
@@ -198,36 +233,71 @@ fn Reader() -> Element {
 fn LibraryBooks() -> Element {
     let library = use_context::<Rc<Library>>();
     let mut books = use_context::<Signal<Vec<library::Book>>>();
+    let mut open_book = use_context::<Signal<Option<OpenBook>>>();
+    let mut open_status = use_signal(|| None::<String>);
 
     rsx! {
-        ul {
-            for book in books() {
-                li {
-                    key: "{book.id}",
-                    "{book.title}"
-                    if let Some(author) = book.author.as_deref() {
-                        span {
-                            " - {author} "
+        div {
+            ul {
+                for book in books() {
+                    li {
+                        key: "{book.id}",
+                        "{book.title}"
+                        if let Some(author) = book.author.as_deref() {
+                            span {
+                                " - {author} "
+                            }
                         }
-                    }
-                    button {
-                        onclick: {
-                            let library = Rc::clone(&library);
-                            let id = book.id;
+                        button {
+                            onclick: {
+                                let library = Rc::clone(&library);
+                                let id = book.id;
 
-                            move |_| {
-                                if library.remove(id).is_ok() {
-                                    if let Ok(list) = library.list() {
-                                        books.set(list);
+                                move |_| {
+                                    if library.remove(id).is_ok() {
+                                        if let Ok(list) = library.list() {
+                                            books.set(list);
+                                        }
                                     }
                                 }
-                            }
-                        },
-                        "Remove"
+                            },
+                            "Remove"
+                        }
+                        button {
+                            onclick: {
+                                let id = book.id;
+                                let title = book.title;
+                                let path = book.path;
+
+                                move |_| {
+                                    match Epub::open(&path) {
+                                        Ok(epub) => {
+                                            open_status.set(None);
+                                            open_book
+                                                .set(
+                                                    Some(OpenBook {
+                                                        id,
+                                                        title: title.clone(),
+                                                        epub: Rc::new(epub),
+                                                    }),
+                                                );
+                                        }
+                                        Err(error) => open_status.set(Some(format!("Open failed: {error}"))),
+                                    }
+                                }
+                            },
+                            "Open"
+                        }
+
                     }
                 }
-            }
 
+            }
+        }
+        if let Some(status) = open_status() {
+            p {
+                "{status}"
+            }
         }
     }
 }
