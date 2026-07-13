@@ -30,7 +30,7 @@ list. **Data first, UI last**, exactly like the EPUB layer.
 5. **Delete a book from the library** — `Library::remove(id)` + a Remove control per row that
    refreshes the shared books signal. `#[test]` + eyeball. *(done)*
 6. **Open a book → reader renders it** — the row selection drives the reader; `const BOOK`
-   comes out. End-to-end eyeball. *(pending)*
+   comes out. End-to-end eyeball. *(done)*
 7. **Review & refactor** — tidy module boundaries and errors, then delete the single-book
    scaffolding. *(pending)*
 
@@ -778,3 +778,159 @@ Two checks — one automated store test, one desktop eyeball.
 
 > **Status:** done — committed in `db5b79c` (19 tests green; desktop eyeball confirmed for
 > immediate removal, persistence across restart, and leaving the source EPUB untouched).
+
+
+---
+
+## Step 6 — open a library book in the reader
+
+The library now owns the runtime paths, but the reader still ignores them and opens the
+bundled `BOOK`. This step replaces that compile-time choice with one piece of app state:
+an `Option<OpenBook>`. A row click opens the path once; mounting a keyed `Reader` gives
+that EPUB to both spine loading and the asset handler, so changing books also resets all
+per-book navigation hooks.
+
+### Runnable check first
+
+This is Dioxus wiring, so the primary check is a desktop eyeball rather than a unit test.
+Before editing, run `dx serve --platform desktop` and note that the bundled Sherlock Holmes
+book renders even when no library row was selected. After the implementation:
+
+1. Start the app with at least two imported EPUBs. Before opening a row, no book iframe is
+   shown — only the library list and import control.
+2. Click **Open** on book A. Its first chapter renders, its title is shown above the reader,
+   and chapter/page navigation still works. The library list is hidden while reading.
+3. Advance book A away from its first page, click **Close**, then open book B. Book B
+   renders — including its CSS/images — and navigation starts at chapter 1, page 1 rather
+   than retaining book A's state.
+4. Restart the app and open a persisted row without re-importing it. It still renders.
+5. Import a temporary EPUB, remove or rename that file, then click **Open**. The app stays
+   alive and shows an `Open failed: …` message under the list instead of panicking.
+6. Close the reader, then **Remove** a row. The row disappears from the list and the source
+   file remains untouched.
+
+Finish with `cargo test` (the existing 19 tests remain green) and `cargo clippy`.
+
+### Minimal implementation
+
+1. In `src/main.rs`, introduce a small UI-state value near `BridgeMsg`:
+
+   ```rust
+   #[derive(Clone)]
+   struct OpenBook {
+       id: i64,
+       title: String,
+       epub: Rc<Epub>,
+   }
+
+   impl PartialEq for OpenBook {
+       fn eq(&self, other: &Self) -> bool {
+           self.id == other.id
+       }
+   }
+   ```
+
+   `OpenBook` is not a database row: it means “this row's path opened successfully.” Keep
+   the `Rc<Epub>` here so the row click is the only `Epub::open` boundary and both consumers
+   borrow/share the same parsed book. The manual `PartialEq` compares stable library
+   identity because `Epub` itself is not a value type that needs structural comparison.
+
+2. In `App`, replace the bundled-EPUB hook/context with selection state:
+
+   ```rust
+   let open_book = use_signal(|| None::<OpenBook>);
+   use_context_provider(|| open_book);
+   ```
+
+   Remove the unconditional asset-handler registration. Treat library and reader as
+   exclusive screens, and key the reader by row id:
+
+   ```rust
+   if let Some(book) = open_book() {
+       Reader {
+           key: "{book.id}",
+           book,
+       }
+   } else {
+       LibraryBooks {}
+       ImportControl {}
+   }
+   ```
+
+3. In `LibraryBooks`, consume `Signal<Option<OpenBook>>` and add a local
+   `Signal<Option<String>>` for open errors. Add an **Open** button beside **Remove**. Capture
+   owned `id`, `title`, and `path` values for its `move` closure, then use this shape:
+
+   ```rust
+   match Epub::open(&path) {
+       Ok(epub) => {
+           open_status.set(None);
+           open_book.set(Some(OpenBook {
+               id,
+               title: title.clone(),
+               epub: Rc::new(epub),
+           }));
+       }
+       Err(error) => open_status.set(Some(format!("Open failed: {error}"))),
+   }
+   ```
+
+   Render the status under the list so open failures are visible.
+
+4. Change `Reader` to accept `book: OpenBook` instead of reading `Rc<Epub>` from context.
+   Register the asset handler with `book.epub.clone()`, build the spine from the same EPUB,
+   show `book.title` in the reader chrome, and add a **Close** control that sets
+   `open_book` back to `None`. Keep the existing nav/bridge/iframe body otherwise unchanged.
+
+   The component key is essential: when the selected id changes, Dioxus unmounts the old
+   `Reader` and mounts a fresh one. That reruns `use_hook`/`use_reader_state`, registers the
+   handler for the new EPUB, and resets chapter/page state. Merely changing a prop while
+   keeping the same component instance would leave one-time hook initialization tied to the
+   previous book. Exclusive screens make that switch go through **Close** first; the key
+   still protects the mount lifetime when the open id changes.
+
+5. Remove the production use of `BOOK`. Gate the fixture constant with `#[cfg(test)]` so the
+   application no longer has a default book path. Keep the bundled file as a test fixture for
+   the EPUB suite.
+
+### Why it works
+
+- **Open at the event boundary, share inward.** `Epub::open` is fallible user I/O, so the
+  click handler can report failure without constructing broken reader state. On success,
+  `Rc<Epub>` gives the spine loader and asset handler shared ownership without reopening the
+  zip or cloning its contents.
+- **`Option` models the UI honestly.** `None` means library mode; `Some(OpenBook)` means a
+  valid EPUB is ready. There is no sentinel path and no `expect` for a user-controlled file.
+- **Exclusive screens keep one mode honest.** While reading, the list is unmounted, so open
+  and remove cannot race the active reader. **Close** is the deliberate return path to the
+  library.
+- **The key defines state identity.** Dioxus preserves hook slots while a component keeps
+  its identity. `key: book.id` says navigation state belongs to one library row; opening a
+  different id after Close deliberately creates a new state lifetime.
+- **The handler follows the mounted reader.** `use_asset_handler` registers on mount and
+  removes its route handler on cleanup. Putting it inside the keyed reader keeps resource
+  requests and rendered spine documents on the same `Rc<Epub>`.
+
+### Scope note
+
+- No saved reading position yet; every open starts at chapter 1/page 1. Persistence is the
+  next library-adjacent feature.
+- Open failures are still display strings. Step 7 / R3 replaces boxed/opaque errors with a
+  matchable `thiserror` type and reviews the remaining startup `expect`s.
+- Re-clicking the already-open row is not a concern under exclusive screens; the reader is
+  only reachable after a successful open.
+- This step intentionally uses exclusive library/reader screens rather than an always-visible
+  list with side-by-side selection. Richer routing can come later.
+
+### Leftovers for Step 7
+
+- The fixture constant is still named `BOOK`, not renamed to `TEST_BOOK`, though it is
+  correctly gated with `#[cfg(test)]`.
+- `load_spine(...).expect("bundled epub should load")` still uses bundled-book wording even
+  though the spine now comes from a library path.
+- Remove does not clear `open_book` by id. Under exclusive screens that path is unreachable
+  (the list only mounts when `open_book` is already `None`), but a later always-visible list
+  or multi-pane shell would need the clear.
+
+> **Status:** done — committed in `907b0a6` (19 tests green; exclusive library/reader UX with
+> Close, open-failure status, and leftovers recorded for Step 7).

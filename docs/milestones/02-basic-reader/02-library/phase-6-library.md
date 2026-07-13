@@ -64,9 +64,10 @@ and the list are thin glue over a core that's already tested.
 - [x] **Step 5 — Delete a book from the library.** `Library::remove(id)` drops the row (not
       the `.epub` on disk); a Remove control on each list row refreshes the shared books
       signal. `#[test]` + eyeball.
-- [ ] **Step 6 — Open a book → reader renders it.** Selecting a row opens *that* path; the
-      reader drops `const BOOK` and keys the spine + asset handler off the choice. End-to-end
-      eyeball: import → list → open → page.
+- [x] **Step 6 — Open a book → reader renders it.** Selecting a row opens *that* path; the
+      reader drops `const BOOK` and keys the spine + asset handler off the choice. Exclusive
+      library/reader screens with a Close control. End-to-end eyeball: import → list → open
+      → page → close.
 - [ ] **Step 7 — Review & refactor** (mandatory phase-closer): review the library module
       boundary, tidy error handling, and delete the dead single-book `BOOK` scaffolding.
 
