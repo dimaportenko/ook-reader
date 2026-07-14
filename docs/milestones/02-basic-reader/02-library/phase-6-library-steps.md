@@ -32,7 +32,7 @@ list. **Data first, UI last**, exactly like the EPUB layer.
 6. **Open a book → reader renders it** — the row selection drives the reader; `const BOOK`
    comes out. End-to-end eyeball. *(done)*
 7. **Import into managed storage** — copy into `data_dir()/books/`, store source + managed
-   paths, and prove open survives deletion of the source. `#[test]` + eyeball. *(pending)*
+   paths, and prove open survives deletion of the source. `#[test]` + eyeball. *(done)*
 8. **Re-import replaces the managed copy** — keep the row id while refreshing the stored
    bytes and metadata; repair a missing copy without leaking files. `#[test]`. *(pending)*
 9. **Remove the managed copy** — delete the row first, then the owned file; refresh the UI
@@ -1086,7 +1086,8 @@ Desktop eyeball:
 - Paths remain lossy UTF-8 strings in SQLite, matching the existing desktop MVP decision.
 - Filesystem work remains synchronous on the UI thread; async progress is deferred.
 
-> **Status:** pending.
+> **Status:** done — committed in `f9edefd` (20 tests green; desktop import, source move,
+> managed-copy presence, and reader open confirmed).
 
 ---
 

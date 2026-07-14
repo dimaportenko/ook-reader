@@ -71,7 +71,7 @@ and the list are thin glue over a core that's already tested.
       reader drops `const BOOK` and keys the spine + asset handler off the choice. Exclusive
       library/reader screens with a Close control. End-to-end eyeball: import → list → open
       → page → close.
-- [ ] **Step 7 — Import into managed storage.** Copy the chosen file into
+- [x] **Step 7 — Import into managed storage.** Copy the chosen file into
       `data_dir()/books/`; store source + managed paths. `#[test]` proves open still works
       after the source is deleted.
 - [ ] **Step 8 — Re-import replaces the managed copy.** Preserve the row id while replacing
