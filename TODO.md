@@ -10,6 +10,8 @@ Place to quickly drop things I would like to work later.
 - [ ] Fix previous page transition to previous chapter
 - [ ] Spine navigation UI 
 - [ ] CSS architecture BEM, OOCSS, etc
+- [ ] refactoring phase
+- [ ] show cover image in books library
 
 
 
