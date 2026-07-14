@@ -40,19 +40,10 @@ fn open_library() -> Library {
     let dirs = ProjectDirs::from("com", "dimaportenko", "ook-reader")
         .expect("a home directory should exist");
     let data_dir = dirs.data_dir();
+    let books_dir = data_dir.join("books");
 
-    std::fs::create_dir_all(data_dir).expect("app data dir should be creatable");
-    Library::open(data_dir.join("library.sqlite3")).expect("library db should open")
-}
-
-fn import_epub(
-    library: &Library,
-    path: &std::path::Path,
-) -> Result<library::Book, Box<dyn std::error::Error>> {
-    let epub = Epub::open(path)?;
-    let meta = epub::read_metadata(&epub)?;
-
-    Ok(library.add(&path.to_string_lossy(), &meta)?)
+    std::fs::create_dir_all(&books_dir).expect("app data dir should be creatable");
+    Library::open(data_dir.join("library.sqlite3"), books_dir).expect("library db should open")
 }
 
 #[derive(Clone)]
@@ -322,7 +313,7 @@ fn ImportControl() -> Element {
                         let Some(file) = event.files().into_iter().next() else {
                             return;
                         };
-                        match import_epub(&library, &file.path()) {
+                        match library.add_from_path(&file.path()) {
                             Ok(book) => {
                                 status.set(Some(format!("Imported: {}", book.title)));
                                 if let Ok(list) = library.list() {

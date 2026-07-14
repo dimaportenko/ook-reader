@@ -34,14 +34,17 @@ and the list are thin glue over a core that's already tested.
 
 ## Design decisions (recorded up front)
 
-- **Store the book's *path*, not a copy of the file.** The library row references the
-  `.epub` where it already sits on disk; we don't copy it into app storage. Simpler schema,
-  no file I/O in import, and good enough for a desktop MVP. *Trade-off:* if the user moves or
-  deletes the original, the row dangles — we detect that lazily at open time. Copying files
-  into `data_dir()` (robust to moves) is a deliberate later hardening, not this phase.
-- **Identity = the absolute path.** A `UNIQUE` constraint on `path` makes re-importing the
-  same file idempotent. (A content hash or the EPUB's `dc:identifier` would dedupe copies at
-  different paths — deferred; the path is the pragmatic key.)
+- **The library owns a copy of each book.** Import copies the chosen `.epub` into
+  `data_dir()/books/`; the SQLite row stores that *managed* path. Open always reads the
+  managed copy, so moving or deleting the user's original no longer breaks the library.
+  Remove deletes the managed file *and* the row. Steps 1–6 first landed a path-only MVP;
+  Steps 7–9 add managed import, correct re-import, and managed removal once the path-only
+  trade-off became the real annoyance (the original was moved).
+- **Identity for re-import = the absolute *source* path.** A `UNIQUE` constraint on
+  `source_path` keeps re-importing the same picker path idempotent: the row id stays stable
+  while its managed copy and metadata are refreshed. The managed `path` is what open/remove
+  use. (A content hash or the EPUB's `dc:identifier` would dedupe the same bytes imported
+  from different source paths — deferred.)
 - **`rusqlite`, per [`RESEARCH.md`](../../../../RESEARCH.md) §4** — already the recorded
   choice; bundled feature so there's no system SQLite dependency. Full reasoning vs the
   alternatives (redb, a JSON file), the libSQL/Turso sync path, and why the WASM/tokio
@@ -68,22 +71,30 @@ and the list are thin glue over a core that's already tested.
       reader drops `const BOOK` and keys the spine + asset handler off the choice. Exclusive
       library/reader screens with a Close control. End-to-end eyeball: import → list → open
       → page → close.
-- [ ] **Step 7 — Review & refactor** (mandatory phase-closer): review the library module
+- [ ] **Step 7 — Import into managed storage.** Copy the chosen file into
+      `data_dir()/books/`; store source + managed paths. `#[test]` proves open still works
+      after the source is deleted.
+- [ ] **Step 8 — Re-import replaces the managed copy.** Preserve the row id while replacing
+      the owned bytes and refreshing metadata; repair a missing copy without leaking files.
+- [ ] **Step 9 — Remove the managed copy.** Delete the row first, then the owned file;
+      refresh the UI and report incomplete cleanup. `#[test]` + eyeball.
+- [ ] **Step 10 — Review & refactor** (mandatory phase-closer): review the library module
       boundary, tidy error handling, and delete the dead single-book `BOOK` scaffolding.
 
 > **Related:** a July 2026 codebase review produced a parallel refactor backlog
 > ([`review-2026-07-steps.md`](../review-2026-07-steps.md)). Two items interact with this
 > phase: **R2** (pass `&Epub`, not paths) is best landed *before* Step 6 (open a book), and
-> **R3** (a `thiserror` error type) pairs with Step 7's "tidy error handling."
+> **R3** (a `thiserror` error type) pairs with Step 10's "tidy error handling."
 
 ## Known constraints
 
 - **`rusqlite` bundled feature** — add `rusqlite = { version = "…", features = ["bundled"] }`
   so it compiles its own SQLite; no system dependency, works the same on every dev machine.
 - **`FileData` differs by renderer** — on desktop `FileData::path()` is the selected real
-  path, which fits this phase's path-based library. A browser cannot reveal an absolute
-  path; the future web target will use the same file-input event but consume
-  `FileData::read_bytes()` and store/copy those bytes instead.
-- **Dangling paths are a runtime error, not a schema one** — a stored path whose file has
-  since moved fails at `Epub::open` time. Handle it where the book is opened (Step 6), not in
-  the store.
+  path used as the *source* for the copy into app storage. A browser cannot reveal an
+  absolute path; the future web target will use the same file-input event but consume
+  `FileData::read_bytes()` and write those bytes straight into the managed books dir.
+- **Managed paths can still fail at open** — disk full mid-copy, a hand-deleted file under
+  `books/`, etc. Those stay runtime errors at `Epub::open` (Step 6's open-status path).
+  What the managed-storage steps remove is the common case: the user moved the *original*
+  after import.

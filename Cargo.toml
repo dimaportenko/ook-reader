@@ -13,6 +13,7 @@ base64 = "0.22"
 percent-encoding = "2.3"
 rusqlite = { version = "0.40", features = ["bundled"] }
 directories = "6"
+uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 tempfile = "3"

@@ -31,8 +31,14 @@ list. **Data first, UI last**, exactly like the EPUB layer.
    refreshes the shared books signal. `#[test]` + eyeball. *(done)*
 6. **Open a book → reader renders it** — the row selection drives the reader; `const BOOK`
    comes out. End-to-end eyeball. *(done)*
-7. **Review & refactor** — tidy module boundaries and errors, then delete the single-book
-   scaffolding. *(pending)*
+7. **Import into managed storage** — copy into `data_dir()/books/`, store source + managed
+   paths, and prove open survives deletion of the source. `#[test]` + eyeball. *(pending)*
+8. **Re-import replaces the managed copy** — keep the row id while refreshing the stored
+   bytes and metadata; repair a missing copy without leaking files. `#[test]`. *(pending)*
+9. **Remove the managed copy** — delete the row first, then the owned file; refresh the UI
+   even when filesystem cleanup reports an error. `#[test]` + eyeball. *(pending)*
+10. **Review & refactor** — tidy module boundaries and errors, then delete the single-book
+    scaffolding. *(pending)*
 
 ---
 
@@ -295,7 +301,7 @@ impl Library {
   decision "identity = the absolute path" is enforced.
 - **No positions/bookmarks/highlights.** One `books` table now; the related tables arrive
   later in the milestone as features need them.
-- **Dedicated module from the start.** `Book`/`Library` live in `src/library.rs`; Step 7 can
+- **Dedicated module from the start.** `Book`/`Library` live in `src/library.rs`; Step 10 can
   still review the boundary once the import and UI callers reveal what should remain
   `pub(crate)`.
 
@@ -538,7 +544,7 @@ This step has one automated persistence check and one desktop eyeball check.
   all rows.
 - **No reader switch yet.** The bundled `BOOK` still drives `Reader`; Step 6 replaces it
   with the selected library path.
-- **Errors are displayed as strings for now.** R3 / Phase 6 Step 7 introduces a matchable
+- **Errors are displayed as strings for now.** R3 / Phase 6 Step 10 introduces a matchable
   `thiserror` type and cleans up the remaining startup `expect` path.
 - **The persistence flow is desktop-only for now.** Browsers expose selected bytes, not an
   absolute path. A future web build can keep the same Dioxus input but use
@@ -589,7 +595,7 @@ rows once with a local hook and never refreshed after import; the fix was to lif
 - **No reader switch yet.** The bundled `BOOK` still drives `Reader`; Step 6 wires row
   selection to the open path.
 - **List load errors still collapse to empty.** `unwrap_or(vec![])` on startup and a quiet
-  `if let Ok(list)` after import are acceptable for this eyeball step; R3 / Step 7 can make
+  `if let Ok(list)` after import are acceptable for this eyeball step; R3 / Step 10 can make
   failures matchable and visible.
 - **Cover thumbnails deferred** — title + author only, per the phase plan.
 - **No delete yet.** Removing a row is Step 5 — store method first, then a control on each
@@ -742,7 +748,8 @@ Two checks — one automated store test, one desktop eyeball.
      works with your current Dioxus version for this pattern, keep it — the important bit is
      capturing the **id**, not a borrow of the row.
    - Failures stay quiet for now (`if … is_ok()`), matching Step 4's "list errors collapse
-     to empty." A visible error status for delete can wait for R3 / Step 7.
+     to empty." A visible error status for delete can wait for the managed-remove step, with
+     the final typed-error cleanup in R3 / Step 10.
    - No confirm dialog. One click removes the row. A "are you sure?" prompt is polish for
      later; the action is cheap to reverse (re-import the same path upserts it back).
 
@@ -772,8 +779,8 @@ Two checks — one automated store test, one desktop eyeball.
 - **No confirm dialog, no undo, no toast.** One click, row gone. Re-import restores it via
   the existing upsert path.
 - **Does not delete the file on disk.** Intentional; see the crux.
-- **Quiet on store errors.** Same honesty level as Step 4's list load; Step 7 / R3 can make
-  failures matchable and visible.
+- **Quiet on store errors.** Same honesty level as Step 4's list load; Step 9 can make
+  remove failures visible, while R3 / Step 10 makes store failures matchable.
 - **No multi-select / bulk delete.** One row, one button, one idea.
 
 > **Status:** done — committed in `db5b79c` (19 tests green; desktop eyeball confirmed for
@@ -915,14 +922,14 @@ Finish with `cargo test` (the existing 19 tests remain green) and `cargo clippy`
 
 - No saved reading position yet; every open starts at chapter 1/page 1. Persistence is the
   next library-adjacent feature.
-- Open failures are still display strings. Step 7 / R3 replaces boxed/opaque errors with a
+- Open failures are still display strings. Step 10 / R3 replaces boxed/opaque errors with a
   matchable `thiserror` type and reviews the remaining startup `expect`s.
 - Re-clicking the already-open row is not a concern under exclusive screens; the reader is
   only reachable after a successful open.
 - This step intentionally uses exclusive library/reader screens rather than an always-visible
   list with side-by-side selection. Richer routing can come later.
 
-### Leftovers for Step 7
+### Leftovers for Step 10
 
 - The fixture constant is still named `BOOK`, not renamed to `TEST_BOOK`, though it is
   correctly gated with `#[cfg(test)]`.
@@ -933,4 +940,304 @@ Finish with `cargo test` (the existing 19 tests remain green) and `cargo clippy`
   or multi-pane shell would need the clear.
 
 > **Status:** done — committed in `907b0a6` (19 tests green; exclusive library/reader UX with
-> Close, open-failure status, and leftovers recorded for Step 7).
+> Close, open-failure status, and leftovers recorded for the review step).
+
+---
+
+## Step 7 — import into managed storage
+
+Steps 1–6 store the path returned by the picker. That path belongs to the user: moving or
+renaming the source leaves a dangling row. This step changes only the import side of the
+ownership model. A successful import creates an owned copy under `data_dir()/books/`, and
+`Book.path` points at that copy. Removal remains row-only until Step 9.
+
+### The crux
+
+Keep two paths with different jobs:
+
+- `source_path` is the canonical absolute path selected by the user. It is a private dedup
+  key and is never used to open the reader.
+- `path` is the managed copy under `books_dir`. It is the path returned in `Book`, opened by
+  the reader, and later deleted by `Library::remove`.
+
+`Library` therefore owns both its SQLite `Connection` and its `books_dir: PathBuf`. Import
+copies first and reads metadata from the **copy**, so the metadata is guaranteed to describe
+the bytes the library retained. A UUID filename prevents collisions between unrelated books
+with the same source filename.
+
+### Runnable check first
+
+Add one store test using a temporary database, managed directory, and disposable source copy:
+
+```rust
+#[test]
+fn import_opens_from_managed_copy_after_source_is_deleted() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let db_path = dir.path().join("library.sqlite3");
+    let books_dir = dir.path().join("books");
+    std::fs::create_dir_all(&books_dir).expect("books dir");
+
+    let source = dir.path().join("holmes-source.epub");
+    std::fs::copy(crate::BOOK, &source).expect("fixture source");
+
+    let library = Library::open(&db_path, &books_dir).expect("library opens");
+    let added = library.add_from_path(&source).expect("import succeeds");
+
+    assert!(std::path::Path::new(&added.path).starts_with(&books_dir));
+    assert_ne!(std::path::Path::new(&added.path), source.as_path());
+
+    std::fs::remove_file(&source).expect("delete source");
+    let epub = rbook::Epub::open(&added.path).expect("managed copy opens");
+    let meta = crate::epub::read_metadata(&epub).expect("managed metadata");
+
+    assert!(meta.title.contains("Sherlock Holmes"));
+    assert_eq!(added.title, meta.title);
+}
+```
+
+Run `cargo test import_opens_from_managed_copy`. It should initially fail because
+`Library::open` still takes one path and `add_from_path` does not exist. After the store
+change, run the complete suite and `cargo clippy`.
+
+Desktop eyeball:
+
+1. Stop the app and remove the pre-Step-7 **development** database and managed-books
+   directory. `CREATE TABLE IF NOT EXISTS` cannot add `source_path` to the old schema; this
+   explicit reset is the intentionally migration-free pre-release policy.
+2. Start `dx serve --platform desktop` and import an EPUB from outside app storage.
+3. Confirm a UUID-named `.epub` appears under
+   `~/Library/Application Support/com.dimaportenko.ook-reader/books/` on macOS.
+4. Move the original and click **Open**. The reader must still render the book.
+
+### Minimal implementation
+
+1. Add the collision-safe filename dependency explicitly:
+
+   ```toml
+   uuid = { version = "1", features = ["v4"] }
+   ```
+
+   Do not synthesize uniqueness from timestamps and process IDs.
+
+2. Extend the schema and store:
+
+   ```sql
+   CREATE TABLE IF NOT EXISTS books (
+       id          INTEGER PRIMARY KEY,
+       path        TEXT NOT NULL UNIQUE,
+       source_path TEXT NOT NULL UNIQUE,
+       title       TEXT NOT NULL,
+       author      TEXT
+   )
+   ```
+
+   ```text
+   Library { conn, books_dir }
+   Library::open(db_path, books_dir)
+   Library::open_in_memory(books_dir) // tests only
+   ```
+
+   Keep directory creation at the boundary for now: `open_library` and tests call
+   `create_dir_all`, while `Library::open` opens the paths it is given. This avoids lying
+   about an I/O failure by converting it to `rusqlite::Error::InvalidPath`. Step 10 will
+   introduce the combined typed error and can move that responsibility back into `Library`.
+
+3. Implement `add_from_path(&Path)` in this order:
+
+   ```text
+   canonicalize source_path
+   query by source_path; if already present, return the existing Book for now
+   choose books_dir/<uuid>.epub
+   copy source -> managed destination
+   open the managed destination and read its metadata
+   insert source_path + managed path + metadata
+   return Book whose path is the managed destination
+   ```
+
+   Production must only import through `add_from_path`; do not preserve a production
+   `add(path, meta)` route that can create rows without owned files. A private test helper is
+   acceptable only for narrow SQL mapping tests. Import `rusqlite::OptionalExtension` for
+   the optional source lookup.
+
+   Once the copy exists, every later failure must attempt to delete it. Treat `NotFound` as
+   already clean; report other cleanup failures (temporarily with `eprintln!`) rather than
+   silently discarding them. This is best-effort cross-store consistency, not an atomic
+   filesystem/SQLite transaction.
+
+4. Collapse `main.rs` import glue to `library.add_from_path(path)`. `LibraryBooks` already
+   opens `book.path`, so no reader or Dioxus state change is needed.
+
+### Why it works
+
+- The managed path is controlled by the application, so source moves no longer invalidate
+  the row.
+- Canonicalizing once makes source identity stable for relative paths and `..` components.
+- Reading metadata from the copied file validates the exact retained bytes rather than a
+  source that could differ by the time copying finishes.
+- Returning an existing source row keeps re-import idempotent without introducing the
+  replacement algorithm into this first increment. Step 8 deliberately upgrades that
+  behavior to refresh the bytes.
+
+### Scope note
+
+- Re-import returns the existing managed copy in this step; replacing it is Step 8.
+- Remove still deletes only the row until Step 9. Avoid using Remove in the Step 7 eyeball.
+- The pre-release database reset is intentional; no schema migrator yet.
+- Paths remain lossy UTF-8 strings in SQLite, matching the existing desktop MVP decision.
+- Filesystem work remains synchronous on the UI thread; async progress is deferred.
+
+> **Status:** pending.
+
+---
+
+## Step 8 — re-import replaces the managed copy without changing row identity
+
+Step 7 makes first import durable, but its early return means choosing the same source again
+does not refresh changed bytes. Re-import must retain `books.id` while replacing `Book.path`
+and metadata together. Preserving the **row id**, not the filename, is what keeps future
+positions and highlights attached to the same logical book.
+
+### Runnable check first
+
+Add two focused tests:
+
+1. `reimport_replaces_the_managed_copy_without_leaking_the_old_file` imports the disposable
+   source twice and asserts:
+   - both returned books have the same id;
+   - their managed paths differ;
+   - the first managed path no longer exists;
+   - the second managed path exists;
+   - `books_dir` contains exactly one file and `library.list()` contains one row.
+2. `reimport_repairs_a_missing_managed_copy` imports once, manually deletes the managed
+   file, imports the same source again, and asserts the id is unchanged and the replacement
+   opens successfully with `rbook::Epub::open`.
+
+Run each test by name, then `cargo test` and `cargo clippy`.
+
+### Minimal implementation
+
+Remove Step 7's early return and use this order:
+
+```text
+canonicalize source_path
+look up the previous managed path for that source, if any
+copy source to a fresh UUID destination
+open that destination and read its metadata
+upsert the row, replacing path/title/author but preserving SQLite row id
+on SQL failure: clean up the fresh destination
+on success: clean up the previous managed path when it differs from the new path
+return the row produced by the upsert
+```
+
+The upsert should replace the managed path:
+
+```sql
+INSERT INTO books (path, source_path, title, author)
+VALUES (?1, ?2, ?3, ?4)
+ON CONFLICT(source_path) DO UPDATE SET
+    path   = excluded.path,
+    title  = excluded.title,
+    author = excluded.author
+RETURNING id, path
+```
+
+SQLite updates the existing row, so its `id` remains stable. The newly generated path is
+stored atomically with the refreshed metadata. Only after that succeeds is the old file
+removed. If the process stops between those last two operations, the row still points at a
+valid new copy and the old file is merely an orphan; that is safer than a readable row
+pointing at a deleted file.
+
+For cleanup, treat `NotFound` as success and report other failures. Until Step 10 gives
+cleanup a typed outcome, logging an old-file cleanup failure is preferable to returning a
+plain `Err` after the database has already committed: the current import handler otherwise
+would say “failed” and skip refreshing the list even though the import succeeded.
+
+### Why it works
+
+- Row identity remains stable because conflict handling updates rather than replaces the
+  SQLite row.
+- A new destination repairs a hand-deleted managed file and ensures changed source bytes are
+  actually adopted.
+- Updating `path` removes the stale-content bug where metadata came from the new source but
+  the reader opened the old copy.
+- New-first ordering prioritizes a valid readable row. The unavoidable cross-store failure
+  mode is a benign orphan, which can be swept later.
+
+### Scope note
+
+- Identity is still canonical source path, not content hash or EPUB identifier.
+- Cleanup is best-effort because SQLite and the filesystem cannot share one transaction.
+- An orphan sweep and richer “import succeeded, cleanup warned” outcome wait for Step 10.
+- No Dioxus change is required beyond the Step 7 import call.
+
+> **Status:** pending.
+
+---
+
+## Step 9 — remove the row and its managed copy
+
+The library now owns every path stored in `Book.path`, so Remove can finally mean “forget the
+book and delete the application-owned bytes.” The user's original source remains untouched.
+
+### Runnable check first
+
+Keep removal behaviors separate:
+
+1. `remove_deletes_the_row_and_managed_copy` imports a disposable EPUB, removes its id, and
+   asserts `Ok(true)`, an empty list, and an absent managed path.
+2. `remove_succeeds_when_the_managed_copy_is_already_missing` imports, manually deletes the
+   managed path, removes the id, and asserts `Ok(true)` plus an empty list.
+3. Keep the existing unknown-id check: it returns `Ok(false)` without changing the store.
+
+Then run the desktop check:
+
+1. Import a book and record both the original and managed paths.
+2. Click **Remove**. The row disappears immediately and stays gone after restart.
+3. The managed file is gone; the original source still exists.
+4. Manually delete another managed file before clicking Remove. The stale row should still
+   be removable without an error.
+
+Finish with `cargo test` and `cargo clippy`.
+
+### Minimal implementation
+
+Import `rusqlite::OptionalExtension`, then preserve the current no-op contract while adding
+filesystem cleanup:
+
+```text
+SELECT managed path WHERE id = ?
+if no row: return Ok(false)
+DELETE row WHERE id = ?
+if no row was deleted: return Ok(false)
+remove managed file
+    success or NotFound -> Ok(true)
+    other I/O error     -> Err(error)
+```
+
+Delete the **row first**. Deleting the file first could leave a persistent row pointing at
+nothing if SQL then failed. Row-first can instead leave an orphan when file deletion fails;
+that consumes disk space but does not break another visible library row.
+
+Because a non-`NotFound` I/O error happens after the row was deleted, adjust the Remove UI
+handler to re-list regardless of `remove`'s result. On error, show a neutral message such as
+`Remove failed or cleanup is incomplete: …`; do not leave the stale UI row visible merely
+because managed-file cleanup failed. Clear that status after a later successful remove.
+
+### Why it works
+
+- `Book.path` is now an application-owned capability, so deleting it cannot remove the
+  user's original file.
+- `OptionalExtension` maps “no row” to `None`, preserving idempotent `Ok(false)` behavior.
+- `NotFound` means the desired filesystem state already holds and should not block removing
+  a stale row.
+- Refreshing from SQLite after every attempt keeps the signal honest even when the method
+  reports an incomplete filesystem cleanup.
+
+### Scope note
+
+- There is no confirmation dialog, undo, trash, or orphan sweep yet.
+- `Box<dyn Error>` remains temporary across mixed SQL/I/O operations.
+- Step 10 will introduce the matchable error/outcome type, remove startup `expect`s, rename
+  `BOOK` to `TEST_BOOK`, and review the `Library`/EPUB boundary.
+
+> **Status:** pending.
