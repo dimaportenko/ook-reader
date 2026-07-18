@@ -92,25 +92,19 @@ impl Library {
         let source_path = source_path.canonicalize()?;
         let source_path_text = source_path.to_string_lossy().into_owned();
 
-        let existing = self
+        let previous_path: Option<String> = self
             .conn
             .query_row(
-                "SELECT id, path, title, author
-                FROM books
-                WHERE source_path = ?1",
+                "SELECT path FROM books WHERE source_path = ?1",
                 params![&source_path_text],
-                Self::read_book,
+                |row| row.get(0),
             )
             .optional()?;
-
-        if let Some(book) = existing {
-            return Ok(book);
-        }
 
         let managed_path = self.books_dir.join(format!("{}.epub", Uuid::new_v4()));
 
         if let Err(error) = fs::copy(&source_path, &managed_path) {
-            cleanup_failed_import(&managed_path);
+            cleanup_managed_file(&managed_path);
             return Err(Box::new(error));
         }
 
@@ -122,12 +116,16 @@ impl Library {
             let book = self.conn.query_row(
                 "INSERT INTO books (path, source_path, title, author)
                 VALUES (?1, ?2, ?3, ?4)
+                ON CONFLICT(source_path) DO UPDATE SET
+                    path = excluded.path,
+                    title = excluded.title,
+                    author = excluded.author
                 RETURNING id, path, title, author",
                 params![
                     &managed_path_text,
                     &source_path_text,
                     &meta.title,
-                    meta.author.as_deref(),
+                    meta.author.as_deref()
                 ],
                 Self::read_book,
             )?;
@@ -135,18 +133,35 @@ impl Library {
             Ok(book)
         })();
 
-        if result.is_err() {
-            cleanup_failed_import(&managed_path);
+        match &result {
+            Err(_) => cleanup_managed_file(&managed_path),
+            Ok(_) => {
+                if let Some(previous) = previous_path {
+                    cleanup_managed_file(Path::new(&previous));
+                }
+            }
         }
 
         result
     }
 
     pub(crate) fn remove(&self, id: i64) -> rusqlite::Result<bool> {
-        let removed = self
+        let removed_path: Option<String> = self
             .conn
-            .execute("DELETE FROM books WHERE id = ?1", params![id])?;
-        Ok(removed > 0)
+            .query_row(
+                "DELETE FROM books WHERE id = ?1 RETURNING path",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        let Some(removed_path) = removed_path else {
+            return Ok(false);
+        };
+
+        cleanup_managed_file(Path::new(&removed_path));
+
+        Ok(true)
     }
 
     pub(crate) fn list(&self) -> rusqlite::Result<Vec<Book>> {
@@ -158,7 +173,7 @@ impl Library {
     }
 }
 
-fn cleanup_failed_import(path: &Path) {
+fn cleanup_managed_file(path: &Path) {
     match fs::remove_file(path) {
         Ok(()) => {}
         Err(error) if error.kind() == ErrorKind::NotFound => {}
@@ -178,26 +193,28 @@ mod test {
     #[test]
     fn add_then_list_round_trips_books() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let library =
-            Library::open_in_memory(dir.path().join("books")).expect("in-memory db opens");
+        let books_dir = dir.path().join("books");
+        let library = Library::open_in_memory(&books_dir).expect("in-memory db opens");
+        let holmes_path = books_dir.join("holmes.epub");
+        let beowulf_path = books_dir.join("beowulf.epub");
 
         let holmes = BookMeta {
             title: "The Adventures of Sherlock Holmes".to_string(),
             author: Some("Arthur Conan Doyle".to_string()),
         };
         let added = library
-            .add("/books/holmes.epub", &holmes)
+            .add(&holmes_path.to_string_lossy(), &holmes)
             .expect("add succeeds");
 
         assert_eq!(added.id, 1);
-        assert_eq!(added.path, "/books/holmes.epub");
+        assert_eq!(added.path, holmes_path.to_string_lossy());
 
         let beowulf = BookMeta {
             title: "Beowulf".to_string(),
             author: None,
         };
         library
-            .add("/books/beowulf.epub", &beowulf)
+            .add(&beowulf_path.to_string_lossy(), &beowulf)
             .expect("add anon");
 
         let books = library.list().expect("list succeeds");
@@ -239,6 +256,9 @@ mod test {
         let dir = tempfile::tempdir().expect("temp dir");
         let library =
             Library::open_in_memory(dir.path().join("books")).expect("in-memory db opens");
+        let books_dir = dir.path().join("books");
+        let holmes_path = books_dir.join("holmes.epub");
+        let beowulf_path = books_dir.join("beowulf.epub");
 
         let holmes = BookMeta {
             title: "The Adventures of Sherlock Holmes".to_string(),
@@ -249,10 +269,10 @@ mod test {
             author: None,
         };
         let added = library
-            .add("/books/holmes.epub", &holmes)
+            .add(&holmes_path.to_string_lossy(), &holmes)
             .expect("add holmes");
         library
-            .add("/books/beowulf.epub", &beowulf)
+            .add(&beowulf_path.to_string_lossy(), &beowulf)
             .expect("add beowulf");
 
         // Remove by the DB-assigned id, not by path.
@@ -292,5 +312,100 @@ mod test {
 
         assert!(meta.title.contains("Sherlock Holmes"));
         assert_eq!(added.title, meta.title);
+    }
+
+    #[test]
+    fn reimport_replaces_the_managed_copy_without_leaking_the_old_file() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let db_path = dir.path().join("library.sqlite3");
+        let books_dir = dir.path().join("books");
+        std::fs::create_dir_all(&books_dir).expect("books dir");
+
+        let source = dir.path().join("holmes-source.epub");
+        std::fs::copy(crate::BOOK, &source).expect("fixture source");
+
+        let library = Library::open(&db_path, &books_dir).expect("library opens");
+        let first = library.add_from_path(&source).expect("first import");
+        let second = library.add_from_path(&source).expect("reimport");
+
+        // Same logical book, fresh bytes: id stable, managed path replaced.
+        assert_eq!(second.id, first.id);
+        assert_ne!(second.path, first.path);
+        assert!(!Path::new(&first.path).exists());
+        assert!(Path::new(&second.path).exists());
+
+        // Exactly one managed file and one row — nothing leaked, nothing duplicated.
+        let files = std::fs::read_dir(&books_dir)
+            .expect("read books dir")
+            .count();
+        assert_eq!(files, 1);
+        assert_eq!(library.list().expect("list succeeds"), vec![second]);
+    }
+
+    #[test]
+    fn reimport_repairs_a_missing_managed_copy() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let db_path = dir.path().join("library.sqlite3");
+        let books_dir = dir.path().join("books");
+        std::fs::create_dir_all(&books_dir).expect("books dir");
+
+        let source = dir.path().join("holmes-source.epub");
+        std::fs::copy(crate::BOOK, &source).expect("fixture source");
+
+        let library = Library::open(&db_path, &books_dir).expect("library opens");
+        let first = library.add_from_path(&source).expect("first import");
+
+        // Simulate a hand-deleted managed file: the row now points at nothing.
+        std::fs::remove_file(&first.path).expect("delete managed copy");
+
+        let repaired = library.add_from_path(&source).expect("reimport repairs");
+
+        assert_eq!(repaired.id, first.id);
+        rbook::Epub::open(&repaired.path).expect("repaired copy opens");
+    }
+
+    #[test]
+    fn remove_deletes_the_row_and_managed_copy() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let db_path = dir.path().join("library.sqlite3");
+        let books_dir = dir.path().join("books");
+        std::fs::create_dir_all(&books_dir).expect("books dir");
+
+        let source = dir.path().join("holmes-source.epub");
+        std::fs::copy(crate::BOOK, &source).expect("fixture source");
+
+        let library = Library::open(&db_path, &books_dir).expect("library opens");
+        let added = library.add_from_path(&source).expect("import succeeds");
+
+        let removed = library.remove(added.id).expect("remove succeeds");
+
+        assert!(removed, "expected an existing row to report true");
+        assert!(library.list().expect("list succeeds").is_empty());
+        assert!(!Path::new(&added.path).exists(), "managed copy is deleted");
+        assert!(source.exists(), "the user's original source is untouched");
+    }
+
+    #[test]
+    fn remove_succeeds_when_the_managed_copy_is_already_missing() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let db_path = dir.path().join("library.sqlite3");
+        let books_dir = dir.path().join("books");
+        std::fs::create_dir_all(&books_dir).expect("books dir");
+
+        let source = dir.path().join("holmes-source.epub");
+        std::fs::copy(crate::BOOK, &source).expect("fixture source");
+
+        let library = Library::open(&db_path, &books_dir).expect("library opens");
+        let added = library.add_from_path(&source).expect("import succeeds");
+
+        // Simulate a hand-deleted managed file: the row now points at nothing.
+        std::fs::remove_file(&added.path).expect("delete managed copy");
+
+        let removed = library
+            .remove(added.id)
+            .expect("missing file is not an error");
+
+        assert!(removed, "a stale row is still removable");
+        assert!(library.list().expect("list succeeds").is_empty());
     }
 }

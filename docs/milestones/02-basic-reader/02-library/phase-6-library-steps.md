@@ -1100,20 +1100,62 @@ positions and highlights attached to the same logical book.
 
 ### Runnable check first
 
-Add two focused tests:
+Two focused tests in `library.rs`, next to the Step 7 import test. Both fail against the
+current code: `add_from_path` early-returns the existing row, so `second.path ==
+first.path` and the repaired path doesn't exist.
 
-1. `reimport_replaces_the_managed_copy_without_leaking_the_old_file` imports the disposable
-   source twice and asserts:
-   - both returned books have the same id;
-   - their managed paths differ;
-   - the first managed path no longer exists;
-   - the second managed path exists;
-   - `books_dir` contains exactly one file and `library.list()` contains one row.
-2. `reimport_repairs_a_missing_managed_copy` imports once, manually deletes the managed
-   file, imports the same source again, and asserts the id is unchanged and the replacement
-   opens successfully with `rbook::Epub::open`.
+```rust
+#[test]
+fn reimport_replaces_the_managed_copy_without_leaking_the_old_file() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let db_path = dir.path().join("library.sqlite3");
+    let books_dir = dir.path().join("books");
+    std::fs::create_dir_all(&books_dir).expect("books dir");
 
-Run each test by name, then `cargo test` and `cargo clippy`.
+    let source = dir.path().join("holmes-source.epub");
+    std::fs::copy(crate::BOOK, &source).expect("fixture source");
+
+    let library = Library::open(&db_path, &books_dir).expect("library opens");
+    let first = library.add_from_path(&source).expect("first import");
+    let second = library.add_from_path(&source).expect("reimport");
+
+    // Same logical book, fresh bytes: id stable, managed path replaced.
+    assert_eq!(second.id, first.id);
+    assert_ne!(second.path, first.path);
+    assert!(!Path::new(&first.path).exists());
+    assert!(Path::new(&second.path).exists());
+
+    // Exactly one managed file and one row — nothing leaked, nothing duplicated.
+    let files = std::fs::read_dir(&books_dir).expect("read books dir").count();
+    assert_eq!(files, 1);
+    assert_eq!(library.list().expect("list succeeds"), vec![second]);
+}
+
+#[test]
+fn reimport_repairs_a_missing_managed_copy() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let db_path = dir.path().join("library.sqlite3");
+    let books_dir = dir.path().join("books");
+    std::fs::create_dir_all(&books_dir).expect("books dir");
+
+    let source = dir.path().join("holmes-source.epub");
+    std::fs::copy(crate::BOOK, &source).expect("fixture source");
+
+    let library = Library::open(&db_path, &books_dir).expect("library opens");
+    let first = library.add_from_path(&source).expect("first import");
+
+    // Simulate a hand-deleted managed file: the row now points at nothing.
+    std::fs::remove_file(&first.path).expect("delete managed copy");
+
+    let repaired = library.add_from_path(&source).expect("reimport repairs");
+
+    assert_eq!(repaired.id, first.id);
+    rbook::Epub::open(&repaired.path).expect("repaired copy opens");
+}
+```
+
+Run `cargo test reimport` first (both should go green), then the full `cargo test`
+(22 tests) and `cargo clippy`.
 
 ### Minimal implementation
 
@@ -1126,27 +1168,100 @@ copy source to a fresh UUID destination
 open that destination and read its metadata
 upsert the row, replacing path/title/author but preserving SQLite row id
 on SQL failure: clean up the fresh destination
-on success: clean up the previous managed path when it differs from the new path
+on success: clean up the previous managed path
 return the row produced by the upsert
 ```
 
-The upsert should replace the managed path:
+Full replacement for `add_from_path`:
 
-```sql
-INSERT INTO books (path, source_path, title, author)
-VALUES (?1, ?2, ?3, ?4)
-ON CONFLICT(source_path) DO UPDATE SET
-    path   = excluded.path,
-    title  = excluded.title,
-    author = excluded.author
-RETURNING id, path
+```rust
+pub(crate) fn add_from_path(
+    &self,
+    source_path: &Path,
+) -> Result<Book, Box<dyn std::error::Error>> {
+    let source_path = source_path.canonicalize()?;
+    let source_path_text = source_path.to_string_lossy().into_owned();
+
+    // The managed file this source currently owns, if any. Kept alive until
+    // the new copy is committed, then deleted — new-first ordering means a
+    // crash in between leaves an orphan file, never a row pointing at nothing.
+    let previous_path: Option<String> = self
+        .conn
+        .query_row(
+            "SELECT path FROM books WHERE source_path = ?1",
+            params![&source_path_text],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    let managed_path = self.books_dir.join(format!("{}.epub", Uuid::new_v4()));
+
+    if let Err(error) = fs::copy(&source_path, &managed_path) {
+        cleanup_managed_file(&managed_path);
+        return Err(Box::new(error));
+    }
+
+    let result = (|| -> Result<Book, Box<dyn std::error::Error>> {
+        let epub = Epub::open(&managed_path)?;
+        let meta = epub::read_metadata(&epub)?;
+        let managed_path_text = managed_path.to_string_lossy().into_owned();
+
+        let book = self.conn.query_row(
+            "INSERT INTO books (path, source_path, title, author)
+            VALUES (?1, ?2, ?3, ?4)
+            ON CONFLICT(source_path) DO UPDATE SET
+                path = excluded.path,
+                title = excluded.title,
+                author = excluded.author
+            RETURNING id, path, title, author",
+            params![
+                &managed_path_text,
+                &source_path_text,
+                &meta.title,
+                meta.author.as_deref(),
+            ],
+            Self::read_book,
+        )?;
+
+        Ok(book)
+    })();
+
+    match &result {
+        Err(_) => cleanup_managed_file(&managed_path),
+        Ok(_) => {
+            if let Some(previous) = previous_path {
+                cleanup_managed_file(Path::new(&previous));
+            }
+        }
+    }
+
+    result
+}
 ```
 
-SQLite updates the existing row, so its `id` remains stable. The newly generated path is
-stored atomically with the refreshed metadata. Only after that succeeds is the old file
-removed. If the process stops between those last two operations, the row still points at a
-valid new copy and the old file is merely an orphan; that is safer than a readable row
-pointing at a deleted file.
+Rename `cleanup_failed_import` to `cleanup_managed_file`, since it now also cleans up
+replaced copies, not just failed imports:
+
+```rust
+/// Best-effort delete of a library-owned file. NotFound means the desired
+/// state already holds; other failures are reported, not returned — the DB
+/// has already committed by the time this runs.
+fn cleanup_managed_file(path: &Path) {
+    match fs::remove_file(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == ErrorKind::NotFound => {}
+        Err(error) => {
+            eprintln!("failed to clean up managed copy {}: {error}", path.display());
+        }
+    }
+}
+```
+
+SQLite updates the existing row on conflict, so its `id` remains stable. The newly
+generated path is stored atomically with the refreshed metadata. Only after that succeeds
+is the old file removed. If the process stops between those last two operations, the row
+still points at a valid new copy and the old file is merely an orphan; that is safer than
+a readable row pointing at a deleted file.
 
 For cleanup, treat `NotFound` as success and report other failures. Until Step 10 gives
 cleanup a typed outcome, logging an old-file cleanup failure is preferable to returning a
@@ -1155,14 +1270,18 @@ would say “failed” and skip refreshing the list even though the import succe
 
 ### Why it works
 
-- Row identity remains stable because conflict handling updates rather than replaces the
-  SQLite row.
-- A new destination repairs a hand-deleted managed file and ensures changed source bytes are
-  actually adopted.
+- **`ON CONFLICT(source_path) DO UPDATE`** hits the existing row instead of inserting, so
+  SQLite keeps its `id` — that's the whole "row identity survives re-import" guarantee,
+  and `RETURNING` hands back the refreshed row in one round trip.
+- A new destination repairs a hand-deleted managed file and ensures changed source bytes
+  are actually adopted: the fresh copy is always made from the source, and the upsert
+  overwrites the dangling `path` regardless of what it pointed at.
 - Updating `path` removes the stale-content bug where metadata came from the new source but
   the reader opened the old copy.
 - New-first ordering prioritizes a valid readable row. The unavoidable cross-store failure
   mode is a benign orphan, which can be swept later.
+- No `previous != new` comparison is needed before deleting the old file: the new path is a
+  fresh UUID, so it can never equal the previous one.
 
 ### Scope note
 
@@ -1170,6 +1289,8 @@ would say “failed” and skip refreshing the list even though the import succe
 - Cleanup is best-effort because SQLite and the filesystem cannot share one transaction.
 - An orphan sweep and richer “import succeeded, cleanup warned” outcome wait for Step 10.
 - No Dioxus change is required beyond the Step 7 import call.
+- The two tests share near-identical setup (tempdir + books dir + fixture source + open)
+  with the Step 7 test; extracting a small test helper is a Step 10 tidy, not a blocker.
 
 > **Status:** pending.
 
@@ -1177,68 +1298,157 @@ would say “failed” and skip refreshing the list even though the import succe
 
 ## Step 9 — remove the row and its managed copy
 
-The library now owns every path stored in `Book.path`, so Remove can finally mean “forget the
-book and delete the application-owned bytes.” The user's original source remains untouched.
+The library now owns every path stored in `Book.path`, so Remove can finally
+mean “forget the book and delete the application-owned bytes.” The user's
+original source remains untouched.
 
 ### Runnable check first
 
-Keep removal behaviors separate:
+Keep removal behaviors separate. Two new `#[test]`s in `library.rs`, next to
+the existing import tests (same tempdir + `crate::BOOK` fixture setup):
 
-1. `remove_deletes_the_row_and_managed_copy` imports a disposable EPUB, removes its id, and
-   asserts `Ok(true)`, an empty list, and an absent managed path.
-2. `remove_succeeds_when_the_managed_copy_is_already_missing` imports, manually deletes the
-   managed path, removes the id, and asserts `Ok(true)` plus an empty list.
-3. Keep the existing unknown-id check: it returns `Ok(false)` without changing the store.
+1. `remove_deletes_the_row_and_managed_copy` imports a disposable EPUB,
+   removes its id, and asserts `Ok(true)`, an empty list, and an absent
+   managed path:
+
+   ```rust
+   #[test]
+   fn remove_deletes_the_row_and_managed_copy() {
+       let dir = tempfile::tempdir().expect("temp dir");
+       let db_path = dir.path().join("library.sqlite3");
+       let books_dir = dir.path().join("books");
+       std::fs::create_dir_all(&books_dir).expect("books dir");
+
+       let source = dir.path().join("holmes-source.epub");
+       std::fs::copy(crate::BOOK, &source).expect("fixture source");
+
+       let library = Library::open(&db_path, &books_dir).expect("library opens");
+       let added = library.add_from_path(&source).expect("import succeeds");
+
+       let removed = library.remove(added.id).expect("remove succeeds");
+
+       assert!(removed, "expected an existing row to report true");
+       assert!(library.list().expect("list succeeds").is_empty());
+       assert!(!Path::new(&added.path).exists(), "managed copy is deleted");
+       assert!(source.exists(), "the user's original source is untouched");
+   }
+   ```
+
+2. `remove_succeeds_when_the_managed_copy_is_already_missing` imports,
+   manually deletes the managed path, removes the id, and asserts `Ok(true)`
+   plus an empty list:
+
+   ```rust
+   #[test]
+   fn remove_succeeds_when_the_managed_copy_is_already_missing() {
+       let dir = tempfile::tempdir().expect("temp dir");
+       let db_path = dir.path().join("library.sqlite3");
+       let books_dir = dir.path().join("books");
+       std::fs::create_dir_all(&books_dir).expect("books dir");
+
+       let source = dir.path().join("holmes-source.epub");
+       std::fs::copy(crate::BOOK, &source).expect("fixture source");
+
+       let library = Library::open(&db_path, &books_dir).expect("library opens");
+       let added = library.add_from_path(&source).expect("import succeeds");
+
+       // Simulate a hand-deleted managed file: the row now points at nothing.
+       std::fs::remove_file(&added.path).expect("delete managed copy");
+
+       let removed = library.remove(added.id).expect("missing file is not an error");
+
+       assert!(removed, "a stale row is still removable");
+       assert!(library.list().expect("list succeeds").is_empty());
+   }
+   ```
+
+3. Keep the existing unknown-id check
+   (`remove_drops_the_row_and_is_a_noop_for_unknown_ids`): it returns
+   `Ok(false)` without changing the store, and compiles unchanged.
+
+Run `cargo test remove`. The two new tests should fail against a row-only
+`remove` (it leaves the managed file behind), then pass once the
+implementation lands.
 
 Then run the desktop check:
 
 1. Import a book and record both the original and managed paths.
-2. Click **Remove**. The row disappears immediately and stays gone after restart.
+2. Click **Remove**. The row disappears immediately and stays gone after
+   restart.
 3. The managed file is gone; the original source still exists.
-4. Manually delete another managed file before clicking Remove. The stale row should still
-   be removable without an error.
+4. Manually delete another managed file before clicking Remove. The stale row
+   should still be removable without an error.
 
 Finish with `cargo test` and `cargo clippy`.
 
 ### Minimal implementation
 
-Import `rusqlite::OptionalExtension`, then preserve the current no-op contract while adding
-filesystem cleanup:
+In `src/library.rs`, one statement does both the lookup and the delete.
+SQLite's `RETURNING` clause (3.35+, guaranteed by rusqlite's `bundled`
+feature) hands back the `path` of the row it just deleted, so there is no gap
+between "read the managed path" and "remove the row" — the row either existed
+and is now gone, or it never existed:
 
-```text
-SELECT managed path WHERE id = ?
-if no row: return Ok(false)
-DELETE row WHERE id = ?
-if no row was deleted: return Ok(false)
-remove managed file
-    success or NotFound -> Ok(true)
-    other I/O error     -> Err(error)
+```rust
+pub(crate) fn remove(&self, id: i64) -> rusqlite::Result<bool> {
+    let removed_path: Option<String> = self
+        .conn
+        .query_row(
+            "DELETE FROM books WHERE id = ?1 RETURNING path",
+            params![id],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    let Some(removed_path) = removed_path else {
+        return Ok(false);
+    };
+
+    cleanup_managed_file(Path::new(&removed_path));
+
+    Ok(true)
+}
 ```
 
-Delete the **row first**. Deleting the file first could leave a persistent row pointing at
-nothing if SQL then failed. Row-first can instead leave an orphan when file deletion fails;
-that consumes disk space but does not break another visible library row.
+Notes on the shape:
 
-Because a non-`NotFound` I/O error happens after the row was deleted, adjust the Remove UI
-handler to re-list regardless of `remove`'s result. On error, show a neutral message such as
-`Remove failed or cleanup is incomplete: …`; do not leave the stale UI row visible merely
-because managed-file cleanup failed. Clear that status after a later successful remove.
+- `query_row`, not `execute`: a statement with `RETURNING` produces rows, and
+  rusqlite requires the row-reading API for it. `.optional()` maps "deleted
+  nothing" to `None`, preserving the idempotent `Ok(false)` contract.
+- File deletion reuses `cleanup_managed_file`, the same helper import-failure
+  cleanup uses: success and `NotFound` are both fine, and any other I/O error
+  is logged to stderr rather than returned. The method therefore keeps its
+  `rusqlite::Result<bool>` signature instead of widening to `Box<dyn Error>`.
+- Row-first ordering still holds — the SQL runs before the file removal — so
+  a failed file deletion can leave a silent orphan on disk, never a broken
+  visible row. Because no new error can surface, the existing Remove handler
+  in `LibraryBooks` needs no change.
+- Optional polish: `cleanup_managed_file`'s log message says "imported copy",
+  which reads oddly from `remove`; "managed copy" fits both call sites.
 
 ### Why it works
 
-- `Book.path` is now an application-owned capability, so deleting it cannot remove the
-  user's original file.
-- `OptionalExtension` maps “no row” to `None`, preserving idempotent `Ok(false)` behavior.
-- `NotFound` means the desired filesystem state already holds and should not block removing
-  a stale row.
-- Refreshing from SQLite after every attempt keeps the signal honest even when the method
-  reports an incomplete filesystem cleanup.
+- `Book.path` is now an application-owned capability, so deleting it cannot
+  remove the user's original file.
+- `DELETE … RETURNING` makes lookup and delete one atomic statement: there is
+  no window where the row can change between reading its path and removing
+  it, and no `removed == 0` re-check is needed.
+- `OptionalExtension` maps “no row” to `None`, preserving idempotent
+  `Ok(false)` behavior.
+- `cleanup_managed_file` treats `NotFound` as success — the desired
+  filesystem state already holds — so a stale row is still removable.
+- Logging (rather than returning) other I/O errors is a deliberate trade-off:
+  the worst case is an invisible orphan file, not an error message the user
+  cannot act on.
 
 ### Scope note
 
-- There is no confirmation dialog, undo, trash, or orphan sweep yet.
-- `Box<dyn Error>` remains temporary across mixed SQL/I/O operations.
-- Step 10 will introduce the matchable error/outcome type, remove startup `expect`s, rename
-  `BOOK` to `TEST_BOOK`, and review the `Library`/EPUB boundary.
+- There is no confirmation dialog, undo, trash, or orphan sweep yet — a
+  failed managed-file deletion is visible only in stderr.
+- `Box<dyn Error>` remains temporary on `add_from_path`; `remove` stays on
+  `rusqlite::Result` because cleanup failures are logged, not returned.
+- Step 10 will introduce the matchable error/outcome type, remove startup
+  `expect`s, rename `BOOK` to `TEST_BOOK`, and review the `Library`/EPUB
+  boundary.
 
 > **Status:** pending.
