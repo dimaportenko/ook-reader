@@ -45,6 +45,13 @@ and the list are thin glue over a core that's already tested.
   while its managed copy and metadata are refreshed. The managed `path` is what open/remove
   use. (A content hash or the EPUB's `dc:identifier` would dedupe the same bytes imported
   from different source paths — deferred.)
+- **Covers are files beside the managed copy, served over a `covers` asset route.**
+  Import writes the extracted cover to `data_dir()/books/<uuid>.cover.<ext>` and stores
+  that path in a nullable `cover_path` column; the library list renders thumbnails through
+  an app-level `use_asset_handler("covers", …)`. Chosen over a SQLite BLOB + data URLs to
+  keep image bytes out of the DOM and the DB, at the price of a second managed file whose
+  lifecycle reuses the Steps 7–9 machinery (import / re-import / remove / failed-import
+  cleanup). Full trade-off discussion in the build log's Step 11 entry.
 - **`rusqlite`, per [`RESEARCH.md`](../../../../RESEARCH.md) §4** — already the recorded
   choice; bundled feature so there's no system SQLite dependency. Full reasoning vs the
   alternatives (redb, a JSON file), the libSQL/Turso sync path, and why the WASM/tokio
@@ -78,7 +85,17 @@ and the list are thin glue over a core that's already tested.
       the owned bytes and refreshing metadata; repair a missing copy without leaking files.
 - [x] **Step 9 — Remove the managed copy.** Delete the row first, then the owned file;
       tolerate an already-missing managed file. `#[test]` + eyeball.
-- [ ] **Step 10 — Review & refactor** (mandatory phase-closer): review the library module
+- [x] **Step 10 — Cover image in `BookMeta`.** Extend `read_metadata` to pull the manifest
+      cover (bytes + media type) into `BookMeta.cover: Option<CoverImage>`, best-effort so
+      metadata stays infallible. `#[test]` against the bundled book. Domain only — no
+      storage, no UI. *(Pulls forward the cover thread deferred at Step 4.)*
+- [ ] **Step 11a — Persist the cover beside the managed copy.** Nullable `cover_path`
+      column; import writes `<uuid>.cover.<ext>`, re-import replaces it, remove deletes
+      it, a failed import cleans it up. `#[test]`s mirror the Steps 7–9 lifecycle tests.
+- [ ] **Step 11b — Serve covers and show thumbnails.** App-level `covers` asset route
+      with file-name sanitization; `<img>` thumbnails in the library list. `#[test]` for
+      the sanitizer + `dx serve` eyeball.
+- [ ] **Step 12 — Review & refactor** (mandatory phase-closer): review the library module
       boundary, tidy error handling, and delete the dead single-book `BOOK` scaffolding.
 
 > **Related:** a July 2026 codebase review produced a parallel refactor backlog

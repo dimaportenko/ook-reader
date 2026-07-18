@@ -37,8 +37,14 @@ list. **Data first, UI last**, exactly like the EPUB layer.
    bytes and metadata; repair a missing copy without leaking files. `#[test]`. *(done)*
 9. **Remove the managed copy** — delete the row first, then the owned file; tolerate an
    already-missing managed file. `#[test]` + eyeball. *(done)*
-10. **Review & refactor** — tidy module boundaries and errors, then delete the single-book
-    scaffolding. *(pending)*
+10. **Cover image in `BookMeta`** — extract the manifest cover (bytes + media type) into
+    `BookMeta.cover: Option<CoverImage>`, best-effort so metadata stays infallible.
+    `#[test]` against the bundled book. *(done)*
+11. **Persist & show covers (file beside the managed copy)** — 11a: cover-file lifecycle
+    (import / re-import / remove / cleanup) with a nullable `cover_path` column; 11b: an
+    app-level `covers` asset route + thumbnails in the list. *(planned — entries below)*
+12. **Review & refactor** — tidy module boundaries and errors, then delete the single-book
+    scaffolding. *(suggested — punch-list below)*
 
 ---
 
@@ -1448,9 +1454,533 @@ Notes on the shape:
   failed managed-file deletion is visible only in stderr.
 - `Box<dyn Error>` remains temporary on `add_from_path`; `remove` stays on
   `rusqlite::Result` because cleanup failures are logged, not returned.
-- Step 10 will introduce the matchable error/outcome type, remove startup
-  `expect`s, rename `BOOK` to `TEST_BOOK`, and review the `Library`/EPUB
-  boundary.
+- Step 12 (review & refactor; numbered 10 when this was written) will introduce
+  the matchable error/outcome type, remove startup `expect`s, rename `BOOK` to
+  `TEST_BOOK`, and review the `Library`/EPUB boundary.
 
 > **Status:** done — committed in `a0cd057` (24 tests green; desktop removal,
 > restart persistence, original-source preservation, and stale-row removal confirmed).
+
+---
+
+## Step 10 — cover image in `BookMeta`
+
+*(Refined in: this step was inserted before the review-and-refactor closer, which moved
+from Step 10 to Step 12. It deliberately pulls forward the cover thread deferred at
+Step 4 — domain first, storage and UI in Step 11.)*
+
+### Runnable check first
+
+A `#[test]` in `epub.rs`'s test module. The existing `reads_cover_image_bytes` test
+already proves the `rbook` API hands back real image bytes for the bundled book; this new
+test pins that `read_metadata` now *carries* them:
+
+```rust
+#[test]
+fn read_metadata_extracts_the_cover_image() {
+    let epub = Epub::open(crate::BOOK).expect("open fixture book");
+    let meta = read_metadata(&epub).expect("bundled epub metadata should read");
+
+    let cover = meta.cover.expect("the bundled book declares a cover image");
+    assert!(cover.media_type.starts_with("image/"));
+    // Real image bytes, not a stray placeholder: JPEG → FF D8 FF, PNG → 89 50 4E 47.
+    let is_jpeg = cover.bytes.starts_with(&[0xFF, 0xD8, 0xFF]);
+    let is_png = cover.bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]);
+    assert!(
+        is_jpeg || is_png,
+        "expected JPEG or PNG bytes, got {} bytes",
+        cover.bytes.len()
+    );
+}
+```
+
+Watch it fail first — it won't even compile while `BookMeta` has no `cover` field, which
+is the borrow checker acting as the red phase — then pass.
+
+### Minimal implementation
+
+All in `epub.rs`. A small struct, one new field, one lookup:
+
+```rust
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CoverImage {
+    pub(crate) media_type: String,
+    pub(crate) bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct BookMeta {
+    pub(crate) title: String,
+    pub(crate) author: Option<String>,
+    pub(crate) cover: Option<CoverImage>,
+}
+```
+
+In `read_metadata`, before the final `Ok(...)` (reusing the same manifest lookup the
+`reads_cover_image_bytes` test exercises):
+
+```rust
+let cover = epub.manifest().cover_image().and_then(|entry| {
+    let bytes = entry.read_bytes().ok()?;
+    Some(CoverImage {
+        media_type: entry.media_type().to_string(),
+        bytes,
+    })
+});
+```
+
+*(Check `media_type()`'s exact return type against the pinned rbook 0.7 — the existing
+test calls `.starts_with` on it, so it's string-like; `.to_string()` may need to be
+`.as_str().to_string()` or similar.)*
+
+**Ripple:** the `BookMeta { title, author }` literals in `library.rs`'s tests stop
+compiling — add `cover: None` to each. `add_from_path` needs no change; it reads only
+`title`/`author` and simply drops the cover for now.
+
+### Why it works
+
+- **`manifest().cover_image()` is the whole lookup.** EPUB declares covers two different
+  ways (EPUB 3's `properties="cover-image"` manifest flag, EPUB 2's `<meta name="cover">`
+  workaround), and rbook resolves both behind this one call — the same reason the project
+  chose a parsing crate over hand-rolling OPF traversal.
+- **Best-effort by construction.** The `and_then` + `.ok()?` chain means *any* missing
+  piece — no cover declared, unreadable bytes — collapses to `None` instead of an error.
+  `?` on an `Option` inside a closure returning `Option` short-circuits exactly like it
+  does on `Result`, and it's what keeps `read_metadata` effectively infallible — the
+  property Step 12's punch-list item b (drop the `Result`) depends on. A cover is
+  decoration; its absence should never block an import.
+- **`media_type` rides along now** because the eventual `<img>` render needs a content
+  type for its data URL, and capturing it here avoids re-opening the EPUB later just to
+  ask what kind of image we already had in hand.
+
+### Scope note
+
+Nothing persists or renders yet: `Book`, the SQLite schema, and the UI are untouched, and
+the extracted bytes are dropped by `add_from_path`. Step 11 decides storage (a file
+beside the managed copy vs a BLOB column) and puts thumbnails in the list — that's where
+the bytes stop being dropped. There's no coverless fixture, so the `None` path stays
+untested; it's guaranteed by the combinator chain rather than pinned by a test.
+
+> **Status:** done — committed in `5202cff` (25 tests green; metadata extraction test
+> confirmed real JPEG or PNG bytes and an `image/*` media type).
+
+---
+
+## Step 11 — persist & show covers (option B: file beside the managed copy)
+
+### The decision, recorded
+
+Three storage shapes were on the table: **(A)** a `cover BLOB` column rendered as base64
+data URLs, **(B)** a cover *file* beside the managed `.epub`, served through a second
+asset-handler route, **(C)** no storage — re-extract from the zip on every render. **B
+chosen**: it keeps image bytes out of the DOM (no base64-inflated strings held by the
+list) and out of the DB, and it generalizes the asset-handler pattern the reader already
+uses for chapter resources. The price is a second managed file per book — but its
+lifecycle (import writes, re-import replaces, remove deletes, failed import cleans up) is
+exactly the machinery Steps 7–9 built and tested, now applied twice. A's transactional
+"cover dies with the row for free" is real; here that guarantee is earned by tests
+instead. C loses on reopening N zips per render for static data.
+
+Split in two: **11a** is pure domain (file + column + lifecycle, all `#[test]`-able),
+**11b** is delivery (asset route + `<img>`, eyeball). Data first, UI last.
+
+---
+
+### Step 11a — the cover file's lifecycle
+
+#### Runnable check first
+
+Three new tests in `library.rs`, mirroring the Steps 7–9 lifecycle tests — plus one
+existing test that goes red on purpose:
+
+```rust
+#[test]
+fn import_writes_a_cover_file_next_to_the_managed_copy() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let (library, source) = library_with_source(&dir); // Step 12(a) proposes this helper — pulling it forward here is fair game
+    let added = library.add_from_path(&source).expect("import succeeds");
+
+    let cover_path = added.cover_path.expect("bundled book has a cover");
+    assert!(Path::new(&cover_path).starts_with(dir.path().join("books")));
+    assert!(Path::new(&cover_path).exists());
+    // The stored extension round-trips through the serve-time content-type lookup.
+    assert!(crate::epub::content_type_for(&cover_path).starts_with("image/"));
+}
+
+#[test]
+fn reimport_replaces_the_cover_without_leaking_files() {
+    // …two imports of the same source…
+    // books_dir holds exactly 2 files afterwards: one .epub + one cover.
+    // The first import's cover file no longer exists.
+}
+
+#[test]
+fn remove_deletes_the_cover_file_too() {
+    // …import, then remove(id)…
+    // Row gone, managed .epub gone, cover file gone, source untouched.
+}
+```
+
+**Expected red:** `reimport_replaces_the_managed_copy_without_leaking_the_old_file`
+asserts `files == 1` in `books_dir` — with a cover written that becomes 2. Updating that
+assertion is part of this step, not a regression.
+
+#### Minimal implementation
+
+1. **Schema + row type.** Add a nullable column and thread it through:
+
+   ```sql
+   cover_path TEXT
+   ```
+
+   `Book` gains `cover_path: Option<String>`; `read_book` gains `row.get(4)?`; `list`'s
+   SELECT and both `RETURNING` clauses name the new column; the `ON CONFLICT(source_path)
+   DO UPDATE` sets `cover_path = excluded.cover_path`.
+
+   *Migration caveat:* `CREATE TABLE IF NOT EXISTS` won't add a column to the dev database
+   you already have. Cheapest: delete it
+   (`~/Library/Application Support/com.dimaportenko.ook-reader/` on macOS) and re-import —
+   it's dev data, and re-import rebuilds everything. A real `PRAGMA user_version`
+   migration is recorded as deferred (worth doing when the schema next changes *after*
+   real data exists).
+
+2. **A pure inverse of `content_type_for`,** in `epub.rs` beside it — media type → file
+   extension, `None` for anything we wouldn't know how to serve back:
+
+   ```rust
+   pub(crate) fn extension_for(media_type: &str) -> Option<&'static str> {
+       match media_type {
+           "image/jpeg" => Some("jpg"),
+           "image/png" => Some("png"),
+           "image/gif" => Some("gif"),
+           "image/svg+xml" => Some("svg"),
+           _ => None,
+       }
+   }
+   ```
+
+   One-line `#[test]`: for each mapped pair, `content_type_for` of a name ending in the
+   extension gives back the media type — the round-trip *is* the spec.
+
+3. **Write the file in `add_from_path`,** inside the existing fallible block, after
+   `read_metadata`. Reuse the UUID stem so the pair sorts together on disk:
+
+   ```rust
+   // managed_path is books_dir/<uuid>.epub — derive <uuid>.cover.<ext> from the same stem.
+   let cover_path = meta.cover.as_ref().and_then(|cover| {
+       let ext = epub::extension_for(&cover.media_type)?;
+       let path = managed_path.with_extension(format!("cover.{ext}"));
+       fs::write(&path, &cover.bytes).ok()?;
+       Some(path.to_string_lossy().into_owned())
+   });
+   ```
+
+   Best-effort, like extraction in Step 10: an unwritable cover means a bookless cover,
+   never a failed import.
+
+4. **Extend all three cleanup sites** — the same pattern each time, applied to the cover
+   path alongside the epub path:
+   - *failed import:* the `Err` arm also `cleanup_managed_file`s the just-written cover;
+   - *successful re-import:* the pre-query that fetches the previous `path` also fetches
+     the previous `cover_path`, and both are cleaned after the row updates;
+   - *remove:* `RETURNING path, cover_path`, then clean both (`cleanup_managed_file`
+     already tolerates `NotFound`, which covers rows imported before this step).
+
+#### Why it works
+
+- **The lifecycle is symmetric by construction.** Every place that creates, replaces, or
+  destroys the managed `.epub` now does the identical dance for the cover — no new
+  concepts, the Steps 7–9 pattern applied to a second file. That symmetry is what makes
+  option B's bookkeeping safe: you can audit it by checking that the two paths always
+  travel together.
+- **`Option` composes down the whole chain.** No cover extracted (Step 10), no known
+  extension, or a failed write all collapse into `cover_path: NULL` via the same
+  `and_then`/`?` shape — one code path handles every "no cover" cause, and SQLite's
+  nullable column mirrors `Option<String>` exactly (rusqlite maps the two for free).
+- **`with_extension` on the shared stem** means the pair is visibly related in the books
+  dir (`<uuid>.epub` / `<uuid>.cover.jpg`) and re-import's fresh UUID automatically gives
+  the fresh cover a fresh name — no overwrite hazard while the old row still points at
+  the old file.
+
+#### Scope note
+
+No serving, no UI — `cover_path` is written and cleaned up but never read back except by
+tests. Thumbnail *downscaling* (the `image` crate) is deliberately not here: covers are
+stored at original size until list memory/latency is a felt problem (ADR-0002
+discipline). 11b reads the column.
+
+> **Status:** suggested — awaiting implementation.
+
+---
+
+### Step 11b — serve covers, render thumbnails
+
+#### Runnable check first
+
+Two layers, like every UI step:
+
+- **Unit test** for the one pure, security-relevant piece — the file-name sanitizer that
+  keeps the covers route from serving arbitrary disk paths:
+
+  ```rust
+  #[test]
+  fn covers_route_only_serves_bare_file_names() {
+      assert_eq!(sanitized_file_name("abc.cover.jpg"), Some("abc.cover.jpg".to_string()));
+      assert_eq!(sanitized_file_name("../library.sqlite3"), None);
+      assert_eq!(sanitized_file_name("a/b.jpg"), None);
+      assert_eq!(sanitized_file_name(""), None);
+  }
+  ```
+
+- **`dx serve` eyeball:** thumbnails appear next to title/author for freshly imported
+  books *and* (after a re-import) for books imported before 11a ran; a book with no cover
+  renders its row without an `<img>` and without a broken-image icon; remove takes the
+  thumbnail away; restart keeps them. `cargo clippy` clean.
+
+#### Minimal implementation sketch
+
+1. **Expose the books dir:** a `books_dir(&self) -> &Path` getter on `Library` (the
+   handler needs the directory, and `App` shouldn't recompute `ProjectDirs`).
+2. **An app-level route,** registered once in `App` (not per-book like the reader's):
+
+   ```rust
+   pub(crate) fn use_register_covers_handler(books_dir: PathBuf) {
+       use_asset_handler("covers", move |request, responder| {
+           let name = request.uri().path().rsplit('/').next().unwrap_or_default();
+           let Some(name) = sanitized_file_name(name) else { /* 404 */ };
+           match std::fs::read(books_dir.join(&name)) {
+               Ok(bytes) => { /* respond with content_type_for(&name) */ }
+               Err(_) => { /* 404, same shape as the epub handler */ }
+           }
+       })
+   }
+   ```
+
+   `sanitized_file_name`: accept only names whose `Path::file_name()` equals the whole
+   input (that single check defeats `../`, nested paths, and empty names at once).
+3. **The `<img>` in `LibraryBooks`:** derive the URL from the stored path's file name —
+
+   ```rust
+   if let Some(cover) = book.cover_path.as_deref() {
+       if let Some(name) = Path::new(cover).file_name().and_then(|n| n.to_str()) {
+           img { src: "/covers/{name}", width: "48px" }
+       }
+   }
+   ```
+
+   Confirm under `dx serve` that a root-relative `src` resolves through the custom
+   protocol to the `covers` route (the reader's `EPUB_URL_PREFIX` shows the expected
+   final shape: `dioxus://index.html/covers/<name>`); if the relative form doesn't route,
+   use the absolute prefix exactly as the EPUB constants do.
+
+#### Why it works
+
+- **Asset handlers are the desktop's "serve me bytes" primitive.** The webview can't read
+  arbitrary `file://` paths from the app origin — that sandbox is a feature. A
+  `use_asset_handler` route is the sanctioned hole: request comes in on the app protocol,
+  your closure answers from disk. The reader already proved the pattern for chapter
+  resources; this reuses it at app scope, which is why it's registered in `App` (the
+  library screen exists before any book is open).
+- **Sanitize by structure, not by blocklist.** `file_name() == whole input` is a
+  whitelist-shaped check (same lesson as R6's fragment whitelist): you can't forget an
+  escape sequence you never accept. The route can only ever serve immediate children of
+  `books_dir`.
+- **The browser does the caching.** Serving over a URL (vs data URLs in the DOM) means
+  the webview fetches each cover once and caches it like any image — list re-renders
+  don't re-touch the bytes at all, which is the concrete payoff option B was chosen for.
+
+#### Scope note
+
+Thumbnails are full-size images scaled by the `width` attribute — real downscaling at
+import stays deferred until it hurts. The route serves anything in `books_dir`, including
+`.epub` files, to anyone who guesses a UUID name — harmless in a local desktop app, worth
+an extension check the day this meets a real network. Styling beyond a bare `width` waits
+for the theming phase.
+
+> **Status:** suggested — awaiting implementation.
+
+---
+
+## Step 12 — review & refactor (phase closer)
+
+The feature steps got the library *working*; this step makes it *good*. Nothing here
+changes behavior — which is exactly what makes it safe to do boldly.
+
+### Runnable check — a safety net, not a target
+
+Refactoring must not change behavior, so the existing suite **is** the spec:
+
+- `cargo test` — 24 green before, 24+ green after (item **b** adds one test; item **a**
+  may reshape a few, but every behavior they pinned stays pinned).
+- `cargo clippy` — clean before and after (the `block v0.1.6` future-incompat note is
+  transitive and stays).
+- One `dx serve` eyeball at the end: import → list → open → page → chapter nav → TOC link
+  → close → remove. Identical behavior, tidier insides.
+
+Run the suite after **each** punch-list item, not once at the end — that's what makes a
+refactor a sequence of safe moves instead of one big leap.
+
+### Punch-list
+
+*(suggested order a → b → c → d; e rides along wherever you're already editing)*
+
+#### a. Delete the test-only `Library::add` and share the test setup
+
+`add` (`library.rs:60`) is `#[cfg(test)]` scaffolding from Steps 1–6: a path-only API that
+production no longer has, with an `ON CONFLICT(path)` clause that *diverges* from
+production's `ON CONFLICT(source_path)`. The three oldest tests are therefore exercising
+conflict behavior the app can't reach. Rework `add_then_list_round_trips_books`,
+`file_backed_library_survives_reopen_and_reimport_is_idempotent`, and
+`remove_drops_the_row_and_is_a_noop_for_unknown_ids` to seed through `add_from_path`
+(copy the `crate::BOOK` fixture to two differently-named temp sources, as the newer tests
+already do), then delete `add` outright.
+
+While you're in there: the newer tests repeat the same five setup lines (tempdir →
+books_dir → copy fixture → open library) five times. Pull a helper into `mod test`, e.g.
+
+```rust
+fn library_with_source(dir: &tempfile::TempDir) -> (Library, PathBuf) {
+    let books_dir = dir.path().join("books");
+    std::fs::create_dir_all(&books_dir).expect("books dir");
+    let library =
+        Library::open(dir.path().join("library.sqlite3"), &books_dir).expect("library opens");
+    let source = dir.path().join("holmes-source.epub");
+    std::fs::copy(crate::BOOK, &source).expect("fixture source");
+    (library, source)
+}
+```
+
+*(The tempdir stays owned by the test — if the helper created it, it would be dropped —
+and deleted — when the helper returned.)*
+
+**Why.** Tests are the safety net for items b–d, so strengthen the net first. A test-only
+method with test-only SQL is worse than dead code: it's *live* code asserting the wrong
+contract. And a setup helper isn't just shorter — it makes each test read as *only* the
+lines that differ, which is what makes a failure diagnosable at a glance.
+
+#### b. R3 — a real error type with `thiserror` (the "tidy error handling" half)
+
+Two changes in opposite directions:
+
+- **`read_metadata` is infallible — drop its `Result`.** Its body contains no `?` and no
+  `Err`: a missing title falls back to `"Untitled"`, a missing author is `None`. The
+  signature `-> Result<BookMeta, Box<dyn Error>>` promises failures that cannot happen,
+  and every caller pays an `?`/`expect` tax for them. Make it `-> BookMeta` and delete the
+  handling at the call sites.
+- **`add_from_path` gets a matchable enum.** Add `thiserror = "2"` and, in `library.rs`:
+
+  ```rust
+  #[derive(Debug, thiserror::Error)]
+  pub(crate) enum LibraryError {
+      #[error("could not copy the book into the library: {0}")]
+      Io(#[from] std::io::Error),
+      #[error("library database error: {0}")]
+      Db(#[from] rusqlite::Error),
+      #[error("failed to read the EPUB: {0}")]
+      Epub(#[from] /* rbook's error type — check docs.rs/rbook for the pinned 0.7 path */),
+  }
+  ```
+
+  `add_from_path` returns `Result<Book, LibraryError>`; every `?` in its body keeps
+  compiling because `#[from]` generates the conversions. `remove` stays on
+  `rusqlite::Result` (cleanup failures are logged, not returned — recorded in Step 9).
+
+New test — the check that the box became matchable:
+
+```rust
+#[test]
+fn import_of_a_missing_source_is_a_matchable_io_error() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let (library, _source) = library_with_source(&dir);
+    let err = library
+        .add_from_path(Path::new("/no/such/book.epub"))
+        .unwrap_err();
+    assert!(matches!(err, LibraryError::Io(_)), "got {err:?}");
+    assert!(!err.to_string().is_empty());
+}
+```
+
+**Why.** `Box<dyn Error>` can only be *displayed*; an enum can be *matched* — and matching
+is what a UI needs to choose between "that file isn't an EPUB" and "the disk is full".
+`thiserror` derives `Display` (the `#[error]` strings), `std::error::Error` (with
+`source()` wired), and the `From` impls `?` relies on — the machinery `anyhow` hides,
+written out where you can see it. And shrinking `read_metadata`'s signature teaches the
+inverse lesson: a `Result` that can't fail is as misleading as a panic that can.
+
+#### c. Move the last fallible open out of `Reader`
+
+`Reader` still holds a panic on the user path: `load_spine(&epub).expect("bundled epub
+should load")` (`main.rs:151`) — a stale message from the `const BOOK` era, now reachable
+by any imported file whose container opens but whose spine doesn't read. The Open handler
+in `LibraryBooks` already has the right pattern: fallible work at the click site, failure
+into `open_status`. Finish the job — load the spine there too, and let `OpenBook` carry it:
+
+```rust
+struct OpenBook {
+    id: i64,
+    title: String,
+    epub: Rc<Epub>,
+    docs: Rc<Vec<epub::SpineDoc>>,
+}
+```
+
+In the handler, chain `Epub::open(&path)` → `epub::load_spine(&epub)`; either failure sets
+`open_status`, success sets the fully-loaded `OpenBook`. `Reader`'s `use_hook` line
+disappears — it just clones `book.docs`.
+
+**Why.** This draws the boundary Step 12 is named for: *everything fallible happens at the
+edge, where there's a status line to show; past the boundary, components are infallible.*
+`Reader` becomes a pure function of an already-loaded book — no `expect`, nothing to go
+wrong — which is the same "data first, UI last" shape the whole phase was built on.
+(Verification is the end-to-end eyeball; "container opens but spine fails" has no easy
+fixture, and the type change itself removes the panic.)
+
+#### d. Shrink `main.rs` — split the UI modules, move the app-dir logic
+
+`main.rs` is 377 lines wearing four hats. Three moves, all mechanical:
+
+1. **`open_library()` → `library.rs`** as `Library::open_default()`. The
+   `ProjectDirs`/data-dir/books-dir logic is the library's own bootstrapping; moving it
+   takes the `directories` import out of `main.rs` and puts the path policy next to the
+   store it configures.
+2. **`src/ui/reader.rs`** — `Reader`, `NavRow`, `use_bridge`, `BridgeMsg` + its test, and
+   `BRIDGE_JS`. The bridge pieces are the reader's private plumbing: `pub(crate)` only
+   what `App` renders (`Reader`), keep the rest module-private.
+3. **`src/ui/library.rs`** — `LibraryBooks`, `ImportControl`, and `OpenBook` (it's the
+   value the library screen produces and the reader consumes — either file defensibly owns
+   it; put it where it's constructed).
+
+`main.rs` keeps `main`, `App`, the asset `const`s, and the `#[cfg(test)] BOOK` fixture
+path (already correctly test-gated — despite earlier notes, there's no dead scaffolding
+left to delete, though renaming it `TEST_BOOK` would make the gating obvious at the call
+sites). A `src/ui/mod.rs` (or `mod ui { … }` declarations) wires it up.
+
+**Why.** Module boundaries in Rust are privacy boundaries: while everything lives in
+`main.rs`, everything can touch everything, and `pub(crate)` is a formality. After the
+split, the compiler enforces that only `Reader` is the reader's public surface — the
+bridge protocol can change without any other file caring. That's the "module boundary
+review" the phase promised, done with `mod` and `pub` instead of comments.
+
+While moving the two mutation handlers, also collapse the duplicated refresh
+(`if let Ok(list) = library.list() { books.set(list); }` appears in both Remove and
+Import) into one small `refresh_books(library, books)` helper in `ui/library.rs`.
+
+#### e. Naming & hygiene (ride-alongs)
+
+- `injects_page_listener` (`epub.rs:168`) → `inject_page_listener` — it's named like its
+  test, breaking the `inject_*` convention of its four siblings.
+- Test-name typo: `"database reopnes"` (`library.rs:244`).
+- Stale `expect` messages that still say "bundled epub" on paths that now serve
+  user-supplied files (the Reader one dies in item c; grep for the rest).
+
+### Scope note
+
+- **R6 stays its own backlog item** (fragment sanitization, case-insensitive content
+  types, "Page 1 of 0") — it changes behavior, so it doesn't belong in a refactor pass.
+- The startup `expect`s in `Library::open_default` remain: no home directory / unopenable
+  DB means the app genuinely can't run, and there's no UI yet to show it. Recorded, not
+  hidden.
+- Cover thumbnails, content-hash dedupe, and the web-target `read_bytes()` import path
+  stay deferred per the phase doc.
+
+> **Status:** suggested — awaiting implementation.
