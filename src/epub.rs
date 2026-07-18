@@ -227,9 +227,16 @@ pub(crate) fn use_register_asset_handler(epub: Rc<Epub>) {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CoverImage {
+    pub(crate) media_type: String,
+    pub(crate) bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BookMeta {
     pub(crate) title: String,
     pub(crate) author: Option<String>,
+    pub(crate) cover: Option<CoverImage>,
 }
 
 pub(crate) fn read_metadata(epub: &Epub) -> Result<BookMeta, Box<dyn std::error::Error>> {
@@ -242,7 +249,19 @@ pub(crate) fn read_metadata(epub: &Epub) -> Result<BookMeta, Box<dyn std::error:
 
     let author = metadata.creators().next().map(|c| c.value().to_string());
 
-    Ok(BookMeta { title, author })
+    let cover = epub.manifest().cover_image().and_then(|entry| {
+        let bytes = entry.read_bytes().ok()?;
+        Some(CoverImage {
+            media_type: entry.media_type().to_string(),
+            bytes,
+        })
+    });
+
+    Ok(BookMeta {
+        title,
+        author,
+        cover,
+    })
 }
 
 #[cfg(test)]
@@ -435,5 +454,22 @@ mod test {
         assert!(out.contains(r#"setProperty('--ook-page'"#));
         assert!(out.find("ook-set-page").unwrap() < out.find("</head>").unwrap());
         assert!(out.contains("<p>Hi</p>"));
+    }
+
+    #[test]
+    fn read_metadata_extracts_the_cover_image() {
+        let epub = Epub::open(crate::BOOK).expect("open fixture book");
+        let meta = read_metadata(&epub).expect("bundled epub metadata should read");
+
+        let cover = meta.cover.expect("the bundled book declares a cover image");
+        assert!(cover.media_type.starts_with("image/"));
+        // Real image bytes, not a stray placeholder: JPEG → FF D8 FF, PNG → 89 50 4E 47.
+        let is_jpeg = cover.bytes.starts_with(&[0xFF, 0xD8, 0xFF]);
+        let is_png = cover.bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]);
+        assert!(
+            is_jpeg || is_png,
+            "expected JPEG or PNG bytes, got {} bytes",
+            cover.bytes.len()
+        );
     }
 }

@@ -201,6 +201,7 @@ mod test {
         let holmes = BookMeta {
             title: "The Adventures of Sherlock Holmes".to_string(),
             author: Some("Arthur Conan Doyle".to_string()),
+            cover: None,
         };
         let added = library
             .add(&holmes_path.to_string_lossy(), &holmes)
@@ -212,6 +213,7 @@ mod test {
         let beowulf = BookMeta {
             title: "Beowulf".to_string(),
             author: None,
+            cover: None,
         };
         library
             .add(&beowulf_path.to_string_lossy(), &beowulf)
@@ -234,6 +236,7 @@ mod test {
         let meta = BookMeta {
             title: "The Adventures of Sherlock Holmes".to_string(),
             author: Some("Arthur Conan Doyle".to_string()),
+            cover: None,
         };
 
         let books_dir = dir.path().join("books");
@@ -263,10 +266,12 @@ mod test {
         let holmes = BookMeta {
             title: "The Adventures of Sherlock Holmes".to_string(),
             author: Some("Arthur Conan Doyle".to_string()),
+            cover: None,
         };
         let beowulf = BookMeta {
             title: "Beowulf".to_string(),
             author: None,
+            cover: None,
         };
         let added = library
             .add(&holmes_path.to_string_lossy(), &holmes)
