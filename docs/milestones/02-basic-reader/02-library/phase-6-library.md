@@ -74,10 +74,10 @@ and the list are thin glue over a core that's already tested.
 - [x] **Step 7 — Import into managed storage.** Copy the chosen file into
       `data_dir()/books/`; store source + managed paths. `#[test]` proves open still works
       after the source is deleted.
-- [ ] **Step 8 — Re-import replaces the managed copy.** Preserve the row id while replacing
+- [x] **Step 8 — Re-import replaces the managed copy.** Preserve the row id while replacing
       the owned bytes and refreshing metadata; repair a missing copy without leaking files.
-- [ ] **Step 9 — Remove the managed copy.** Delete the row first, then the owned file;
-      refresh the UI and report incomplete cleanup. `#[test]` + eyeball.
+- [x] **Step 9 — Remove the managed copy.** Delete the row first, then the owned file;
+      tolerate an already-missing managed file. `#[test]` + eyeball.
 - [ ] **Step 10 — Review & refactor** (mandatory phase-closer): review the library module
       boundary, tidy error handling, and delete the dead single-book `BOOK` scaffolding.
 

@@ -34,9 +34,9 @@ list. **Data first, UI last**, exactly like the EPUB layer.
 7. **Import into managed storage** — copy into `data_dir()/books/`, store source + managed
    paths, and prove open survives deletion of the source. `#[test]` + eyeball. *(done)*
 8. **Re-import replaces the managed copy** — keep the row id while refreshing the stored
-   bytes and metadata; repair a missing copy without leaking files. `#[test]`. *(pending)*
-9. **Remove the managed copy** — delete the row first, then the owned file; refresh the UI
-   even when filesystem cleanup reports an error. `#[test]` + eyeball. *(pending)*
+   bytes and metadata; repair a missing copy without leaking files. `#[test]`. *(done)*
+9. **Remove the managed copy** — delete the row first, then the owned file; tolerate an
+   already-missing managed file. `#[test]` + eyeball. *(done)*
 10. **Review & refactor** — tidy module boundaries and errors, then delete the single-book
     scaffolding. *(pending)*
 
@@ -1292,7 +1292,8 @@ would say “failed” and skip refreshing the list even though the import succe
 - The two tests share near-identical setup (tempdir + books dir + fixture source + open)
   with the Step 7 test; extracting a small test helper is a Step 10 tidy, not a blocker.
 
-> **Status:** pending.
+> **Status:** done — committed in `a0cd057` (24 tests green, including both focused
+> re-import tests).
 
 ---
 
@@ -1451,4 +1452,5 @@ Notes on the shape:
   `expect`s, rename `BOOK` to `TEST_BOOK`, and review the `Library`/EPUB
   boundary.
 
-> **Status:** pending.
+> **Status:** done — committed in `a0cd057` (24 tests green; desktop removal,
+> restart persistence, original-source preservation, and stale-row removal confirmed).
