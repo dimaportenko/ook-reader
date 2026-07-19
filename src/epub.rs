@@ -20,6 +20,16 @@ pub(crate) struct LinkTarget {
     pub(crate) fragment: Option<String>,
 }
 
+pub(crate) fn extension_for(media_type: &str) -> Option<&'static str> {
+    match media_type {
+        "image/jpeg" => Some("jpg"),
+        "image/png" => Some("png"),
+        "image/gif" => Some("gif"),
+        "image/svg+xml" => Some("svg"),
+        _ => None,
+    }
+}
+
 pub(crate) fn content_type_for(path: &str) -> &'static str {
     let ext = path.rsplit('.').next().unwrap_or("");
     match ext {
