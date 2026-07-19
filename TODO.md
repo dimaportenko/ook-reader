@@ -12,6 +12,7 @@ Place to quickly drop things I would like to work later.
 - [ ] CSS architecture BEM, OOCSS, etc
 - [ ] refactoring phase
 - [ ] show cover image in books library
+- [ ] implement same book import guardrails
 
 
 

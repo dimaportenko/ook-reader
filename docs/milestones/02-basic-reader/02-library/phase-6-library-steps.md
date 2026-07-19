@@ -41,8 +41,8 @@ list. **Data first, UI last**, exactly like the EPUB layer.
     `BookMeta.cover: Option<CoverImage>`, best-effort so metadata stays infallible.
     `#[test]` against the bundled book. *(done)*
 11. **Persist & show covers (file beside the managed copy)** — 11a: cover-file lifecycle
-    (import / re-import / remove / cleanup) with a nullable `cover_path` column; 11b: an
-    app-level `covers` asset route + thumbnails in the list. *(planned — entries below)*
+    (import / re-import / remove / cleanup) with a nullable `cover_path` column *(done)*;
+    11b: an app-level `covers` asset route + thumbnails in the list. *(planned below)*
 12. **Review & refactor** — tidy module boundaries and errors, then delete the single-book
     scaffolding. *(suggested — punch-list below)*
 
@@ -1609,15 +1609,44 @@ fn import_writes_a_cover_file_next_to_the_managed_copy() {
 
 #[test]
 fn reimport_replaces_the_cover_without_leaking_files() {
-    // …two imports of the same source…
-    // books_dir holds exactly 2 files afterwards: one .epub + one cover.
-    // The first import's cover file no longer exists.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let (library, source) = library_with_source(&dir);
+
+    let first = library.add_from_path(&source).expect("first import");
+    let second = library.add_from_path(&source).expect("reimport");
+
+    let first_cover = first.cover_path.expect("first import has a cover");
+    let second_cover = second.cover_path.expect("reimport has a cover");
+
+    // Same logical book, fresh files: the old cover is gone, the new one exists.
+    assert_ne!(second_cover, first_cover);
+    assert!(!Path::new(&first_cover).exists());
+    assert!(Path::new(&second_cover).exists());
+
+    // Exactly one .epub + one cover — nothing leaked, nothing duplicated.
+    // (This is the assertion that goes red in the *old* reimport test: its
+    // `files == 1` becomes `files == 2` once covers land next to the copies.)
+    let files = std::fs::read_dir(dir.path().join("books"))
+        .expect("read books dir")
+        .count();
+    assert_eq!(files, 2);
 }
 
 #[test]
 fn remove_deletes_the_cover_file_too() {
-    // …import, then remove(id)…
-    // Row gone, managed .epub gone, cover file gone, source untouched.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let (library, source) = library_with_source(&dir);
+
+    let added = library.add_from_path(&source).expect("import succeeds");
+    let cover_path = added.cover_path.clone().expect("import has a cover");
+
+    let removed = library.remove(added.id).expect("remove succeeds");
+
+    assert!(removed, "expected an existing row to report true");
+    assert!(library.list().expect("list succeeds").is_empty());
+    assert!(!Path::new(&added.path).exists(), "managed copy is deleted");
+    assert!(!Path::new(&cover_path).exists(), "cover file is deleted");
+    assert!(source.exists(), "the user's original source is untouched");
 }
 ```
 
@@ -1679,12 +1708,85 @@ assertion is part of this step, not a regression.
    never a failed import.
 
 4. **Extend all three cleanup sites** — the same pattern each time, applied to the cover
-   path alongside the epub path:
-   - *failed import:* the `Err` arm also `cleanup_managed_file`s the just-written cover;
-   - *successful re-import:* the pre-query that fetches the previous `path` also fetches
-     the previous `cover_path`, and both are cleaned after the row updates;
-   - *remove:* `RETURNING path, cover_path`, then clean both (`cleanup_managed_file`
-     already tolerates `NotFound`, which covers rows imported before this step).
+   path alongside the epub path. The exact changes, site by site:
+
+   - *Failed import.* The cover is written inside the fallible closure, so a
+     `let` in there is invisible to the `Err` arm. Hoist the binding: declare
+     it mutable before the closure, *assign* inside. The closure is invoked
+     immediately, so its mutable capture of `cover_path` ends before the
+     `match` reads it — no borrow conflict:
+
+     ```rust
+     let mut cover_path: Option<String> = None;
+
+     let result = (|| -> Result<Book, Box<dyn std::error::Error>> {
+         // ...
+         cover_path = meta.cover.as_ref().and_then(|cover| { /* unchanged */ });
+         // ...
+     })();
+
+     match &result {
+         Err(_) => {
+             cleanup_managed_file(&managed_path);
+             if let Some(cover) = &cover_path {
+                 cleanup_managed_file(Path::new(cover));
+             }
+         }
+         // ...
+     ```
+
+   - *Successful re-import.* The pre-query grows from one column to a `(path,
+     cover_path)` tuple — rusqlite maps a two-column row through a closure
+     that builds the pair:
+
+     ```rust
+     let previous: Option<(String, Option<String>)> = self
+         .conn
+         .query_row(
+             "SELECT path, cover_path FROM books WHERE source_path = ?1",
+             params![&source_path_text],
+             |row| Ok((row.get(0)?, row.get(1)?)),
+         )
+         .optional()?;
+     ```
+
+     and the `Ok` arm destructures and cleans both:
+
+     ```rust
+     Ok(_) => {
+         if let Some((previous_path, previous_cover)) = previous {
+             cleanup_managed_file(Path::new(&previous_path));
+             if let Some(cover) = previous_cover {
+                 cleanup_managed_file(Path::new(&cover));
+             }
+         }
+     }
+     ```
+
+   - *Remove.* Same tuple shape on the `DELETE`:
+
+     ```rust
+     let removed: Option<(String, Option<String>)> = self
+         .conn
+         .query_row(
+             "DELETE FROM books WHERE id = ?1 RETURNING path, cover_path",
+             params![id],
+             |row| Ok((row.get(0)?, row.get(1)?)),
+         )
+         .optional()?;
+     ```
+
+     then clean the epub path and, `if let Some`, the cover.
+     `cleanup_managed_file` already tolerates `NotFound`, which covers rows
+     imported before this step (their `cover_path` is `NULL`, so the `if let`
+     simply skips them).
+
+   *Reimport gotcha the test will catch:* the upsert's `DO UPDATE SET` list
+   must also include `cover_path = excluded.cover_path`. Without it the
+   conflicting row keeps the *old* cover path, `RETURNING` hands it back, and
+   the freshly written new cover file leaks —
+   `reimport_replaces_the_cover_without_leaking_files` fails on both
+   `assert_ne!` and the `files == 2` count.
 
 #### Why it works
 
@@ -1709,7 +1811,9 @@ tests. Thumbnail *downscaling* (the `image` crate) is deliberately not here: cov
 stored at original size until list memory/latency is a felt problem (ADR-0002
 discipline). 11b reads the column.
 
-> **Status:** suggested — awaiting implementation.
+> **Status:** done — committed in `d1ed76b` (28 tests green, including the
+> three cover-lifecycle tests; the pre-existing reimport leak test updated to
+> expect the epub + cover pair).
 
 ---
 
