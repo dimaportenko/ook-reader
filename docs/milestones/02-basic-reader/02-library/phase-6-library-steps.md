@@ -42,7 +42,7 @@ list. **Data first, UI last**, exactly like the EPUB layer.
     `#[test]` against the bundled book. *(done)*
 11. **Persist & show covers (file beside the managed copy)** — 11a: cover-file lifecycle
     (import / re-import / remove / cleanup) with a nullable `cover_path` column *(done)*;
-    11b: an app-level `covers` asset route + thumbnails in the list. *(planned below)*
+    11b: an app-level `covers` asset route + thumbnails in the list *(done)*.
 12. **Review & refactor** — tidy module boundaries and errors, then delete the single-book
     scaffolding. *(suggested — punch-list below)*
 
@@ -1901,7 +1901,15 @@ import stays deferred until it hurts. The route serves anything in `books_dir`, 
 an extension check the day this meets a real network. Styling beyond a bare `width` waits
 for the theming phase.
 
-> **Status:** suggested — awaiting implementation.
+> **Status:** done — committed in `1020159` (29 tests green, including the
+> sanitizer test; desktop eyeball confirmed thumbnails, placeholder jacket for
+> cover-less books, removal, and restart persistence). Went beyond the sketch:
+> the styling deferred above landed here anyway — a responsive cover grid, a
+> spine-crease mask effect, and a placeholder jacket (`placeholder-2.jpg`,
+> title/author overlaid) instead of an `<img>`-less row. Note: the placeholder
+> overlay's `position: absolute` resolves against `.book-cover` only because
+> its `drop-shadow` filter creates a containing block — add
+> `position: relative` if that filter ever goes away.
 
 ---
 
