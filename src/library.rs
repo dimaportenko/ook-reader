@@ -22,6 +22,15 @@ pub(crate) struct Book {
     pub(crate) cover_path: Option<String>,
 }
 
+impl Book {
+    pub(crate) fn get_book_cover_name(&self) -> Option<&str> {
+        self.cover_path
+            .as_deref()
+            .and_then(|cover| std::path::Path::new(cover).file_name())
+            .and_then(|name| name.to_str())
+    }
+}
+
 pub(crate) struct Library {
     conn: Connection,
     books_dir: PathBuf,
@@ -56,6 +65,10 @@ impl Library {
             [],
         )?;
         Ok(Self { conn, books_dir })
+    }
+
+    pub(crate) fn books_dir(&self) -> &Path {
+        self.books_dir.as_path()
     }
 
     #[cfg(test)]

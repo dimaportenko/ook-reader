@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -207,6 +208,42 @@ pub(crate) fn inject_page_count_probe(xhtml: &str) -> String {
     </script>"#;
 
     insert_before_head_close(xhtml, script)
+}
+
+fn sanitized_file_name(input: &str) -> Option<String> {
+    let file_name = std::path::Path::new(input).file_name()?.to_str()?;
+    (file_name == input).then(|| input.to_owned())
+}
+
+pub(crate) fn use_register_covers_handler(books_dir: PathBuf) {
+    use_asset_handler("covers", move |request, responder| {
+        let name = request.uri().path().rsplit('/').next().unwrap_or_default();
+        let Some(name) = sanitized_file_name(name) else {
+            let not_found = Response::builder()
+                .status(404)
+                .body(Vec::new())
+                .expect("empty 404 body is always valid");
+            responder.respond(not_found);
+            return;
+        };
+
+        match std::fs::read(books_dir.join(&name)) {
+            Ok(bytes) => {
+                let body = Response::builder()
+                    .header("Content-Type", content_type_for(&name))
+                    .body(bytes)
+                    .expect("response with a valid content-type header");
+                responder.respond(body);
+            }
+            Err(_) => {
+                let not_found = Response::builder()
+                    .status(404)
+                    .body(Vec::new())
+                    .expect("empty 404 body is always valid");
+                responder.respond(not_found);
+            }
+        }
+    });
 }
 
 pub(crate) fn use_register_asset_handler(epub: Rc<Epub>) {
@@ -481,5 +518,16 @@ mod test {
             "expected JPEG or PNG bytes, got {} bytes",
             cover.bytes.len()
         );
+    }
+
+    #[test]
+    fn covers_route_only_serves_bare_file_names() {
+        assert_eq!(
+            sanitized_file_name("abc.cover.jpg"),
+            Some("abc.cover.jpg".to_string())
+        );
+        assert_eq!(sanitized_file_name("../library.sqlite3"), None);
+        assert_eq!(sanitized_file_name("a/b.jpg"), None);
+        assert_eq!(sanitized_file_name(""), None);
     }
 }

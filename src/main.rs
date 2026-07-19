@@ -13,6 +13,7 @@ mod nav;
 use library::Library;
 use nav::*;
 
+static PLACEHOLDER_2: Asset = asset!("/assets/books/placeholder-2.jpg");
 const FAVICON: Asset = asset!("/assets/favicon.ico");
 const MAIN_CSS: Asset = asset!("/assets/main.css");
 const BRIDGE_JS: &str = r#"
@@ -93,6 +94,8 @@ fn App() -> Element {
     use_context_provider(|| library.clone());
     use_context_provider(|| books);
     use_context_provider(|| open_book);
+
+    epub::use_register_covers_handler(library.books_dir().to_path_buf());
 
     rsx! {
         document::Link {
@@ -230,13 +233,47 @@ fn LibraryBooks() -> Element {
     rsx! {
         div {
             ul {
+                class: "library-books__list",
                 for book in books() {
                     li {
+                        class: "library-books__item",
                         key: "{book.id}",
+
+                        if let Some(name) = book.get_book_cover_name() {
+                            div {
+                                class: "book-cover",
+                                img {
+                                    class: "book-cover__img",
+                                    src: "/covers/{name}",
+                                }
+                            }
+                        } else {
+                            div {
+                                class: "book-cover",
+                                img {
+                                    class: "book-cover__img",
+                                    src: PLACEHOLDER_2,
+                                }
+                                div {
+                                    class: "book-cover__placeholder",
+                                    span {
+                                        class: "book-cover__placeholder-title",
+                                        "{book.title}"
+                                    }
+                                    if let Some(author) = book.author.as_deref() {
+                                        span {
+                                            class: "book-cover__placeholder-author",
+                                            "{author}"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         "{book.title}"
                         if let Some(author) = book.author.as_deref() {
                             span {
-                                " - {author} "
+                                "{author} "
                             }
                         }
                         button {
