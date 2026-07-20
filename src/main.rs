@@ -239,59 +239,8 @@ fn LibraryBooks() -> Element {
                         class: "library-books__item",
                         key: "{book.id}",
 
-                        if let Some(name) = book.get_book_cover_name() {
-                            div {
-                                class: "book-cover",
-                                img {
-                                    class: "book-cover__img",
-                                    src: "/covers/{name}",
-                                }
-                            }
-                        } else {
-                            div {
-                                class: "book-cover",
-                                img {
-                                    class: "book-cover__img",
-                                    src: PLACEHOLDER_2,
-                                }
-                                div {
-                                    class: "book-cover__placeholder",
-                                    span {
-                                        class: "book-cover__placeholder-title",
-                                        "{book.title}"
-                                    }
-                                    if let Some(author) = book.author.as_deref() {
-                                        span {
-                                            class: "book-cover__placeholder-author",
-                                            "{author}"
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        "{book.title}"
-                        if let Some(author) = book.author.as_deref() {
-                            span {
-                                "{author} "
-                            }
-                        }
                         button {
-                            onclick: {
-                                let library = Rc::clone(&library);
-                                let id = book.id;
-
-                                move |_| {
-                                    if library.remove(id).is_ok() {
-                                        if let Ok(list) = library.list() {
-                                            books.set(list);
-                                        }
-                                    }
-                                }
-                            },
-                            "Remove"
-                        }
-                        button {
+                            class: "book-cover",
                             onclick: {
                                 let id = book.id;
                                 let title = book.title;
@@ -314,7 +263,59 @@ fn LibraryBooks() -> Element {
                                     }
                                 }
                             },
-                            "Open"
+
+                            if let Some(name) = book.get_book_cover_name() {
+                                div {
+                                    class: "book-cover__container",
+                                    img {
+                                        class: "book-cover__img",
+                                        src: "/covers/{name}",
+                                    }
+                                }
+                            } else {
+                                div {
+                                    class: "book-cover__container",
+                                    img {
+                                        class: "book-cover__img",
+                                        src: PLACEHOLDER_2,
+                                    }
+                                    div {
+                                        class: "book-cover__placeholder",
+                                        span {
+                                            class: "book-cover__placeholder-title",
+                                            "{book.title}"
+                                        }
+                                        if let Some(author) = book.author.as_deref() {
+                                            span {
+                                                class: "book-cover__placeholder-author",
+                                                "{author}"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // "{book.title}"
+                        // if let Some(author) = book.author.as_deref() {
+                        //     span {
+                        //         "{author} "
+                        //     }
+                        // }
+                        button {
+                            onclick: {
+                                let library = Rc::clone(&library);
+                                let id = book.id;
+
+                                move |_| {
+                                    if library.remove(id).is_ok() {
+                                        if let Ok(list) = library.list() {
+                                            books.set(list);
+                                        }
+                                    }
+                                }
+                            },
+                            "Remove"
                         }
 
                     }
