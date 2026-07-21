@@ -89,10 +89,10 @@ and the list are thin glue over a core that's already tested.
       cover (bytes + media type) into `BookMeta.cover: Option<CoverImage>`, best-effort so
       metadata stays infallible. `#[test]` against the bundled book. Domain only — no
       storage, no UI. *(Pulls forward the cover thread deferred at Step 4.)*
-- [ ] **Step 11a — Persist the cover beside the managed copy.** Nullable `cover_path`
+- [x] **Step 11a — Persist the cover beside the managed copy.** Nullable `cover_path`
       column; import writes `<uuid>.cover.<ext>`, re-import replaces it, remove deletes
       it, a failed import cleans it up. `#[test]`s mirror the Steps 7–9 lifecycle tests.
-- [ ] **Step 11b — Serve covers and show thumbnails.** App-level `covers` asset route
+- [x] **Step 11b — Serve covers and show thumbnails.** App-level `covers` asset route
       with file-name sanitization; `<img>` thumbnails in the library list. `#[test]` for
       the sanitizer + `dx serve` eyeball.
 - [ ] **Step 12 — Review & refactor** (mandatory phase-closer): review the library module

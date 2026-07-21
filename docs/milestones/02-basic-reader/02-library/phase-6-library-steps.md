@@ -1911,6 +1911,12 @@ for the theming phase.
 > its `drop-shadow` filter creates a containing block — add
 > `position: relative` if that filter ever goes away.
 
+> **Follow-up (unplanned):** `7b74a76` made the cover itself the click target — the
+> whole `.book-cover` became a `button` whose handler runs the same `Epub::open` →
+> `open_status`/`open_book` flow the old Open control used, replacing the separate
+> button. UI-only; verified by eyeball. Step 12's item **c** (move `load_spine` out of
+> `Reader`) now applies to *this* handler.
+
 ---
 
 ## Step 12 — review & refactor (phase closer)
@@ -1922,7 +1928,7 @@ changes behavior — which is exactly what makes it safe to do boldly.
 
 Refactoring must not change behavior, so the existing suite **is** the spec:
 
-- `cargo test` — 24 green before, 24+ green after (item **b** adds one test; item **a**
+- `cargo test` — 29 green before, 29+ green after (item **b** adds one test; item **a**
   may reshape a few, but every behavior they pinned stays pinned).
 - `cargo clippy` — clean before and after (the `block v0.1.6` future-incompat note is
   transitive and stays).
@@ -1938,7 +1944,7 @@ refactor a sequence of safe moves instead of one big leap.
 
 #### a. Delete the test-only `Library::add` and share the test setup
 
-`add` (`library.rs:60`) is `#[cfg(test)]` scaffolding from Steps 1–6: a path-only API that
+`add` (`library.rs:75`) is `#[cfg(test)]` scaffolding from Steps 1–6: a path-only API that
 production no longer has, with an `ON CONFLICT(path)` clause that *diverges* from
 production's `ON CONFLICT(source_path)`. The three oldest tests are therefore exercising
 conflict behavior the app can't reach. Rework `add_then_list_round_trips_books`,
@@ -2022,7 +2028,7 @@ inverse lesson: a `Result` that can't fail is as misleading as a panic that can.
 #### c. Move the last fallible open out of `Reader`
 
 `Reader` still holds a panic on the user path: `load_spine(&epub).expect("bundled epub
-should load")` (`main.rs:151`) — a stale message from the `const BOOK` era, now reachable
+should load")` (`main.rs:154`) — a stale message from the `const BOOK` era, now reachable
 by any imported file whose container opens but whose spine doesn't read. The Open handler
 in `LibraryBooks` already has the right pattern: fallible work at the click site, failure
 into `open_status`. Finish the job — load the spine there too, and let `OpenBook` carry it:
@@ -2049,7 +2055,7 @@ fixture, and the type change itself removes the panic.)
 
 #### d. Shrink `main.rs` — split the UI modules, move the app-dir logic
 
-`main.rs` is 377 lines wearing four hats. Three moves, all mechanical:
+`main.rs` is ~415 lines wearing four hats. Three moves, all mechanical:
 
 1. **`open_library()` → `library.rs`** as `Library::open_default()`. The
    `ProjectDirs`/data-dir/books-dir logic is the library's own bootstrapping; moving it
@@ -2095,4 +2101,10 @@ Import) into one small `refresh_books(library, books)` helper in `ui/library.rs`
 - Cover thumbnails, content-hash dedupe, and the web-target `read_bytes()` import path
   stay deferred per the phase doc.
 
-> **Status:** suggested — awaiting implementation.
+> **Status:** in progress — item **a** implemented (uncommitted): `Library::add` and the
+> now-unused `open_in_memory` + test-only `BookMeta` import deleted; the three oldest
+> tests reseeded through `add_from_path` via the existing `library_with_source` helper,
+> which every library test now uses. Because both seeded sources copy the same fixture,
+> the round-trip test asserts list *contents* rather than `ORDER BY title` order (equal
+> titles have unspecified relative order). The `"database reopnes"` typo from item **e**
+> died with the rewrite. 29 tests green, clippy clean. Items **b**–**e** remain.

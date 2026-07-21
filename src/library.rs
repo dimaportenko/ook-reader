@@ -10,9 +10,6 @@ use uuid::Uuid;
 
 use crate::epub;
 
-#[cfg(test)]
-use crate::epub::BookMeta;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Book {
     pub(crate) id: i64,
@@ -37,14 +34,6 @@ pub(crate) struct Library {
 }
 
 impl Library {
-    #[cfg(test)]
-    fn open_in_memory(books_dir: impl AsRef<Path>) -> rusqlite::Result<Self> {
-        Self::init(
-            Connection::open_in_memory()?,
-            books_dir.as_ref().to_path_buf(),
-        )
-    }
-
     pub(crate) fn open(
         db_path: impl AsRef<std::path::Path>,
         books_dir: impl AsRef<std::path::Path>,
@@ -69,27 +58,6 @@ impl Library {
 
     pub(crate) fn books_dir(&self) -> &Path {
         self.books_dir.as_path()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn add(&self, path: &str, meta: &BookMeta) -> rusqlite::Result<Book> {
-        let id = self.conn.query_row(
-            "INSERT INTO books (path, source_path, title, author)
-                VALUES (?1, ?1, ?2, ?3)
-                ON CONFLICT(path) DO UPDATE SET
-                    title = excluded.title,
-                    author = excluded.author
-            RETURNING id",
-            params![path, &meta.title, meta.author.as_deref()],
-            |row| row.get(0),
-        )?;
-        Ok(Book {
-            id,
-            path: path.to_string(),
-            title: meta.title.clone(),
-            author: meta.author.clone(),
-            cover_path: None,
-        })
     }
 
     fn read_book(row: &Row<'_>) -> rusqlite::Result<Book> {
@@ -231,61 +199,37 @@ mod test {
     #[test]
     fn add_then_list_round_trips_books() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let books_dir = dir.path().join("books");
-        let library = Library::open_in_memory(&books_dir).expect("in-memory db opens");
-        let holmes_path = books_dir.join("holmes.epub");
-        let beowulf_path = books_dir.join("beowulf.epub");
+        let (library, first_source, books_dir) = library_with_source(&dir);
+        let second_source = dir.path().join("holmes-second-source.epub");
+        std::fs::copy(crate::BOOK, &second_source).expect("second fixture source");
 
-        let holmes = BookMeta {
-            title: "The Adventures of Sherlock Holmes".to_string(),
-            author: Some("Arthur Conan Doyle".to_string()),
-            cover: None,
-        };
-        let added = library
-            .add(&holmes_path.to_string_lossy(), &holmes)
-            .expect("add succeeds");
+        let first = library.add_from_path(&first_source).expect("first import");
+        let second = library.add_from_path(&second_source).expect("second import");
 
-        assert_eq!(added.id, 1);
-        assert_eq!(added.path, holmes_path.to_string_lossy());
+        // Distinct source paths are distinct books, with metadata read from the file.
+        assert_ne!(first.id, second.id);
+        assert!(Path::new(&first.path).starts_with(&books_dir));
+        assert!(first.title.contains("Sherlock Holmes"));
+        assert!(first.author.as_deref().unwrap_or("").contains("Doyle"));
 
-        let beowulf = BookMeta {
-            title: "Beowulf".to_string(),
-            author: None,
-            cover: None,
-        };
-        library
-            .add(&beowulf_path.to_string_lossy(), &beowulf)
-            .expect("add anon");
-
+        // Both sources are the same fixture, so titles tie and ORDER BY title
+        // leaves their relative order unspecified — assert contents, not order.
         let books = library.list().expect("list succeeds");
         assert_eq!(books.len(), 2);
-
-        // ORDER BY title
-        assert_eq!(books[0].title, "Beowulf");
-        assert_eq!(books[0].author, None);
-        assert_eq!(books[1], added);
-        assert_eq!(books[1].author.as_deref(), Some("Arthur Conan Doyle"));
+        assert!(books.contains(&first));
+        assert!(books.contains(&second));
     }
 
     #[test]
     fn file_backed_library_survives_reopen_and_reimport_is_idempotent() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let db_path = dir.path().join("library.sqlite3");
-        let meta = BookMeta {
-            title: "The Adventures of Sherlock Holmes".to_string(),
-            author: Some("Arthur Conan Doyle".to_string()),
-            cover: None,
-        };
-
-        let books_dir = dir.path().join("books");
-        let library = Library::open(&db_path, &books_dir).expect("file database opens");
-        let first = library.add("/books/holmes.epub", &meta).expect("first add");
+        let (library, source, books_dir) = library_with_source(&dir);
+        let first = library.add_from_path(&source).expect("first import");
         drop(library);
 
-        let library = Library::open(&db_path, &books_dir).expect("database reopnes");
-        let second = library
-            .add("/books/holmes.epub", &meta)
-            .expect("second add");
+        let library = Library::open(dir.path().join("library.sqlite3"), &books_dir)
+            .expect("database reopens");
+        let second = library.add_from_path(&source).expect("second import");
         let books = library.list().expect("list succeeds");
 
         assert_eq!(second.id, first.id);
@@ -295,40 +239,21 @@ mod test {
     #[test]
     fn remove_drops_the_row_and_is_a_noop_for_unknown_ids() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let library =
-            Library::open_in_memory(dir.path().join("books")).expect("in-memory db opens");
-        let books_dir = dir.path().join("books");
-        let holmes_path = books_dir.join("holmes.epub");
-        let beowulf_path = books_dir.join("beowulf.epub");
-
-        let holmes = BookMeta {
-            title: "The Adventures of Sherlock Holmes".to_string(),
-            author: Some("Arthur Conan Doyle".to_string()),
-            cover: None,
-        };
-        let beowulf = BookMeta {
-            title: "Beowulf".to_string(),
-            author: None,
-            cover: None,
-        };
-        let added = library
-            .add(&holmes_path.to_string_lossy(), &holmes)
-            .expect("add holmes");
-        library
-            .add(&beowulf_path.to_string_lossy(), &beowulf)
-            .expect("add beowulf");
+        let (library, first_source, _) = library_with_source(&dir);
+        let second_source = dir.path().join("holmes-second-source.epub");
+        std::fs::copy(crate::BOOK, &second_source).expect("second fixture source");
+        let first = library.add_from_path(&first_source).expect("first import");
+        let second = library.add_from_path(&second_source).expect("second import");
 
         // Remove by the DB-assigned id, not by path.
-        let removed = library.remove(added.id).expect("remove succeeds");
+        let removed = library.remove(first.id).expect("remove succeeds");
         assert!(removed, "expected an existing row to report true");
 
         let books = library.list().expect("list succeeds");
-        assert_eq!(books.len(), 1);
-        assert_eq!(books[0].title, "Beowulf");
-        assert_ne!(books[0].id, added.id);
+        assert_eq!(books, vec![second]);
 
         // Unknown id: no error, no change, reports false.
-        let removed_again = library.remove(added.id).expect("missing id is Ok(false)");
+        let removed_again = library.remove(first.id).expect("missing id is Ok(false)");
         assert!(!removed_again);
         assert_eq!(library.list().expect("list still one").len(), 1);
     }
@@ -336,14 +261,7 @@ mod test {
     #[test]
     fn import_opens_from_managed_copy_after_source_is_deleted() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let db_path = dir.path().join("library.sqlite3");
-        let books_dir = dir.path().join("books");
-        std::fs::create_dir_all(&books_dir).expect("books dir");
-
-        let source = dir.path().join("holmes-source.epub");
-        std::fs::copy(crate::BOOK, &source).expect("fixture source");
-
-        let library = Library::open(&db_path, &books_dir).expect("library opens");
+        let (library, source, books_dir) = library_with_source(&dir);
         let added = library.add_from_path(&source).expect("import succeeds");
 
         assert!(std::path::Path::new(&added.path).starts_with(&books_dir));
@@ -437,7 +355,7 @@ mod test {
     #[test]
     fn import_writes_a_cover_file_next_to_the_managed_copy() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let (library, source, _) = library_with_source(&dir); // Step 12(a) proposes this helper — pulling it forward here is fair game
+        let (library, source, _) = library_with_source(&dir);
         let added = library.add_from_path(&source).expect("import succeeds");
 
         let cover_path = added.cover_path.expect("bundled book has a cover");
