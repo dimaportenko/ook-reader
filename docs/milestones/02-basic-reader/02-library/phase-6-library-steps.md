@@ -2101,10 +2101,11 @@ Import) into one small `refresh_books(library, books)` helper in `ui/library.rs`
 - Cover thumbnails, content-hash dedupe, and the web-target `read_bytes()` import path
   stay deferred per the phase doc.
 
-> **Status:** in progress — item **a** implemented (uncommitted): `Library::add` and the
-> now-unused `open_in_memory` + test-only `BookMeta` import deleted; the three oldest
-> tests reseeded through `add_from_path` via the existing `library_with_source` helper,
-> which every library test now uses. Because both seeded sources copy the same fixture,
-> the round-trip test asserts list *contents* rather than `ORDER BY title` order (equal
-> titles have unspecified relative order). The `"database reopnes"` typo from item **e**
-> died with the rewrite. 29 tests green, clippy clean. Items **b**–**e** remain.
+> **Status:** in progress — item **a** done, committed in `3f65e73` (29 tests green,
+> clippy clean): `Library::add` and the now-unused `open_in_memory` + test-only
+> `BookMeta` import deleted; the three oldest tests reseeded through `add_from_path` via
+> the existing `library_with_source` helper, which every library test now uses. Because
+> both seeded sources copy the same fixture, the round-trip test asserts list *contents*
+> rather than `ORDER BY title` order (equal titles have unspecified relative order). The
+> `"database reopnes"` typo from item **e** died with the rewrite. Items **b**–**e**
+> remain.
