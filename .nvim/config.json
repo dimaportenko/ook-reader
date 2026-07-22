@@ -1,5 +1,6 @@
 {
   "commands": {
+    "dx:bundle": "dx bundle --bundle macos",
     "dx:serve": "dx serve --platform desktop",
     "test": "cargo test",
     "validate": "cargo test && cargo clippy --all-targets"
