@@ -1547,7 +1547,7 @@ compiling — add `cover: None` to each. `add_from_path` needs no change; it rea
   piece — no cover declared, unreadable bytes — collapses to `None` instead of an error.
   `?` on an `Option` inside a closure returning `Option` short-circuits exactly like it
   does on `Result`, and it's what keeps `read_metadata` effectively infallible — the
-  property Step 12's punch-list item b (drop the `Result`) depends on. A cover is
+  property Step 12's punch-list item e (drop the `Result`) depends on. A cover is
   decoration; its absence should never block an import.
 - **`media_type` rides along now** because the eventual `<img>` render needs a content
   type for its data URL, and capturing it here avoids re-opening the EPUB later just to
@@ -1914,7 +1914,7 @@ for the theming phase.
 > **Follow-up (unplanned):** `7b74a76` made the cover itself the click target — the
 > whole `.book-cover` became a `button` whose handler runs the same `Epub::open` →
 > `open_status`/`open_book` flow the old Open control used, replacing the separate
-> button. UI-only; verified by eyeball. Step 12's item **c** (move `load_spine` out of
+> button. UI-only; verified by eyeball. Step 12's item **b** (move `load_spine` out of
 > `Reader`) now applies to *this* handler.
 
 ---
@@ -1928,8 +1928,8 @@ changes behavior — which is exactly what makes it safe to do boldly.
 
 Refactoring must not change behavior, so the existing suite **is** the spec:
 
-- `cargo test` — 29 green before, 29+ green after (item **b** adds one test; item **a**
-  may reshape a few, but every behavior they pinned stays pinned).
+- `cargo test` — 29 green before, 29+ green after (item **e** at the end adds one test;
+  item **a** already reshaped a few, but every behavior they pinned stays pinned).
 - `cargo clippy` — clean before and after (the `block v0.1.6` future-incompat note is
   transitive and stays).
 - One `dx serve` eyeball at the end: import → list → open → page → chapter nav → TOC link
@@ -1940,7 +1940,8 @@ refactor a sequence of safe moves instead of one big leap.
 
 ### Punch-list
 
-*(suggested order a → b → c → d; e rides along wherever you're already editing)*
+*(order a → b → c → d → e — structural moves first, typed errors last so they land
+against the final module shape)*
 
 #### a. Delete the test-only `Library::add` and share the test setup
 
@@ -1971,61 +1972,12 @@ fn library_with_source(dir: &tempfile::TempDir) -> (Library, PathBuf) {
 *(The tempdir stays owned by the test — if the helper created it, it would be dropped —
 and deleted — when the helper returned.)*
 
-**Why.** Tests are the safety net for items b–d, so strengthen the net first. A test-only
+**Why.** Tests are the safety net for items b–e, so strengthen the net first. A test-only
 method with test-only SQL is worse than dead code: it's *live* code asserting the wrong
 contract. And a setup helper isn't just shorter — it makes each test read as *only* the
 lines that differ, which is what makes a failure diagnosable at a glance.
 
-#### b. R3 — a real error type with `thiserror` (the "tidy error handling" half)
-
-Two changes in opposite directions:
-
-- **`read_metadata` is infallible — drop its `Result`.** Its body contains no `?` and no
-  `Err`: a missing title falls back to `"Untitled"`, a missing author is `None`. The
-  signature `-> Result<BookMeta, Box<dyn Error>>` promises failures that cannot happen,
-  and every caller pays an `?`/`expect` tax for them. Make it `-> BookMeta` and delete the
-  handling at the call sites.
-- **`add_from_path` gets a matchable enum.** Add `thiserror = "2"` and, in `library.rs`:
-
-  ```rust
-  #[derive(Debug, thiserror::Error)]
-  pub(crate) enum LibraryError {
-      #[error("could not copy the book into the library: {0}")]
-      Io(#[from] std::io::Error),
-      #[error("library database error: {0}")]
-      Db(#[from] rusqlite::Error),
-      #[error("failed to read the EPUB: {0}")]
-      Epub(#[from] /* rbook's error type — check docs.rs/rbook for the pinned 0.7 path */),
-  }
-  ```
-
-  `add_from_path` returns `Result<Book, LibraryError>`; every `?` in its body keeps
-  compiling because `#[from]` generates the conversions. `remove` stays on
-  `rusqlite::Result` (cleanup failures are logged, not returned — recorded in Step 9).
-
-New test — the check that the box became matchable:
-
-```rust
-#[test]
-fn import_of_a_missing_source_is_a_matchable_io_error() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let (library, _source) = library_with_source(&dir);
-    let err = library
-        .add_from_path(Path::new("/no/such/book.epub"))
-        .unwrap_err();
-    assert!(matches!(err, LibraryError::Io(_)), "got {err:?}");
-    assert!(!err.to_string().is_empty());
-}
-```
-
-**Why.** `Box<dyn Error>` can only be *displayed*; an enum can be *matched* — and matching
-is what a UI needs to choose between "that file isn't an EPUB" and "the disk is full".
-`thiserror` derives `Display` (the `#[error]` strings), `std::error::Error` (with
-`source()` wired), and the `From` impls `?` relies on — the machinery `anyhow` hides,
-written out where you can see it. And shrinking `read_metadata`'s signature teaches the
-inverse lesson: a `Result` that can't fail is as misleading as a panic that can.
-
-#### c. Move the last fallible open out of `Reader`
+#### b. Move the last fallible open out of `Reader`
 
 `Reader` still holds a panic on the user path: `load_spine(&epub).expect("bundled epub
 should load")` (`main.rs:154`) — a stale message from the `const BOOK` era, now reachable
@@ -2053,7 +2005,7 @@ wrong — which is the same "data first, UI last" shape the whole phase was buil
 (Verification is the end-to-end eyeball; "container opens but spine fails" has no easy
 fixture, and the type change itself removes the panic.)
 
-#### d. Shrink `main.rs` — split the UI modules, move the app-dir logic
+#### c. Shrink `main.rs` — split the UI modules, move the app-dir logic
 
 `main.rs` is ~415 lines wearing four hats. Three moves, all mechanical:
 
@@ -2083,13 +2035,79 @@ While moving the two mutation handlers, also collapse the duplicated refresh
 (`if let Ok(list) = library.list() { books.set(list); }` appears in both Remove and
 Import) into one small `refresh_books(library, books)` helper in `ui/library.rs`.
 
-#### e. Naming & hygiene (ride-alongs)
+#### d. Naming & hygiene (ride-alongs)
 
 - `injects_page_listener` (`epub.rs:168`) → `inject_page_listener` — it's named like its
   test, breaking the `inject_*` convention of its four siblings.
-- Test-name typo: `"database reopnes"` (`library.rs:244`).
+- Test-name typo: `"database reopnes"` (`library.rs:244`) — **already fixed in item a**
+  when that test was rewritten.
 - Stale `expect` messages that still say "bundled epub" on paths that now serve
-  user-supplied files (the Reader one dies in item c; grep for the rest).
+  user-supplied files (the Reader one dies in item b; grep for the rest).
+
+#### e. R3 — a real error type with `thiserror` (the "tidy error handling" half)
+
+*Last on purpose:* by the time you get here, `add_from_path` and `read_metadata` live in
+their final homes (`library.rs` / `epub.rs`; UI call sites in `ui/library.rs` after item
+**c**), so the typed surface lands once instead of being shuffled through the module split.
+Item **b** also clears the Reader `expect` first — the open-path half of R3 — leaving this
+item as the import-side half only.
+
+Two changes in opposite directions:
+
+- **`read_metadata` is infallible — drop its `Result`.** Its body contains no `?` and no
+  `Err`: a missing title falls back to `"Untitled"`, a missing author is `None`. The
+  signature `-> Result<BookMeta, Box<dyn Error>>` promises failures that cannot happen,
+  and every caller pays an `?`/`expect` tax for them. Make it `-> BookMeta` and delete the
+  handling at the call sites.
+- **`add_from_path` gets a matchable enum.** Add `thiserror = "2"` and, in `library.rs`:
+
+  ```rust
+  #[derive(Debug, thiserror::Error)]
+  pub(crate) enum LibraryError {
+      #[error("could not copy the book into the library: {0}")]
+      Io(#[from] std::io::Error),
+      #[error("library database error: {0}")]
+      Db(#[from] rusqlite::Error),
+      #[error("failed to read the EPUB: {0}")]
+      Epub(#[from] rbook::ebook::errors::EbookError),
+  }
+  ```
+
+  (`Epub::open` returns `Result<Epub, EbookError>` in rbook 0.7.9 — confirmed in the
+  crate source. Import it as `use rbook::ebook::errors::EbookError` if you prefer the
+  short name in the `#[from]`.)
+
+  `add_from_path` returns `Result<Book, LibraryError>`; every `?` in its body keeps
+  compiling because `#[from]` generates the conversions. The early `fs::copy` failure
+  that today does `return Err(Box::new(error))` becomes `return Err(error.into())` (or
+  restructure so `?` covers it after the cleanup). `remove` stays on `rusqlite::Result`
+  (cleanup failures are logged, not returned — recorded in Step 9).
+
+  Call sites that only *display* the error (`Import failed: {error}` in `ImportControl`)
+  keep working unchanged — `LibraryError` implements `Display` via the `#[error]`
+  strings. What changes is that a future UI *could* `match` on the variant.
+
+New test — the check that the box became matchable:
+
+```rust
+#[test]
+fn import_of_a_missing_source_is_a_matchable_io_error() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let (library, _source) = library_with_source(&dir);
+    let err = library
+        .add_from_path(Path::new("/no/such/book.epub"))
+        .unwrap_err();
+    assert!(matches!(err, LibraryError::Io(_)), "got {err:?}");
+    assert!(!err.to_string().is_empty());
+}
+```
+
+**Why.** `Box<dyn Error>` can only be *displayed*; an enum can be *matched* — and matching
+is what a UI needs to choose between "that file isn't an EPUB" and "the disk is full".
+`thiserror` derives `Display` (the `#[error]` strings), `std::error::Error` (with
+`source()` wired), and the `From` impls `?` relies on — the machinery `anyhow` hides,
+written out where you can see it. And shrinking `read_metadata`'s signature teaches the
+inverse lesson: a `Result` that can't fail is as misleading as a panic that can.
 
 ### Scope note
 
@@ -2107,5 +2125,6 @@ Import) into one small `refresh_books(library, books)` helper in `ui/library.rs`
 > the existing `library_with_source` helper, which every library test now uses. Because
 > both seeded sources copy the same fixture, the round-trip test asserts list *contents*
 > rather than `ORDER BY title` order (equal titles have unspecified relative order). The
-> `"database reopnes"` typo from item **e** died with the rewrite. Items **b**–**e**
-> remain.
+> `"database reopnes"` typo from item **d** died with the rewrite. Letters renumbered
+> sequentially after moving thiserror last: **a → b → c → d → e**. **Next up: item b**
+> (move the last fallible open out of `Reader`).

@@ -203,7 +203,10 @@ doing it earlier makes Steps 3 and 5 cleaner, since import and open are the two 
 these errors surface to the user. The `expect`s in `App`/`Reader` can stay until Step 5
 gives the UI somewhere to show a failure.
 
-> **Status:** pending.
+> **Status:** pending — lands as **Phase 6 Step 12** in two halves, structural work first:
+> item **b** clears the Reader `expect` / moves `load_spine` to the open handler; item
+> **e** (last in the punch-list) adds `LibraryError` on `add_from_path` + infallible
+> `read_metadata`. Mark R3 done once both land.
 
 ---
 

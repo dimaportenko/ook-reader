@@ -13,6 +13,8 @@ mod nav;
 use library::Library;
 use nav::*;
 
+use crate::epub::SpineDoc;
+
 static PLACEHOLDER_2: Asset = asset!("/assets/books/placeholder-2.jpg");
 const FAVICON: Asset = asset!("/assets/favicon.ico");
 const MAIN_CSS: Asset = asset!("/assets/main.css");
@@ -52,6 +54,7 @@ struct OpenBook {
     id: i64,
     title: String,
     epub: Rc<Epub>,
+    docs: Rc<Vec<epub::SpineDoc>>,
 }
 
 impl PartialEq for OpenBook {
@@ -150,8 +153,7 @@ fn Reader(book: OpenBook) -> Element {
     epub::use_register_asset_handler(book.epub.clone());
 
     let mut open_book = use_context::<Signal<Option<OpenBook>>>();
-    let epub = book.epub;
-    let docs = use_hook(|| Rc::new(epub::load_spine(&epub).expect("bundled epub should load")));
+    let docs = book.docs;
     let state = nav::use_reader_state(docs.len());
     let chapter = state.data.chapter();
     let pending_fragment = state.data.pending_fragment();
@@ -223,6 +225,12 @@ fn Reader(book: OpenBook) -> Element {
     }
 }
 
+fn open_epub(path: &std::path::Path) -> Result<(Epub, Vec<SpineDoc>), Box<dyn std::error::Error>> {
+    let epub = Epub::open(path)?;
+    let docs = epub::load_spine(&epub)?;
+    Ok((epub, docs))
+}
+
 #[component]
 fn LibraryBooks() -> Element {
     let library = use_context::<Rc<Library>>();
@@ -247,8 +255,10 @@ fn LibraryBooks() -> Element {
                                 let path = book.path;
 
                                 move |_| {
-                                    match Epub::open(&path) {
-                                        Ok(epub) => {
+                                    let result = open_epub(std::path::Path::new(&path));
+                                    match result
+                                    {
+                                        Ok((epub, docs)) => {
                                             open_status.set(None);
                                             open_book
                                                 .set(
@@ -256,6 +266,7 @@ fn LibraryBooks() -> Element {
                                                         id,
                                                         title: title.clone(),
                                                         epub: Rc::new(epub),
+                                                        docs: Rc::new(docs),
                                                     }),
                                                 );
                                         }
