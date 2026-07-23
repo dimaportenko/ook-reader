@@ -2119,7 +2119,7 @@ inverse lesson: a `Result` that can't fail is as misleading as a panic that can.
 - Cover thumbnails, content-hash dedupe, and the web-target `read_bytes()` import path
   stay deferred per the phase doc.
 
-> **Status:** in progress — items **a**–**b** done. **a** in `3f65e73` (29 tests green,
+> **Status:** in progress — items **a**–**c** done. **a** in `3f65e73` (29 tests green,
 > clippy clean): `Library::add` and the now-unused `open_in_memory` + test-only
 > `BookMeta` import deleted; the three oldest tests reseeded through `add_from_path` via
 > the existing `library_with_source` helper, which every library test now uses. Because
@@ -2129,5 +2129,9 @@ inverse lesson: a `Result` that can't fail is as misleading as a panic that can.
 > sequentially after moving thiserror last: **a → b → c → d → e**. **b** in `65183f3`
 > (29 tests green, clippy clean): `OpenBook` carries `docs`; `open_epub` chains
 > `Epub::open` → `load_spine` at the cover-click site into `open_status` / a fully-loaded
-> `OpenBook`; `Reader` drops the `use_hook`/`expect` and just uses `book.docs`. **Next
-> up: item c** (shrink `main.rs` — split the UI modules, move the app-dir logic).
+> `OpenBook`; `Reader` drops the `use_hook`/`expect` and just uses `book.docs`. **c** in
+> `c122a7b` (29 tests green, clippy clean): `Library::open_default()` owns app-dir
+> bootstrapping; `src/ui/reader.rs` holds `Reader` / `NavRow` / `use_bridge` / `BRIDGE_JS`
+> / `BridgeMsg` (+ test); `src/ui/library.rs` holds `LibraryBooks` / `ImportControl` /
+> `OpenBook` / `refresh_books`; `main.rs` keeps `main`, `App`, asset consts, and the test
+> `BOOK` fixture. **Next up: item d** (naming & hygiene ride-alongs).
