@@ -177,6 +177,16 @@ impl Library {
         let rows = stmt.query_map([], Self::read_book)?;
         rows.collect()
     }
+
+    pub(crate) fn open_default() -> Library {
+        let dirs = directories::ProjectDirs::from("com", "dimaportenko", "ook-reader")
+            .expect("a home directory should exist");
+        let data_dir = dirs.data_dir();
+        let books_dir = data_dir.join("books");
+
+        std::fs::create_dir_all(&books_dir).expect("app data dir should be creatable");
+        Library::open(data_dir.join("library.sqlite3"), books_dir).expect("library db should open")
+    }
 }
 
 fn cleanup_managed_file(path: &Path) {
@@ -204,7 +214,9 @@ mod test {
         std::fs::copy(crate::BOOK, &second_source).expect("second fixture source");
 
         let first = library.add_from_path(&first_source).expect("first import");
-        let second = library.add_from_path(&second_source).expect("second import");
+        let second = library
+            .add_from_path(&second_source)
+            .expect("second import");
 
         // Distinct source paths are distinct books, with metadata read from the file.
         assert_ne!(first.id, second.id);
@@ -243,7 +255,9 @@ mod test {
         let second_source = dir.path().join("holmes-second-source.epub");
         std::fs::copy(crate::BOOK, &second_source).expect("second fixture source");
         let first = library.add_from_path(&first_source).expect("first import");
-        let second = library.add_from_path(&second_source).expect("second import");
+        let second = library
+            .add_from_path(&second_source)
+            .expect("second import");
 
         // Remove by the DB-assigned id, not by path.
         let removed = library.remove(first.id).expect("remove succeeds");
