@@ -68,44 +68,11 @@ pub(crate) fn LibraryBooks() -> Element {
                                 }
                             },
 
-                            if let Some(name) = book.get_book_cover_name() {
-                                div {
-                                    class: "book-cover__container",
-                                    img {
-                                        class: "book-cover__img",
-                                        src: "/covers/{name}",
-                                    }
-                                }
-                            } else {
-                                div {
-                                    class: "book-cover__container",
-                                    img {
-                                        class: "book-cover__img",
-                                        src: PLACEHOLDER_2,
-                                    }
-                                    div {
-                                        class: "book-cover__placeholder",
-                                        span {
-                                            class: "book-cover__placeholder-title",
-                                            "{book.title}"
-                                        }
-                                        if let Some(author) = book.author.as_deref() {
-                                            span {
-                                                class: "book-cover__placeholder-author",
-                                                "{author}"
-                                            }
-                                        }
-                                    }
-                                }
+                            BookCover {
+                                book: book.clone(),
                             }
                         }
 
-                        // "{book.title}"
-                        // if let Some(author) = book.author.as_deref() {
-                        //     span {
-                        //         "{author} "
-                        //     }
-                        // }
                         button {
                             onclick: {
                                 let library = Rc::clone(&library);
@@ -130,6 +97,43 @@ pub(crate) fn LibraryBooks() -> Element {
                 "{status}"
             }
         }
+    }
+}
+
+#[component]
+fn BookCover(book: Book) -> Element {
+    rsx! {
+        if let Some(name) = book.get_book_cover_name() {
+            div {
+                class: "book-cover__container",
+                img {
+                    class: "book-cover__img",
+                    src: "/covers/{name}",
+                }
+            }
+        } else {
+            div {
+                class: "book-cover__container",
+                img {
+                    class: "book-cover__img",
+                    src: PLACEHOLDER_2,
+                }
+                div {
+                    class: "book-cover__placeholder",
+                    span {
+                        class: "book-cover__placeholder-title",
+                        "{book.title}"
+                    }
+                    if let Some(author) = book.author.as_deref() {
+                        span {
+                            class: "book-cover__placeholder-author",
+                            "{author}"
+                        }
+                    }
+                }
+            }
+        }
+
     }
 }
 
