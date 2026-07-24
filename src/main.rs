@@ -11,7 +11,10 @@ mod ui;
 
 use library::Library;
 
-use crate::ui::library::{ImportControl, LibraryBooks, OpenBook};
+use crate::ui::{
+    library::{ImportControl, LibraryBooks, OpenBook},
+    reader::Reader,
+};
 
 const FAVICON: Asset = asset!("/assets/favicon.ico");
 const MAIN_CSS: Asset = asset!("/assets/main.css");
@@ -49,7 +52,7 @@ fn App() -> Element {
         }
 
         if let Some(book) = open_book() {
-            ui::reader::Reader {
+            Reader {
                 key: "{book.id}",
                 book,
             }
