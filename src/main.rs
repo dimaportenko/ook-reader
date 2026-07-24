@@ -8,6 +8,7 @@ mod epub;
 mod library;
 mod nav;
 mod ui;
+mod web;
 
 use library::Library;
 

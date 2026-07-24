@@ -6,6 +6,8 @@ use dioxus::desktop::{use_asset_handler, wry::http::Response};
 use rbook::epub::rewrite::{EpubRewriteOptions, PathRewrite};
 use rbook::Epub;
 
+use crate::web::assets::{get_wrapped_css, get_wrapped_js};
+
 pub(crate) const EPUB_ROUTE: &str = "epub";
 pub(crate) const EPUB_URL_PREFIX: &str = "dioxus://index.html/epub/"; // must embed EPUB_ROUTE
 
@@ -71,47 +73,6 @@ pub(crate) fn load_spine(epub: &Epub) -> Result<Vec<SpineDoc>, Box<dyn std::erro
         .collect()
 }
 
-pub(crate) fn inject_pagination_css(xhtml: &str) -> String {
-    let css = r#"<style type="text/css">
-        :root { --ook-page: 0; }
-        html { width: 100vw; height: 100vh; overflow: hidden; }
-        body {
-            width: 100vw !important;
-            height: 100vh !important;
-            margin: 0 !important;
-            padding: 24px !important;
-            box-sizing: border-box !important;
-            max-width: none !important;
-
-            overflow: visible;
-            column-width: calc(100vw - 48px) !important;
-            column-gap: 48px !important;
-            column-fill: auto;
-            transform: translateX(calc(var(--ook-page) * -100vw));
-        }
-        </style>"#;
-
-    insert_before_head_close(xhtml, css)
-}
-
-pub(crate) fn inject_link_bridge(xhtml: &str) -> String {
-    let script = r#"<script type="text/javascript">
-    //<![CDATA[
-        document.addEventListener('click', function(e) {
-            var a = e.target.closest && e.target.closest('a[href]');
-            if (!a) return;
-            e.preventDefault();
-            window.parent.postMessage(
-                { kind: 'ook-link', raw: a.getAttribute('href') },
-                '*'
-            );
-        });
-    //]]>
-    </script>"#;
-
-    insert_before_head_close(xhtml, script)
-}
-
 pub(crate) fn resolve_internal_link(
     docs: &[SpineDoc],
     current_index: usize,
@@ -164,50 +125,26 @@ pub(crate) fn insert_before_head_close(xhtml: &str, snippet: &str) -> String {
     xhtml.replacen("</head>", &format!("{snippet}</head>"), 1)
 }
 
+const PAGINATION_CSS: &str = include_str!("../assets/reader/pagination.css");
+const PAGE_LISTENER_JS: &str = include_str!("../assets/reader/page-listener.js");
+const LINK_BRIDGE_JS: &str = include_str!("../assets/reader/link-bridge.js");
+const PAGE_COUNT_JS: &str = include_str!("../assets/reader/page-count.js");
+
 pub(crate) fn render_document_url(doc: &SpineDoc, fragment: Option<&str>) -> String {
-    let paged = inject_pagination_css(&doc.xhtml);
-    let page_listener = injects_page_listener(&paged);
-    let bridged = inject_link_bridge(&page_listener);
-    let probed = inject_page_count_probe(&bridged);
+    let pagination_css = get_wrapped_css(PAGINATION_CSS);
+    let paged = insert_before_head_close(&doc.xhtml, &pagination_css);
+    let page_listener_js = get_wrapped_js(PAGE_LISTENER_JS);
+    let page_listener = insert_before_head_close(&paged, &page_listener_js);
+    let link_bridge_js = get_wrapped_js(LINK_BRIDGE_JS);
+    let bridged = insert_before_head_close(&page_listener, &link_bridge_js);
+    let page_count_js = get_wrapped_js(PAGE_COUNT_JS);
+    let probed = insert_before_head_close(&bridged, &page_count_js);
+
     let prepared = match fragment {
         Some(frag) => inject_fragment_scroll(&probed, frag),
         None => probed,
     };
     to_xhtml_data_url(&prepared)
-}
-
-pub(crate) fn injects_page_listener(xhtml: &str) -> String {
-    let script = r#"<script type="text/javascript">
-    //<![CDATA[
-        window.addEventListener('message', function(e) {
-            if (!e.data || e.data.kind !== 'ook-set-page') {
-                return;
-            }
-            document.documentElement.style.setProperty('--ook-page', e.data.page);
-
-        });
-    //]]>
-    </script>"#;
-
-    insert_before_head_close(xhtml, script)
-}
-
-pub(crate) fn inject_page_count_probe(xhtml: &str) -> String {
-    let script = r#"<script type="text/javascript">
-    //<![CDATA[
-        const report = function() {
-            var count = Math.max(
-                1,
-                Math.ceil(document.body.scrollWidth / window.innerWidth)
-            );
-            window.parent.postMessage({ kind: 'ook-pages', count: count }, '*');
-        };
-        window.addEventListener('load', report);
-        window.addEventListener('resize', report);
-    //]]>
-    </script>"#;
-
-    insert_before_head_close(xhtml, script)
 }
 
 fn sanitized_file_name(input: &str) -> Option<String> {
@@ -405,7 +342,7 @@ mod test {
     fn injects_pagination_css_before_head_close() {
         let xhtml = r#"<html xmlns="http://wwww.w3.org/1999/xhtml"><head><title>T</title></head><body><p>Hello</p></body></html>"#;
 
-        let paged = inject_pagination_css(xhtml);
+        let paged = insert_before_head_close(xhtml, PAGINATION_CSS);
 
         assert!(paged.contains("--ook-page: 0"));
         assert!(paged.contains("column-width: calc(100vw"));
@@ -460,7 +397,8 @@ mod test {
     fn injects_page_count_probe_before_head_close() {
         let xhtml = r#"<html xmlns="http://www.w3.org/1999/xhtml"><head><title>T</title></head><body><p>Hi</p></body></html>"#;
 
-        let out = inject_page_count_probe(xhtml);
+        let page_count_js = get_wrapped_js(PAGE_COUNT_JS);
+        let out = insert_before_head_close(xhtml, &page_count_js);
 
         // reports back over the bridge under its own message kind …
         assert!(out.contains("ook-pages"));
@@ -495,10 +433,11 @@ mod test {
     fn injects_page_listener_before_head_close() {
         let xhtml = r#"<html xmlns="http://www.w3.org/1999/xhtml"><head><title>T</title></head><body><p>Hi</p></body></html>"#;
 
-        let out = injects_page_listener(xhtml);
+        let page_listener_js = get_wrapped_js(PAGE_LISTENER_JS);
+        let out = insert_before_head_close(xhtml, &page_listener_js);
 
         assert!(out.contains("ook-set-page"));
-        assert!(out.contains(r#"setProperty('--ook-page'"#));
+        assert!(out.contains(r#"setProperty("--ook-page""#));
         assert!(out.find("ook-set-page").unwrap() < out.find("</head>").unwrap());
         assert!(out.contains("<p>Hi</p>"));
     }

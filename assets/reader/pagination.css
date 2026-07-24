@@ -1,0 +1,22 @@
+:root {
+  --ook-page: 0;
+}
+html {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+body {
+  width: 100vw !important;
+  height: 100vh !important;
+  margin: 0 !important;
+  padding: 24px !important;
+  box-sizing: border-box !important;
+  max-width: none !important;
+
+  overflow: visible;
+  column-width: calc(100vw - 48px) !important;
+  column-gap: 48px !important;
+  column-fill: auto;
+  transform: translateX(calc(var(--ook-page) * -100vw));
+}
