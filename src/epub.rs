@@ -6,9 +6,7 @@ use dioxus::desktop::{use_asset_handler, wry::http::Response};
 use rbook::epub::rewrite::{EpubRewriteOptions, PathRewrite};
 use rbook::Epub;
 
-use crate::web::assets::{
-    wrap_css, wrap_js, LINK_BRIDGE_JS, PAGE_COUNT_JS, PAGE_LISTENER_JS, PAGINATION_CSS,
-};
+use crate::web::assets::INJECTED_ASSETS;
 
 pub(crate) const EPUB_ROUTE: &str = "epub";
 pub(crate) const EPUB_URL_PREFIX: &str = "dioxus://index.html/epub/"; // must embed EPUB_ROUTE
@@ -128,16 +126,7 @@ pub(crate) fn insert_before_head_close(xhtml: &str, snippet: &str) -> String {
 }
 
 pub(crate) fn render_document_url(doc: &SpineDoc, fragment: Option<&str>) -> String {
-    let pagination_css = wrap_css(PAGINATION_CSS);
-    let page_listener_js = wrap_js(PAGE_LISTENER_JS);
-    let link_bridge_js = wrap_js(LINK_BRIDGE_JS);
-    let page_count_js = wrap_js(PAGE_COUNT_JS);
-    let assets = format!(
-        "{}{}{}{}",
-        pagination_css, page_listener_js, link_bridge_js, page_count_js
-    );
-
-    let with_assets = insert_before_head_close(&doc.xhtml, &assets);
+    let with_assets = insert_before_head_close(&doc.xhtml, INJECTED_ASSETS);
 
     let with_assets_and_fragment = match fragment {
         Some(frag) => inject_fragment_scroll(&with_assets, frag),
@@ -341,8 +330,7 @@ mod test {
     fn injects_pagination_css_before_head_close() {
         let xhtml = r#"<html xmlns="http://wwww.w3.org/1999/xhtml"><head><title>T</title></head><body><p>Hello</p></body></html>"#;
 
-        let pagination_css = wrap_css(PAGINATION_CSS);
-        let paged = insert_before_head_close(xhtml, &pagination_css);
+        let paged = insert_before_head_close(xhtml, INJECTED_ASSETS);
 
         assert!(paged.contains("--ook-page: 0"));
         assert!(paged.contains("column-width: calc(100vw"));
@@ -397,8 +385,7 @@ mod test {
     fn injects_page_count_probe_before_head_close() {
         let xhtml = r#"<html xmlns="http://www.w3.org/1999/xhtml"><head><title>T</title></head><body><p>Hi</p></body></html>"#;
 
-        let page_count_js = wrap_js(PAGE_COUNT_JS);
-        let out = insert_before_head_close(xhtml, &page_count_js);
+        let out = insert_before_head_close(xhtml, INJECTED_ASSETS);
 
         // reports back over the bridge under its own message kind …
         assert!(out.contains("ook-pages"));
@@ -433,8 +420,7 @@ mod test {
     fn injects_page_listener_before_head_close() {
         let xhtml = r#"<html xmlns="http://www.w3.org/1999/xhtml"><head><title>T</title></head><body><p>Hi</p></body></html>"#;
 
-        let page_listener_js = wrap_js(PAGE_LISTENER_JS);
-        let out = insert_before_head_close(xhtml, &page_listener_js);
+        let out = insert_before_head_close(xhtml, INJECTED_ASSETS);
 
         assert!(out.contains("ook-set-page"));
         assert!(out.contains(r#"setProperty("--ook-page""#));
