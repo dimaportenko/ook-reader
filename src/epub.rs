@@ -6,7 +6,9 @@ use dioxus::desktop::{use_asset_handler, wry::http::Response};
 use rbook::epub::rewrite::{EpubRewriteOptions, PathRewrite};
 use rbook::Epub;
 
-use crate::web::assets::{get_wrapped_css, get_wrapped_js};
+use crate::web::assets::{
+    wrap_css, wrap_js, LINK_BRIDGE_JS, PAGE_COUNT_JS, PAGE_LISTENER_JS, PAGINATION_CSS,
+};
 
 pub(crate) const EPUB_ROUTE: &str = "epub";
 pub(crate) const EPUB_URL_PREFIX: &str = "dioxus://index.html/epub/"; // must embed EPUB_ROUTE
@@ -125,26 +127,23 @@ pub(crate) fn insert_before_head_close(xhtml: &str, snippet: &str) -> String {
     xhtml.replacen("</head>", &format!("{snippet}</head>"), 1)
 }
 
-const PAGINATION_CSS: &str = include_str!("../assets/reader/pagination.css");
-const PAGE_LISTENER_JS: &str = include_str!("../assets/reader/page-listener.js");
-const LINK_BRIDGE_JS: &str = include_str!("../assets/reader/link-bridge.js");
-const PAGE_COUNT_JS: &str = include_str!("../assets/reader/page-count.js");
-
 pub(crate) fn render_document_url(doc: &SpineDoc, fragment: Option<&str>) -> String {
-    let pagination_css = get_wrapped_css(PAGINATION_CSS);
-    let paged = insert_before_head_close(&doc.xhtml, &pagination_css);
-    let page_listener_js = get_wrapped_js(PAGE_LISTENER_JS);
-    let page_listener = insert_before_head_close(&paged, &page_listener_js);
-    let link_bridge_js = get_wrapped_js(LINK_BRIDGE_JS);
-    let bridged = insert_before_head_close(&page_listener, &link_bridge_js);
-    let page_count_js = get_wrapped_js(PAGE_COUNT_JS);
-    let probed = insert_before_head_close(&bridged, &page_count_js);
+    let pagination_css = wrap_css(PAGINATION_CSS);
+    let page_listener_js = wrap_js(PAGE_LISTENER_JS);
+    let link_bridge_js = wrap_js(LINK_BRIDGE_JS);
+    let page_count_js = wrap_js(PAGE_COUNT_JS);
+    let assets = format!(
+        "{}{}{}{}",
+        pagination_css, page_listener_js, link_bridge_js, page_count_js
+    );
 
-    let prepared = match fragment {
-        Some(frag) => inject_fragment_scroll(&probed, frag),
-        None => probed,
+    let with_assets = insert_before_head_close(&doc.xhtml, &assets);
+
+    let with_assets_and_fragment = match fragment {
+        Some(frag) => inject_fragment_scroll(&with_assets, frag),
+        None => with_assets,
     };
-    to_xhtml_data_url(&prepared)
+    to_xhtml_data_url(&with_assets_and_fragment)
 }
 
 fn sanitized_file_name(input: &str) -> Option<String> {
@@ -342,7 +341,8 @@ mod test {
     fn injects_pagination_css_before_head_close() {
         let xhtml = r#"<html xmlns="http://wwww.w3.org/1999/xhtml"><head><title>T</title></head><body><p>Hello</p></body></html>"#;
 
-        let paged = insert_before_head_close(xhtml, PAGINATION_CSS);
+        let pagination_css = wrap_css(PAGINATION_CSS);
+        let paged = insert_before_head_close(xhtml, &pagination_css);
 
         assert!(paged.contains("--ook-page: 0"));
         assert!(paged.contains("column-width: calc(100vw"));
@@ -397,7 +397,7 @@ mod test {
     fn injects_page_count_probe_before_head_close() {
         let xhtml = r#"<html xmlns="http://www.w3.org/1999/xhtml"><head><title>T</title></head><body><p>Hi</p></body></html>"#;
 
-        let page_count_js = get_wrapped_js(PAGE_COUNT_JS);
+        let page_count_js = wrap_js(PAGE_COUNT_JS);
         let out = insert_before_head_close(xhtml, &page_count_js);
 
         // reports back over the bridge under its own message kind …
@@ -433,7 +433,7 @@ mod test {
     fn injects_page_listener_before_head_close() {
         let xhtml = r#"<html xmlns="http://www.w3.org/1999/xhtml"><head><title>T</title></head><body><p>Hi</p></body></html>"#;
 
-        let page_listener_js = get_wrapped_js(PAGE_LISTENER_JS);
+        let page_listener_js = wrap_js(PAGE_LISTENER_JS);
         let out = insert_before_head_close(xhtml, &page_listener_js);
 
         assert!(out.contains("ook-set-page"));
