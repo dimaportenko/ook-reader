@@ -3,6 +3,7 @@ use std::rc::Rc;
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 use dioxus::desktop::{use_asset_handler, wry::http::Response};
+use percent_encoding::NON_ALPHANUMERIC;
 use rbook::epub::rewrite::{EpubRewriteOptions, PathRewrite};
 use rbook::Epub;
 
@@ -79,7 +80,14 @@ pub(crate) fn resolve_internal_link(
     href: &str,
 ) -> Option<LinkTarget> {
     let (path, fragment) = match href.split_once('#') {
-        Some((path, frag)) => (path, Some(frag.to_string())),
+        Some((path, frag)) => (
+            path,
+            Some(
+                percent_encoding::percent_decode_str(frag)
+                    .decode_utf8_lossy()
+                    .into_owned(),
+            ),
+        ),
         None => (href, None),
     };
 
@@ -103,24 +111,6 @@ pub(crate) fn resolve_internal_link(
     })
 }
 
-pub(crate) fn inject_fragment_scroll(xhtml: &str, fragment: &str) -> String {
-    let script = format!(
-        r#"<script type="text/javascript">
-        //<![CDATA[
-            window.addEventListener('load', function() {{
-                var el = document.getElementById("{fragment}");
-                if (!el) return;
-                var page = Math.round(el.offsetLeft / window.innerWidth);
-                window.parent.postMessage({{ kind: 'ook-scroll', page: page }}, '*');
-            }});
-
-        //]]>
-        </script>"#,
-    );
-
-    insert_before_head_close(xhtml, &script)
-}
-
 pub(crate) fn insert_before_head_close(xhtml: &str, snippet: &str) -> String {
     xhtml.replacen("</head>", &format!("{snippet}</head>"), 1)
 }
@@ -128,11 +118,15 @@ pub(crate) fn insert_before_head_close(xhtml: &str, snippet: &str) -> String {
 pub(crate) fn render_document_url(doc: &SpineDoc, fragment: Option<&str>) -> String {
     let with_assets = insert_before_head_close(&doc.xhtml, INJECTED_ASSETS);
 
-    let with_assets_and_fragment = match fragment {
-        Some(frag) => inject_fragment_scroll(&with_assets, frag),
-        None => with_assets,
-    };
-    to_xhtml_data_url(&with_assets_and_fragment)
+    let url = to_xhtml_data_url(&with_assets);
+    match fragment {
+        Some(frag) => format!(
+            "{}#{}",
+            url,
+            percent_encoding::utf8_percent_encode(frag, NON_ALPHANUMERIC)
+        ),
+        None => url,
+    }
 }
 
 fn sanitized_file_name(input: &str) -> Option<String> {
@@ -366,22 +360,6 @@ mod test {
     }
 
     #[test]
-    fn injects_fragment_scroll_before_head_close() {
-        let xhtml = r#"<html xmlns="http://www.w3.org/1999/xhtml"><head><title>T</title></head><body><p id="x">Hi</p></body></html>"#;
-
-        let out = inject_fragment_scroll(xhtml, "chap02");
-
-        // The script targets the requested anchor id …
-        assert!(out.contains(r#"getElementById("chap02")"#));
-        // … reports back over the bridge under a distinct message kind …
-        assert!(out.contains("ook-scroll"));
-        // … is injected into the head (so it parses before the body it measures) …
-        assert!(out.find("ook-scroll").unwrap() < out.find("</head>").unwrap());
-        // … and leaves the original document intact.
-        assert!(out.contains(r#"<p id="x">Hi</p>"#));
-    }
-
-    #[test]
     fn injects_page_count_probe_before_head_close() {
         let xhtml = r#"<html xmlns="http://www.w3.org/1999/xhtml"><head><title>T</title></head><body><p>Hi</p></body></html>"#;
 
@@ -454,5 +432,62 @@ mod test {
         assert_eq!(sanitized_file_name("../library.sqlite3"), None);
         assert_eq!(sanitized_file_name("a/b.jpg"), None);
         assert_eq!(sanitized_file_name(""), None);
+    }
+
+    #[test]
+    fn fragment_rides_in_the_url_hash_not_the_document() {
+        let doc = SpineDoc {
+            href: "c1.xhtml".into(),
+            xhtml: r#"<html><head></head><body><p id="chap01">Hi</p></body></html>"#.into(),
+        };
+
+        let with = render_document_url(&doc, Some("chap01"));
+        let without = render_document_url(&doc, None);
+
+        assert_eq!(with, format!("{without}#chap01"));
+    }
+
+    #[test]
+    fn resolves_a_percent_encoded_href_to_a_decoded_target() {
+        let docs = vec![
+            SpineDoc {
+                href: "OEBPS/cover.xhtml".into(),
+                xhtml: String::new(),
+            },
+            SpineDoc {
+                href: "OEBPS/Chapter 1.xhtml".into(),
+                xhtml: String::new(),
+            },
+        ];
+
+        let target = resolve_internal_link(
+            &docs,
+            0,
+            &format!("{EPUB_URL_PREFIX}OEBPS/Chapter%201.xhtml#s%20a"),
+        )
+        .expect("an encoded href should still match its decoded spine entry");
+
+        assert_eq!(target.spine_index, 1);
+        assert_eq!(target.fragment.as_deref(), Some("s a"));
+    }
+
+    #[test]
+    fn resolves_a_bare_fragment_against_the_current_chapter() {
+        let docs = vec![SpineDoc {
+            href: "OEBPS/c1.xhtml".into(),
+            xhtml: String::new(),
+        }];
+
+        let target = resolve_internal_link(&docs, 0, "#note%201").expect("bare fragments resolve");
+
+        assert_eq!(target.spine_index, 0);
+        assert_eq!(target.fragment.as_deref(), Some("note 1"));
+    }
+
+    #[test]
+    fn fragment_scroll_asset_reacts_to_hash_changes() {
+        assert!(INJECTED_ASSETS.contains("hashchange"));
+        assert!(INJECTED_ASSETS.contains("location.hash"));
+        assert!(INJECTED_ASSETS.contains("ook-scroll"));
     }
 }

@@ -23,4 +23,5 @@ pub(crate) const INJECTED_ASSETS: &str = concat!(
     wrap_js!("./assets/page-listener.js"),
     wrap_js!("./assets/link-bridge.js"),
     wrap_js!("./assets/page-count.js"),
+    wrap_js!("./assets/fragment-scroll.js"),
 );

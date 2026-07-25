@@ -8,20 +8,7 @@ use crate::{
     ui::library::OpenBook,
 };
 
-const BRIDGE_JS: &str = r#"
-            window.addEventListener('message', (e) => {
-                if (!e.data) return;
-                if (e.data.kind === 'ook-link') {
-                    dioxus.send("link:" + e.data.raw);
-                }
-                if (e.data.kind === 'ook-scroll') {
-                    dioxus.send("scroll:" + e.data.page);
-                }
-                if (e.data.kind === 'ook-pages') {
-                    dioxus.send("pages:" + e.data.count);
-                }
-            });
-            "#;
+const BRIDGE_JS: &str = include_str!("../web/assets/ook-events-listener.js");
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum BridgeMsg {
