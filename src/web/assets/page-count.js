@@ -1,5 +1,5 @@
 const report = function () {
-  var count = Math.max(
+  const count = Math.max(
     1,
     Math.ceil(document.body.scrollWidth / window.innerWidth),
   );
