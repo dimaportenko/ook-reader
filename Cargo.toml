@@ -9,7 +9,6 @@ edition = "2021"
 [dependencies]
 dioxus = { version = "0.7", features = [] }
 rbook = "0.7"
-base64 = "0.22"
 percent-encoding = "2.3"
 rusqlite = { version = "0.40", features = ["bundled"] }
 directories = "6"

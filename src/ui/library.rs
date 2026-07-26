@@ -4,7 +4,7 @@ use dioxus::prelude::*;
 use rbook::Epub;
 
 use crate::{
-    epub::{self, SpineDoc},
+    epub,
     library::{self, Book, Library},
 };
 
@@ -15,7 +15,7 @@ pub(crate) struct OpenBook {
     pub(crate) id: i64,
     pub(crate) title: String,
     pub(crate) epub: Rc<Epub>,
-    pub(crate) docs: Rc<Vec<epub::SpineDoc>>,
+    pub(crate) docs: Rc<Vec<String>>,
 }
 
 impl PartialEq for OpenBook {
@@ -183,8 +183,8 @@ fn refresh_books(library: &Library, mut books: Signal<Vec<Book>>) {
     }
 }
 
-fn open_epub(path: &std::path::Path) -> Result<(Epub, Vec<SpineDoc>), Box<dyn std::error::Error>> {
+fn open_epub(path: &std::path::Path) -> Result<(Epub, Vec<String>), Box<dyn std::error::Error>> {
     let epub = Epub::open(path)?;
-    let docs = epub::load_spine(&epub)?;
+    let docs = epub::spine_hrefs(&epub)?;
     Ok((epub, docs))
 }

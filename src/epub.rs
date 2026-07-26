@@ -1,9 +1,8 @@
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use base64::{engine::general_purpose::STANDARD, Engine};
 use dioxus::desktop::{use_asset_handler, wry::http::Response};
-use percent_encoding::NON_ALPHANUMERIC;
+use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 use rbook::epub::rewrite::{EpubRewriteOptions, PathRewrite};
 use rbook::Epub;
 
@@ -12,16 +11,72 @@ use crate::web::assets::INJECTED_ASSETS;
 pub(crate) const EPUB_ROUTE: &str = "epub";
 pub(crate) const EPUB_URL_PREFIX: &str = "dioxus://index.html/epub/"; // must embed EPUB_ROUTE
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SpineDoc {
-    pub(crate) href: String,
-    pub(crate) xhtml: String,
-}
+const XHTML: &str = "application/xhtml+xml";
+const XHTML_UTF8: &str = "application/xhtml+xml; charset=utf-8";
+
+const PATH: &AsciiSet = &CONTROLS
+    .add(b' ')
+    .add(b'"')
+    .add(b'<')
+    .add(b'>')
+    .add(b'`')
+    .add(b'#')
+    .add(b'?')
+    .add(b'%')
+    .add(b'{')
+    .add(b'}');
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LinkTarget {
     pub(crate) spine_index: usize,
     pub(crate) fragment: Option<String>,
+}
+
+pub(crate) struct Served {
+    pub(crate) content_type: String,
+    pub(crate) body: Vec<u8>,
+}
+
+pub(crate) fn serve_epub_resource(epub: &Epub, path: &str) -> Option<Served> {
+    let content_type = epub
+        .manifest()
+        .by_href(path.trim_start_matches('/'))
+        .map(|entry| entry.media_type().to_owned())
+        .unwrap_or_else(|| content_type_for(path).to_owned());
+
+    if content_type == XHTML || content_type == "text/html" {
+        let rewrite =
+            EpubRewriteOptions::default().rewrite_paths(PathRewrite::prefix(EPUB_URL_PREFIX));
+        let xhtml = epub.read_resource_str_with(path, &rewrite).ok()?;
+        let with_assets = insert_before_head_close(&xhtml, INJECTED_ASSETS);
+        return Some(Served {
+            content_type: XHTML_UTF8.to_owned(),
+            body: with_assets.into_bytes(),
+        });
+    }
+
+    let body = epub.read_resource_bytes(path).ok()?;
+    Some(Served { content_type, body })
+}
+
+pub(crate) fn epub_response(served: Option<Served>) -> Response<Vec<u8>> {
+    let builder = Response::builder().header("Cache-Control", "no-store");
+
+    match served {
+        Some(served) => builder
+            .header("Content-Type", served.content_type)
+            .body(served.body)
+            .expect("response with valid content type header"),
+        None => builder
+            .status(404)
+            .header("Content-Type", "text/plain; charset=utf-8")
+            .body(Vec::new())
+            .expect("404 always valid response"),
+    }
+}
+
+pub(crate) fn chapter_url(href: &str) -> String {
+    format!("{EPUB_URL_PREFIX}{}", utf8_percent_encode(href, PATH))
 }
 
 pub(crate) fn extension_for(media_type: &str) -> Option<&'static str> {
@@ -42,40 +97,13 @@ pub(crate) fn content_type_for(path: &str) -> &'static str {
         "png" => "image/png",
         "gif" => "image/gif",
         "svg" => "image/svg+xml",
-        "xhtml" | "htm" | "html" => "application/xhtml+xml",
+        "xhtml" | "htm" | "html" | "xml" => XHTML,
         _ => "application/octet-stream",
     }
 }
 
-pub(crate) fn to_xhtml_data_url(xhtml: &str) -> String {
-    format!(
-        "data:application/xhtml+xml;base64,{}",
-        STANDARD.encode(xhtml)
-    )
-}
-
-pub(crate) fn load_spine(epub: &Epub) -> Result<Vec<SpineDoc>, Box<dyn std::error::Error>> {
-    let rewrite = EpubRewriteOptions::default().rewrite_paths(PathRewrite::prefix(EPUB_URL_PREFIX));
-
-    epub.reader()
-        .map(|entry| {
-            let entry = entry?;
-            let manifest_entry = entry.manifest_entry();
-
-            let href = manifest_entry
-                .href()
-                .decode()
-                .trim_start_matches('/')
-                .to_string();
-            let xhtml = manifest_entry.read_str_with(&rewrite)?;
-
-            Ok(SpineDoc { href, xhtml })
-        })
-        .collect()
-}
-
 pub(crate) fn resolve_internal_link(
-    docs: &[SpineDoc],
+    hrefs: &[String],
     current_index: usize,
     href: &str,
 ) -> Option<LinkTarget> {
@@ -103,7 +131,7 @@ pub(crate) fn resolve_internal_link(
 
     let zip_path = percent_encoding::percent_decode_str(zip_path).decode_utf8_lossy();
 
-    let spine_index = docs.iter().position(|doc| doc.href == zip_path)?;
+    let spine_index = hrefs.iter().position(|href| *href == zip_path)?;
 
     Some(LinkTarget {
         spine_index,
@@ -113,20 +141,6 @@ pub(crate) fn resolve_internal_link(
 
 pub(crate) fn insert_before_head_close(xhtml: &str, snippet: &str) -> String {
     xhtml.replacen("</head>", &format!("{snippet}</head>"), 1)
-}
-
-pub(crate) fn render_document_url(doc: &SpineDoc, fragment: Option<&str>) -> String {
-    let with_assets = insert_before_head_close(&doc.xhtml, INJECTED_ASSETS);
-
-    let url = to_xhtml_data_url(&with_assets);
-    match fragment {
-        Some(frag) => format!(
-            "{}#{}",
-            url,
-            percent_encoding::utf8_percent_encode(frag, NON_ALPHANUMERIC)
-        ),
-        None => url,
-    }
 }
 
 fn sanitized_file_name(input: &str) -> Option<String> {
@@ -165,30 +179,21 @@ pub(crate) fn use_register_covers_handler(books_dir: PathBuf) {
     });
 }
 
+fn zip_path_for(uri_path: &str) -> String {
+    let path = uri_path
+        .strip_prefix(&format!("/{EPUB_ROUTE}"))
+        .unwrap_or_default();
+
+    percent_encoding::percent_decode_str(path)
+        .decode_utf8_lossy()
+        .into_owned()
+}
+
 pub(crate) fn use_register_asset_handler(epub: Rc<Epub>) {
     use_asset_handler(EPUB_ROUTE, move |request, responder| {
-        let path = request
-            .uri()
-            .path()
-            .strip_prefix(&format!("/{}", EPUB_ROUTE))
-            .unwrap_or_default();
+        let path = zip_path_for(request.uri().path());
 
-        match epub.read_resource_bytes(path) {
-            Ok(bytes) => {
-                let body = Response::builder()
-                    .header("Content-Type", content_type_for(path))
-                    .body(bytes)
-                    .expect("response with a valid content-type header");
-                responder.respond(body);
-            }
-            Err(_) => {
-                let not_found = Response::builder()
-                    .status(404)
-                    .body(Vec::new())
-                    .expect("empty 404 body is always valid");
-                responder.respond(not_found);
-            }
-        }
+        responder.respond(epub_response(serve_epub_resource(&epub, &path)));
     })
 }
 
@@ -230,6 +235,22 @@ pub(crate) fn read_metadata(epub: &Epub) -> Result<BookMeta, Box<dyn std::error:
     })
 }
 
+pub(crate) fn spine_hrefs(epub: &Epub) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    epub.spine()
+        .into_iter()
+        .map(|entry| {
+            let manifest_entry = entry
+                .manifest_entry()
+                .ok_or("spine entry with a dangling idref")?;
+            Ok(manifest_entry
+                .href()
+                .decode()
+                .trim_start_matches('/')
+                .to_string())
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -259,36 +280,6 @@ mod test {
         // Non-trivial size = a real book, not a stray empty placeholder.
         let bytes = std::fs::metadata(path).expect("fixture metadata").len();
         assert!(bytes > 100_000, "fixture looks too small ({bytes} bytes)");
-    }
-
-    #[test]
-    fn loads_spine_in_reading_order() {
-        let epub = Rc::new(Epub::open(crate::BOOK).expect("open fixture book"));
-        let docs = load_spine(&epub).expect("should open the bundled epub");
-        assert_eq!(docs.len(), 15);
-
-        assert!(
-            docs.iter()
-                .any(|d| d.xhtml.contains("A Scandal in Bohemia")),
-            "expected the first story's text somewhere in the spine",
-        );
-
-        assert!(
-            !docs[0].xhtml.contains("A Scandal in Bohemia"),
-            "index 0 should be the cover, not story one"
-        );
-    }
-
-    #[test]
-    fn wraps_xhtml_as_a_base64_data_url() {
-        let url = to_xhtml_data_url("<html />");
-        assert!(url.starts_with("data:application/xhtml+xml;base64,"));
-
-        use base64::{engine::general_purpose::STANDARD, Engine};
-        let payload = url
-            .strip_prefix("data:application/xhtml+xml;base64,")
-            .unwrap();
-        assert_eq!(STANDARD.decode(payload).unwrap(), b"<html />");
     }
 
     #[test]
@@ -335,7 +326,7 @@ mod test {
     #[test]
     fn ignores_external_links() {
         let epub = Rc::new(Epub::open(crate::BOOK).expect("open fixture book"));
-        let docs = load_spine(&epub).expect("should open the bundled epub");
+        let docs = spine_hrefs(&epub).expect("should open the bundled epub");
 
         assert_eq!(
             resolve_internal_link(&docs, 1, "https://www.gutenberg.org"),
@@ -346,7 +337,7 @@ mod test {
     #[test]
     fn resolves_contents_link_to_doc_and_fragment() {
         let epub = Rc::new(Epub::open(crate::BOOK).expect("open fixture book"));
-        let docs = load_spine(&epub).expect("should open the bundled epub");
+        let docs = spine_hrefs(&epub).expect("should open the bundled epub");
 
         let target = resolve_internal_link(
             &docs,
@@ -435,30 +426,8 @@ mod test {
     }
 
     #[test]
-    fn fragment_rides_in_the_url_hash_not_the_document() {
-        let doc = SpineDoc {
-            href: "c1.xhtml".into(),
-            xhtml: r#"<html><head></head><body><p id="chap01">Hi</p></body></html>"#.into(),
-        };
-
-        let with = render_document_url(&doc, Some("chap01"));
-        let without = render_document_url(&doc, None);
-
-        assert_eq!(with, format!("{without}#chap01"));
-    }
-
-    #[test]
     fn resolves_a_percent_encoded_href_to_a_decoded_target() {
-        let docs = vec![
-            SpineDoc {
-                href: "OEBPS/cover.xhtml".into(),
-                xhtml: String::new(),
-            },
-            SpineDoc {
-                href: "OEBPS/Chapter 1.xhtml".into(),
-                xhtml: String::new(),
-            },
-        ];
+        let docs = vec!["OEBPS/cover.xhtml".into(), "OEBPS/Chapter 1.xhtml".into()];
 
         let target = resolve_internal_link(
             &docs,
@@ -473,10 +442,7 @@ mod test {
 
     #[test]
     fn resolves_a_bare_fragment_against_the_current_chapter() {
-        let docs = vec![SpineDoc {
-            href: "OEBPS/c1.xhtml".into(),
-            xhtml: String::new(),
-        }];
+        let docs = vec!["OEBPS/c1.xhtml".into()];
 
         let target = resolve_internal_link(&docs, 0, "#note%201").expect("bare fragments resolve");
 
@@ -489,5 +455,159 @@ mod test {
         assert!(INJECTED_ASSETS.contains("hashchange"));
         assert!(INJECTED_ASSETS.contains("location.hash"));
         assert!(INJECTED_ASSETS.contains("ook-scroll"));
+        // A fragment naming an id the document does not have must still post a
+        // page, because that message is what clears `pending_fragment`. Staying
+        // silent leaves it to be re-applied to the next chapter.
+        assert!(INJECTED_ASSETS.contains("currentPage"));
+    }
+
+    #[test]
+    fn serves_an_image_resource_as_raw_bytes() {
+        let epub = Epub::open(crate::BOOK).expect("open fixture book");
+
+        let served = serve_epub_resource(&epub, "/OEBPS/374963762688302552_cover.jpg")
+            .expect("the fixture's cover is reachable by path");
+
+        assert!(served.content_type.starts_with("image/"));
+        assert!(
+            served.body.starts_with(&[0xFF, 0xD8, 0xFF])
+                || served.body.starts_with(&[0x89, 0x50, 0x4E, 0x47])
+        );
+    }
+
+    #[test]
+    fn serving_an_unknown_path_is_a_miss() {
+        let epub = Epub::open(crate::BOOK).expect("open fixture book");
+        assert!(serve_epub_resource(&epub, "/OEBPS/nope.xhtml").is_none());
+    }
+
+    #[test]
+    fn serving_a_chapter_injects_the_reader_assets() {
+        let epub = Epub::open(crate::BOOK).expect("open fixture book");
+        let hrefs = spine_hrefs(&epub).expect("fixture spine");
+
+        let href = hrefs.get(2).expect("3d item in spine exists");
+        let served = serve_epub_resource(&epub, &format!("/{href}"))
+            .expect("a spine document is reachable by its href");
+
+        let xhtml = String::from_utf8(served.body).expect("chapters are utf-8");
+
+        assert!(xhtml.contains("--ook-page: 0")); // pagination.css
+        assert!(xhtml.contains("ook-pages")); // page-count.js
+        assert!(xhtml.contains("hashchange")); // fragment-scroll.js
+        assert!(xhtml.find("--ook-page: 0").unwrap() < xhtml.find("</head>").unwrap());
+        assert!(xhtml.contains("A SCANDAL IN BOHEMIA")); // the chapter survived
+        assert!(served.content_type.starts_with("application/xhtml+xml"));
+    }
+
+    #[test]
+    fn serving_a_chapter_rewrites_resource_paths_to_the_epub_route() {
+        let epub = Epub::open(crate::BOOK).expect("open fixture book");
+        let hrefs = spine_hrefs(&epub).expect("fixture spine");
+
+        let href = hrefs.get(2).expect("3d item in spine exists");
+        assert!(
+            href.ends_with("5186027266282590649_1661-h-1.htm.xhtml"),
+            "expected the first story at spine index 2, got {href}",
+        );
+
+        let served = serve_epub_resource(&epub, &format!("/{href}"))
+            .expect("a spine document is reachable by its href");
+        let xhtml = String::from_utf8(served.body).expect("chapters are utf-8");
+
+        let css = format!("{EPUB_URL_PREFIX}OEBPS/pgepub.css");
+        let cover = format!("{EPUB_URL_PREFIX}OEBPS/374963762688302552_cover.jpg");
+
+        assert!(
+            xhtml.contains(&css),
+            "stylesheet link was not rewritten to {css}:\n{xhtml}",
+        );
+        assert!(
+            xhtml.contains(&cover),
+            "svg cover image was not rewritten to {cover}:\n{xhtml}",
+        );
+
+        assert!(!xhtml.contains(r#"href="pgepub.css""#));
+        assert!(!xhtml.contains(r#"xlink:href="374963762688302552_cover.jpg""#));
+
+        let path = cover
+            .strip_prefix(EPUB_URL_PREFIX)
+            .expect("prefixed by construction");
+        let image = serve_epub_resource(&epub, &format!("/{path}"))
+            .expect("a rewritten path must round-trip back through the handler");
+
+        assert_eq!(image.content_type, "image/jpeg");
+        assert!(image.body.starts_with(&[0xFF, 0xD8, 0xFF]));
+    }
+
+    #[test]
+    fn the_chapter_url_is_the_route_plus_the_zip_path() {
+        // The fragment is no longer the URL's business — chapter-loader.js appends
+        // it to the blob URL, because fetch would discard a hash anyway.
+        assert_eq!(
+            chapter_url("OEBPS/c1.xhtml"),
+            "dioxus://index.html/epub/OEBPS/c1.xhtml",
+        );
+    }
+
+    #[test]
+    fn the_chapter_url_encodes_spaces_but_keeps_path_separators() {
+        assert_eq!(
+            chapter_url("OEBPS/Chapter 1.xhtml"),
+            "dioxus://index.html/epub/OEBPS/Chapter%201.xhtml",
+        );
+    }
+
+    #[test]
+    fn spine_hrefs_are_relative_zip_paths_in_reading_order() {
+        let epub = Epub::open(crate::BOOK).expect("open fixture book");
+        let hrefs = spine_hrefs(&epub).expect("fixture spine");
+
+        assert_eq!(hrefs.len(), 15); // same count load_spine produced
+        assert!(hrefs[2].ends_with(".xhtml"));
+        assert!(hrefs.iter().all(|h| !h.starts_with('/'))); // relative to the zip root, as before
+    }
+
+    #[test]
+    fn the_handler_decodes_percent_escapes_before_looking_up_the_zip_entry() {
+        // chapter_url writes the escape; this is the matching decode. Without it a
+        // book with a space in a filename 404s on every chapter.
+        assert_eq!(
+            zip_path_for("/epub/OEBPS/Chapter%201.xhtml"),
+            "/OEBPS/Chapter 1.xhtml",
+        );
+        // an unescaped path survives untouched
+        assert_eq!(zip_path_for("/epub/OEBPS/c1.xhtml"), "/OEBPS/c1.xhtml");
+        // a path outside the route yields nothing to serve
+        assert_eq!(zip_path_for("/nope"), "");
+    }
+
+    #[test]
+    fn a_served_resource_is_typed_and_never_cached() {
+        let epub = Epub::open(crate::BOOK).expect("open fixture book");
+        let hrefs = spine_hrefs(&epub).expect("fixture spine");
+
+        let response = epub_response(serve_epub_resource(&epub, &format!("/{}", hrefs[2])));
+
+        assert_eq!(response.status(), 200);
+        // the charset is load-bearing: an XHTML document with no declared encoding
+        // would otherwise be decoded by the webview's locale default
+        assert_eq!(response.headers()["Content-Type"], XHTML_UTF8);
+        // the epub is already in memory; a second copy in the webview cache buys
+        // nothing and would go stale if the book were reimported
+        assert_eq!(response.headers()["Cache-Control"], "no-store");
+    }
+
+    #[test]
+    fn a_missing_resource_is_a_typed_404() {
+        let epub = Epub::open(crate::BOOK).expect("open fixture book");
+
+        let response = epub_response(serve_epub_resource(&epub, "/OEBPS/nope.xhtml"));
+
+        assert_eq!(response.status(), 404);
+        assert_eq!(
+            response.headers()["Content-Type"],
+            "text/plain; charset=utf-8"
+        );
     }
 }

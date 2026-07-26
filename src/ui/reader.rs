@@ -1,5 +1,6 @@
 use std::rc::Rc;
 
+use dioxus::core::use_hook_with_cleanup; // not re-exported through the prelude
 use dioxus::prelude::*;
 
 use crate::{
@@ -9,6 +10,8 @@ use crate::{
 };
 
 const BRIDGE_JS: &str = include_str!("../web/assets/ook-events-listener.js");
+const CHAPTER_LOADER_JS: &str = include_str!("../web/assets/chapter-loader.js");
+const BLOB_CLEANUP_JS: &str = include_str!("../web/assets/blob-cleanup.js");
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum BridgeMsg {
@@ -42,10 +45,6 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
     let pending_fragment = state.data.pending_fragment();
     let (page, page_count) = (state.data.page(), state.data.page_count());
     let docs_for_iframe = docs.clone();
-    let iframe_src = use_memo(move || {
-        let current_doc = &docs_for_iframe[chapter()];
-        epub::render_document_url(current_doc, pending_fragment().as_deref())
-    });
 
     let page_label = format!("Page {} of {}", page() + 1, page_count());
     let chapter_label = format!("Chapter {} of {}", chapter() + 1, state.chapter_count);
@@ -67,6 +66,14 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
         document::eval(&script);
     });
 
+    use_effect(move || {
+        let url = epub::chapter_url(&docs_for_iframe[chapter()]);
+        let fragment = pending_fragment();
+        let loader = document::eval(CHAPTER_LOADER_JS);
+        _ = loader.send((url, fragment));
+    });
+
+    use_revoke_blob_on_unmount();
     use_bridge(state, docs);
 
     rsx! {
@@ -81,7 +88,6 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                 id: "reader-frame",
                 "sandbox": "allow-same-origin allow-scripts",
                 style: "flex: 1; width: 100%; border: none;",
-                src: "{iframe_src}",
             }
 
             div {
@@ -134,7 +140,26 @@ fn NavRow(
     }
 }
 
-fn use_bridge(state: ReaderState, docs: Rc<Vec<epub::SpineDoc>>) {
+/// Revokes the last chapter's blob when the reader leaves the screen.
+///
+/// The window handle is captured at mount and carried into the cleanup rather
+/// than looked up inside it. `document::eval` finds its provider through the
+/// *current scope's* context, and a drop runs with no scope current — it would
+/// quietly fall back to a no-op document and the script would never run. Going
+/// through the webview directly also means holding a strong handle, so there is
+/// no weak upgrade left to fail if the window is torn down first.
+fn use_revoke_blob_on_unmount() {
+    let window = dioxus::desktop::use_window();
+
+    use_hook_with_cleanup(
+        move || window,
+        |window| {
+            _ = window.webview.evaluate_script(BLOB_CLEANUP_JS);
+        },
+    );
+}
+
+fn use_bridge(state: ReaderState, docs: Rc<Vec<String>>) {
     use_future(move || {
         let docs = docs.clone();
         async move {
@@ -172,5 +197,14 @@ mod test {
         // unknown prefixes and malformed numbers decode to None, never panic
         assert_eq!(BridgeMsg::parse("scroll:notanumber"), None);
         assert_eq!(BridgeMsg::parse("bogus:1"), None);
+    }
+
+    #[test]
+    fn the_loader_and_the_cleanup_agree_on_where_the_blob_url_lives() {
+        // Two separate files sharing one global by name: rename it in the loader
+        // and the cleanup silently revokes nothing, leaking a chapter per book.
+        assert!(CHAPTER_LOADER_JS.contains("window.__ookBlobUrl"));
+        assert!(BLOB_CLEANUP_JS.contains("window.__ookBlobUrl"));
+        assert!(BLOB_CLEANUP_JS.contains("revokeObjectURL"));
     }
 }
