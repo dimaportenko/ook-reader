@@ -7,7 +7,7 @@ Place to quickly drop things I would like to work later.
 - [ ] External links support
 - [x] Investigate how to move javascript strings to js files
 - [x] Add app icon
-- [ ] Fix previous page transition to previous chapter
+- [x] Fix previous page transition to previous chapter
 - [ ] Spine navigation UI 
 - [ ] CSS architecture BEM, OOCSS, etc
 - [ ] refactoring phase

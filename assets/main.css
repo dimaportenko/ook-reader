@@ -11,6 +11,11 @@ html {
   overscroll-behavior: none;
 }
 
+/* ---- Utility ----- */
+.invisible {
+  opacity: 0;
+}
+
 /* ---- Library Books ---- */
 .library-books__list {
   display: grid;

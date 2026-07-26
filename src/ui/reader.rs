@@ -43,6 +43,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
     let state = nav::use_reader_state(docs.len());
     let chapter = state.data.chapter();
     let pending_fragment = state.data.pending_fragment();
+    let pending_last = state.data.pending_last();
     let (page, page_count) = (state.data.page(), state.data.page_count());
     let docs_for_iframe = docs.clone();
 
@@ -88,6 +89,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                 id: "reader-frame",
                 "sandbox": "allow-same-origin allow-scripts",
                 style: "flex: 1; width: 100%; border: none;",
+                class: if pending_last() || pending_fragment().is_some() { "invisible" },
             }
 
             div {
