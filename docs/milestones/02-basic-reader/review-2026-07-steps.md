@@ -37,8 +37,9 @@ holes (R6). Most of these are cheapest to fix **before** Phase 6 builds on top o
 - [x] **R5 — Turn pages without reloading the iframe.** postMessage the new page into the
       injected listener instead of regenerating `iframe.src`. *(done early; the isolated
       reader path was validated before Phase 6 UI wiring)*
-- [ ] **R6 — Hygiene batch.** Fragment sanitization, case-insensitive content types, the
-      "Page 1 of 0" label. *(three small test-first fixes in one sitting)*
+- [ ] **R6 — Hygiene batch.** Case-insensitive content types and the "Page 1 of 0" label.
+      *(two small test-first fixes in one sitting; the third — fragment sanitization —
+      was obsoleted by `30e4b0c`)*
 
 ---
 
@@ -336,32 +337,23 @@ relative links/images resolve for free.
 
 ---
 
-## R6 — Hygiene batch: fragment sanitization, content types, page label
+## R6 — Hygiene batch: content types, page label
 
-Three small, independent fixes — each a test + a few lines — batched as one sitting.
+Two small, independent fixes — each a test + a few lines — batched as one sitting.
+(Item **(a)**, fragment sanitization, is kept below as a struck-through record of why
+it no longer applies.)
 
-**(a) Validate fragments before injecting them into JavaScript.** `inject_fragment_scroll`
-(`epub.rs:138`) interpolates the link fragment straight into
-`getElementById("{fragment}")` — a crafted href ending `#x");…` breaks out of the string.
-Not a real privilege escalation (chapter content already runs its own scripts in the
-sandbox), but injection hygiene should be habit.
+**(a) ~~Validate fragments before injecting them into JavaScript.~~ Obsolete —
+resolved by `30e4b0c`.** `inject_fragment_scroll` used to interpolate the link fragment
+straight into `getElementById("{fragment}")`, so a crafted href ending `#x");…` broke
+out of the string. That function no longer exists: the fragment now travels in the data
+URL's hash (percent-encoded with `NON_ALPHANUMERIC`) and the static
+`src/web/assets/fragment-scroll.js` reads it from `location.hash` — there is no
+interpolation site left to sanitize, and no whitelist to maintain. Design:
+[`fragment-scroll-via-url-hash.md`](01-epub-rendering/fragment-scroll-via-url-hash.md).
 
-```rust
-#[test]
-fn fragment_scroll_rejects_unsafe_fragments() {
-    let xhtml = r#"<html><head><t/></head><body/></html>"#;
-    // A fragment that tries to break out of the JS string is not injected at all.
-    let out = inject_fragment_scroll(xhtml, r#"x");alert(1);("#);
-    assert_eq!(out, xhtml);
-    // A normal id still is.
-    assert!(inject_fragment_scroll(xhtml, "chap-1.2").contains("getElementById"));
-}
-```
-
-Sketch: a `fn is_safe_fragment(&str) -> bool` allowing ASCII alphanumerics plus `_ - . :`
-(the characters real-world ids use), checked at the top of `inject_fragment_scroll` —
-return the input unchanged when it fails. *Why:* a whitelist over an escape function
-because it's impossible to get wrong — you can't forget an escape case you never allow in.
+*Lesson worth keeping:* the escaping problem was best solved by removing the parameter,
+not by escaping it better. R6 is therefore down to **(b)** and **(c)**.
 
 **(b) Case-insensitive content types.** `content_type_for` (`epub.rs:23`) matches the
 extension verbatim, so a `COVER.JPG` inside a zip comes back `application/octet-stream`.
@@ -383,8 +375,9 @@ eyeball — the placeholder flashes briefly on chapter load, then the real count
 
 **Recorded but deferred** (not steps, just so they're not forgotten):
 
-- `BRIDGE_JS` accepts `message` events from any origin — fine in a desktop webview where
-  only our iframe posts, but wants a stricter check before any web build.
+- `BRIDGE_JS` (now `src/web/assets/ook-events-listener.js`, `document::eval`'d from
+  `src/ui/reader.rs:11`) accepts `message` events from any origin — fine in a desktop
+  webview where only our iframe posts, but wants a stricter check before any web build.
 - `epub.rs` unconditionally imports `dioxus::desktop`, so
   `--no-default-features --features web` does not compile today. The fix is
   `#[cfg(feature = "desktop")]` gating around the asset handler — a Milestone 4 concern.
