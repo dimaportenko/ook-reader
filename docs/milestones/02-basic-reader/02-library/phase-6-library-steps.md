@@ -43,8 +43,9 @@ list. **Data first, UI last**, exactly like the EPUB layer.
 11. **Persist & show covers (file beside the managed copy)** — 11a: cover-file lifecycle
     (import / re-import / remove / cleanup) with a nullable `cover_path` column *(done)*;
     11b: an app-level `covers` asset route + thumbnails in the list *(done)*.
-12. **Review & refactor** — tidy module boundaries and errors, then delete the single-book
-    scaffolding. *(suggested — punch-list below)*
+12. **Review & refactor** — tidy module boundaries, push the last fallible open to the
+    edge, split `main.rs` into `ui/` modules, rename the `BOOK` fixture. *(done —
+    `thiserror` dropped to the backlog as R3)*
 
 ---
 
@@ -1928,8 +1929,9 @@ changes behavior — which is exactly what makes it safe to do boldly.
 
 Refactoring must not change behavior, so the existing suite **is** the spec:
 
-- `cargo test` — 29 green before, 29+ green after (item **e** at the end adds one test;
-  item **a** already reshaped a few, but every behavior they pinned stays pinned).
+- `cargo test` — green before, green after (item **a** reshaped a few, but every behavior
+  they pinned stays pinned; no item adds a test, since a refactor's spec is the suite that
+  already exists).
 - `cargo clippy` — clean before and after (the `block v0.1.6` future-incompat note is
   transitive and stays).
 - One `dx serve` eyeball at the end: import → list → open → page → chapter nav → TOC link
@@ -1940,8 +1942,8 @@ refactor a sequence of safe moves instead of one big leap.
 
 ### Punch-list
 
-*(order a → b → c → d → e — structural moves first, typed errors last so they land
-against the final module shape)*
+*(order a → b → c → d — structural moves first, then naming hygiene. A fifth item, the
+`thiserror` conversion, was planned here and **dropped** — see the note after item **d**.)*
 
 #### a. Delete the test-only `Library::add` and share the test setup
 
@@ -2037,96 +2039,75 @@ Import) into one small `refresh_books(library, books)` helper in `ui/library.rs`
 
 #### d. Naming & hygiene (ride-alongs)
 
-- `injects_page_listener` (`epub.rs:168`) → `inject_page_listener` — it's named like its
-  test, breaking the `inject_*` convention of its four siblings.
-- Test-name typo: `"database reopnes"` (`library.rs:244`) — **already fixed in item a**
-  when that test was rewritten.
-- Stale `expect` messages that still say "bundled epub" on paths that now serve
-  user-supplied files (the Reader one dies in item b; grep for the rest).
+Three ride-alongs were listed here. By the time items a–c landed, **two had already been
+resolved by those items**, which is itself the lesson: a punch-list written before the
+structural moves will partly dissolve once they happen, so re-check it against the source
+rather than working it from the doc.
 
-#### e. R3 — a real error type with `thiserror` (the "tidy error handling" half)
+- **`BOOK` → `TEST_BOOK`** (`main.rs:24`, plus ~18 `crate::BOOK` call sites in `epub.rs`
+  and `library.rs`). The constant is correctly `#[cfg(test)]`-gated, but the name doesn't
+  say so at the call sites — `Epub::open(crate::BOOK)` reads like the app has a default
+  book, which is exactly the single-book assumption Step 6 removed. The rename makes the
+  gating legible where it's used, not just where it's declared. **This is the only part of
+  item d with work left in it.**
+- ~~`injects_page_listener` (`epub.rs:168`) → `inject_page_listener`~~ — **moot after item
+  c.** That production function no longer exists; the injected snippets became
+  `src/web/assets/*.js`. Only the *test* names `injects_*` remain, where the `injects_`
+  form is correct.
+- ~~Test-name typo `"database reopnes"`~~ — **already fixed in item a** when that test was
+  rewritten.
+- ~~Stale `expect` messages saying "bundled epub" on user-supplied paths~~ — **resolved.**
+  The one that mattered died with item b's `Reader` change. The seven remaining mentions
+  (`library.rs:375`, `epub.rs:287,329,340,373,403,405`) are all inside `mod test`,
+  asserting against the bundled fixture, so the wording is accurate there.
 
-*Last on purpose:* by the time you get here, `add_from_path` and `read_metadata` live in
-their final homes (`library.rs` / `epub.rs`; UI call sites in `ui/library.rs` after item
-**c**), so the typed surface lands once instead of being shuffled through the module split.
-Item **b** also clears the Reader `expect` first — the open-path half of R3 — leaving this
-item as the import-side half only.
+#### Dropped: the `thiserror` conversion (was item e)
 
-Two changes in opposite directions:
+A fifth item planned to add `thiserror`, give `add_from_path` a matchable `LibraryError`,
+and drop `read_metadata`'s can't-fail `Result`. **It is deliberately not part of this
+phase.** The work is real but it is not a *closer*: it's a cross-cutting error-handling
+change that touches `library.rs`, `epub.rs`, and `ui/library.rs`, and Phase 6's remaining
+job is to stop, not to open a new front.
 
-- **`read_metadata` is infallible — drop its `Result`.** Its body contains no `?` and no
-  `Err`: a missing title falls back to `"Untitled"`, a missing author is `None`. The
-  signature `-> Result<BookMeta, Box<dyn Error>>` promises failures that cannot happen,
-  and every caller pays an `?`/`expect` tax for them. Make it `-> BookMeta` and delete the
-  handling at the call sites.
-- **`add_from_path` gets a matchable enum.** Add `thiserror = "2"` and, in `library.rs`:
+It already has a home — **R3** in
+[`review-2026-07-steps.md`](../review-2026-07-steps.md), still unchecked, with the full
+sketch (the enum, the `#[from]` conversions, the "a `Result` that can't fail is as
+misleading as a panic that can" reasoning). Nothing is lost by dropping it here.
 
-  ```rust
-  #[derive(Debug, thiserror::Error)]
-  pub(crate) enum LibraryError {
-      #[error("could not copy the book into the library: {0}")]
-      Io(#[from] std::io::Error),
-      #[error("library database error: {0}")]
-      Db(#[from] rusqlite::Error),
-      #[error("failed to read the EPUB: {0}")]
-      Epub(#[from] rbook::ebook::errors::EbookError),
-  }
-  ```
+Two notes for whoever picks R3 up:
 
-  (`Epub::open` returns `Result<Epub, EbookError>` in rbook 0.7.9 — confirmed in the
-  crate source. Import it as `use rbook::ebook::errors::EbookError` if you prefer the
-  short name in the `#[from]`.)
+- `read_metadata` (`epub.rs:213`) is confirmed infallible — no `?`, no `Err`, every path
+  funnels into one `Ok` at the end. Shrinking its signature to `-> BookMeta` is safe.
+- R3's sketch doesn't say what happens to `spine_hrefs` (`epub.rs:238`), which *is*
+  genuinely fallible (`ok_or("spine entry with a dangling idref")`) and forms the other
+  half of `open_epub`'s error path. It needs a variant, its own type, or an explicit
+  "stays boxed" decision.
 
-  `add_from_path` returns `Result<Book, LibraryError>`; every `?` in its body keeps
-  compiling because `#[from]` generates the conversions. The early `fs::copy` failure
-  that today does `return Err(Box::new(error))` becomes `return Err(error.into())` (or
-  restructure so `?` covers it after the cleanup). `remove` stays on `rusqlite::Result`
-  (cleanup failures are logged, not returned — recorded in Step 9).
-
-  Call sites that only *display* the error (`Import failed: {error}` in `ImportControl`)
-  keep working unchanged — `LibraryError` implements `Display` via the `#[error]`
-  strings. What changes is that a future UI *could* `match` on the variant.
-
-New test — the check that the box became matchable:
-
-```rust
-#[test]
-fn import_of_a_missing_source_is_a_matchable_io_error() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let (library, _source) = library_with_source(&dir);
-    let err = library
-        .add_from_path(Path::new("/no/such/book.epub"))
-        .unwrap_err();
-    assert!(matches!(err, LibraryError::Io(_)), "got {err:?}");
-    assert!(!err.to_string().is_empty());
-}
-```
-
-**Why.** `Box<dyn Error>` can only be *displayed*; an enum can be *matched* — and matching
-is what a UI needs to choose between "that file isn't an EPUB" and "the disk is full".
-`thiserror` derives `Display` (the `#[error]` strings), `std::error::Error` (with
-`source()` wired), and the `From` impls `?` relies on — the machinery `anyhow` hides,
-written out where you can see it. And shrinking `read_metadata`'s signature teaches the
-inverse lesson: a `Result` that can't fail is as misleading as a panic that can.
+The five `Box<dyn Error>` sites that remain after this phase: `library.rs:76`,
+`library.rs:98`, `epub.rs:213`, `epub.rs:238`, `ui/library.rs:186`.
 
 ### Scope note
 
 - **R6 stays its own backlog item** (fragment sanitization, case-insensitive content
   types, "Page 1 of 0") — it changes behavior, so it doesn't belong in a refactor pass.
+- **R3 (`thiserror`) also stays a backlog item** — dropped from this phase, see the note
+  after item **d**. The phase closes with `Box<dyn Error>` still in five places.
 - The startup `expect`s in `Library::open_default` remain: no home directory / unopenable
   DB means the app genuinely can't run, and there's no UI yet to show it. Recorded, not
   hidden.
 - Cover thumbnails, content-hash dedupe, and the web-target `read_bytes()` import path
   stay deferred per the phase doc.
 
-> **Status:** in progress — items **a**–**c** done. **a** in `3f65e73` (29 tests green,
+> **Status:** done — items **a**–**d** committed and the end-to-end `dx serve` eyeball
+> confirmed (import → list → open → page → chapter nav → TOC link → close → remove,
+> behavior identical); the planned `thiserror` item was dropped to the backlog rather
+> than done. **a** in `3f65e73` (29 tests green,
 > clippy clean): `Library::add` and the now-unused `open_in_memory` + test-only
 > `BookMeta` import deleted; the three oldest tests reseeded through `add_from_path` via
 > the existing `library_with_source` helper, which every library test now uses. Because
 > both seeded sources copy the same fixture, the round-trip test asserts list *contents*
 > rather than `ORDER BY title` order (equal titles have unspecified relative order). The
-> `"database reopnes"` typo from item **d** died with the rewrite. Letters renumbered
-> sequentially after moving thiserror last: **a → b → c → d → e**. **b** in `65183f3`
+> `"database reopnes"` typo from item **d** died with the rewrite. **b** in `65183f3`
 > (29 tests green, clippy clean): `OpenBook` carries `docs`; `open_epub` chains
 > `Epub::open` → `load_spine` at the cover-click site into `open_status` / a fully-loaded
 > `OpenBook`; `Reader` drops the `use_hook`/`expect` and just uses `book.docs`. **c** in
@@ -2134,4 +2115,12 @@ inverse lesson: a `Result` that can't fail is as misleading as a panic that can.
 > bootstrapping; `src/ui/reader.rs` holds `Reader` / `NavRow` / `use_bridge` / `BRIDGE_JS`
 > / `BridgeMsg` (+ test); `src/ui/library.rs` holds `LibraryBooks` / `ImportControl` /
 > `OpenBook` / `refresh_books`; `main.rs` keeps `main`, `App`, asset consts, and the test
-> `BOOK` fixture. **Next up: item d** (naming & hygiene ride-alongs).
+> `BOOK` fixture. **d** in `c5ef36b`: `BOOK` → `TEST_BOOK` across `main.rs` and 18 call
+> sites in `epub.rs` / `library.rs`, all inside `mod test` (40 tests green, clippy clean
+> apart from the transitive `block v0.1.6` note). Its other three ride-alongs needed no
+> work: two were already
+> resolved by items **a** and **b**, and the `inject_page_listener` rename went moot when
+> item **c** turned the injected snippets into `src/web/assets/*.js`. The planned
+> `thiserror` item was **dropped** to R3 in the review backlog rather than done — see the
+> note after item **d**. **Remaining to close the step: the end-to-end `dx serve`
+> eyeball** (import → list → open → page → chapter nav → TOC link → close → remove).

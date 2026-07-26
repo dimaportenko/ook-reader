@@ -11,8 +11,8 @@ reading position remembered between launches. The minimum viable reader to build
 
 | # | Feature | Outcome | Status |
 |---|---|---|---|
-| 1 | [EPUB Rendering](01-epub-rendering/README.md) | Parse with `rbook`, render a spine item in a webview iframe | ⬜ |
-| 2 | [Library & Import](02-library/README.md) | Add `.epub` files; list books with covers | ⬜ |
+| 1 | [EPUB Rendering](01-epub-rendering/README.md) | Parse with `rbook`, render a spine item in a webview iframe | ✅ |
+| 2 | [Library & Import](02-library/README.md) | Add `.epub` files; list books with covers | ✅ |
 | 3 | [Reading Position](03-reading-position/README.md) | Persist & restore where you stopped | ⬜ |
 
 ## Cross-cutting
@@ -31,8 +31,8 @@ The rework itself is a three-document chain filed under the feature it reworks,
 
 ## Exit criteria
 
-- [ ] Import an `.epub` and see it in a library list
-- [ ] Open it and turn pages
+- [x] Import an `.epub` and see it in a library list
+- [x] Open it and turn pages
 - [ ] Reopen the app → it resumes at the same spot
 
 ## Stack (from research)

@@ -1,6 +1,6 @@
 # Phase 6 — Library & Import
 
-[← Feature: Library & Import](README.md) · **Status:** 🚧 in progress ·
+[← Feature: Library & Import](README.md) · **Status:** ✅ done ·
 build log: [`phase-6-library-steps.md`](phase-6-library-steps.md)
 
 ## Goal
@@ -95,13 +95,17 @@ and the list are thin glue over a core that's already tested.
 - [x] **Step 11b — Serve covers and show thumbnails.** App-level `covers` asset route
       with file-name sanitization; `<img>` thumbnails in the library list. `#[test]` for
       the sanitizer + `dx serve` eyeball.
-- [ ] **Step 12 — Review & refactor** (mandatory phase-closer): review the library module
-      boundary, tidy error handling, and delete the dead single-book `BOOK` scaffolding.
+- [x] **Step 12 — Review & refactor** (mandatory phase-closer): review the library module
+      boundary, move the last fallible open to the edge, split `main.rs` into `ui/`
+      modules, and rename the test-only `BOOK` fixture to `TEST_BOOK`. *(The "tidy error
+      handling" half — the `thiserror` conversion — was dropped from this phase and stays
+      as **R3** in the [review backlog](../review-2026-07-steps.md).)*
 
 > **Related:** a July 2026 codebase review produced a parallel refactor backlog
 > ([`review-2026-07-steps.md`](../review-2026-07-steps.md)). Two items interact with this
-> phase: **R2** (pass `&Epub`, not paths) is best landed *before* Step 6 (open a book), and
-> **R3** (a `thiserror` error type) pairs with Step 10's "tidy error handling."
+> phase: **R2** (pass `&Epub`, not paths) was landed *before* Step 6 (open a book), and
+> **R3** (a `thiserror` error type) was considered for Step 12's "tidy error handling" but
+> deliberately left in the backlog — it's a cross-cutting change, not a phase closer.
 
 ## Known constraints
 

@@ -4,17 +4,19 @@
 
 **Goal:** let the user add `.epub` files and see their books in a list.
 
-**Status:** 🚧 in progress
+**Status:** ✅ done
 
 ## Phases
 
 | Phase | Outcome | Status |
 |---|---|---|
-| [Phase 6 — Library & Import](phase-6-library.md) | Add `.epub` files → list them (title/author/cover) → open one in the reader | 🚧 |
+| [Phase 6 — Library & Import](phase-6-library.md) | Add `.epub` files → list them (title/author/cover) → open one in the reader | ✅ |
 
 Planned as one phase (build log: [`phase-6-library-steps.md`](phase-6-library-steps.md)),
-built data-first in seven steps: metadata extraction → `rusqlite` store → Dioxus file-input
-import → list view → delete → open (drop the `const BOOK`) → review & refactor.
+built data-first in twelve steps: metadata extraction → `rusqlite` store → Dioxus
+file-input import → list view → delete → open (drop the `const BOOK`) → managed storage
+(import / re-import / remove) → cover extraction → cover persistence & thumbnails →
+review & refactor.
 
 ## Notes
 
