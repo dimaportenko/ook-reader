@@ -211,7 +211,7 @@ mod test {
         let dir = tempfile::tempdir().expect("temp dir");
         let (library, first_source, books_dir) = library_with_source(&dir);
         let second_source = dir.path().join("holmes-second-source.epub");
-        std::fs::copy(crate::BOOK, &second_source).expect("second fixture source");
+        std::fs::copy(crate::TEST_BOOK, &second_source).expect("second fixture source");
 
         let first = library.add_from_path(&first_source).expect("first import");
         let second = library
@@ -253,7 +253,7 @@ mod test {
         let dir = tempfile::tempdir().expect("temp dir");
         let (library, first_source, _) = library_with_source(&dir);
         let second_source = dir.path().join("holmes-second-source.epub");
-        std::fs::copy(crate::BOOK, &second_source).expect("second fixture source");
+        std::fs::copy(crate::TEST_BOOK, &second_source).expect("second fixture source");
         let first = library.add_from_path(&first_source).expect("first import");
         let second = library
             .add_from_path(&second_source)
@@ -362,7 +362,7 @@ mod test {
         let library =
             Library::open(dir.path().join("library.sqlite3"), &books_dir).expect("library opens");
         let source = dir.path().join("holmes-source.epub");
-        std::fs::copy(crate::BOOK, &source).expect("fixture source");
+        std::fs::copy(crate::TEST_BOOK, &source).expect("fixture source");
         (library, source, books_dir)
     }
 

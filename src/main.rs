@@ -21,7 +21,7 @@ const FAVICON: Asset = asset!("/assets/favicon.ico");
 const MAIN_CSS: Asset = asset!("/assets/main.css");
 
 #[cfg(test)]
-pub(crate) const BOOK: &str = concat!(
+pub(crate) const TEST_BOOK: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/book/pg1661-adventures-of-sherlock-holmes.epub"
 );

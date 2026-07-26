@@ -271,11 +271,11 @@ mod test {
 
     #[test]
     fn sample_epub_fixture_is_bundled() {
-        let path = std::path::Path::new(crate::BOOK);
+        let path = std::path::Path::new(crate::TEST_BOOK);
         assert!(
             path.exists(),
-            "sample EPUB fixture missing at {BOOK} — is book/ gitignored or the file moved?",
-            BOOK = crate::BOOK,
+            "sample EPUB fixture missing at {TEST_BOOK} — is book/ gitignored or the file moved?",
+            TEST_BOOK = crate::TEST_BOOK,
         );
         // Non-trivial size = a real book, not a stray empty placeholder.
         let bytes = std::fs::metadata(path).expect("fixture metadata").len();
@@ -284,7 +284,7 @@ mod test {
 
     #[test]
     fn reads_cover_image_bytes() {
-        let epub = Epub::open(crate::BOOK).expect("should open the bundled epub");
+        let epub = Epub::open(crate::TEST_BOOK).expect("should open the bundled epub");
 
         let cover = epub
             .manifest()
@@ -325,7 +325,7 @@ mod test {
 
     #[test]
     fn ignores_external_links() {
-        let epub = Rc::new(Epub::open(crate::BOOK).expect("open fixture book"));
+        let epub = Rc::new(Epub::open(crate::TEST_BOOK).expect("open fixture book"));
         let docs = spine_hrefs(&epub).expect("should open the bundled epub");
 
         assert_eq!(
@@ -336,7 +336,7 @@ mod test {
 
     #[test]
     fn resolves_contents_link_to_doc_and_fragment() {
-        let epub = Rc::new(Epub::open(crate::BOOK).expect("open fixture book"));
+        let epub = Rc::new(Epub::open(crate::TEST_BOOK).expect("open fixture book"));
         let docs = spine_hrefs(&epub).expect("should open the bundled epub");
 
         let target = resolve_internal_link(
@@ -369,7 +369,7 @@ mod test {
 
     #[test]
     fn reads_title_and_author_from_metadata() {
-        let epub = Rc::new(Epub::open(crate::BOOK).expect("open fixture book"));
+        let epub = Rc::new(Epub::open(crate::TEST_BOOK).expect("open fixture book"));
         let meta = read_metadata(&epub).expect("bundled epub metadata should read");
 
         assert!(
@@ -399,7 +399,7 @@ mod test {
 
     #[test]
     fn read_metadata_extracts_the_cover_image() {
-        let epub = Epub::open(crate::BOOK).expect("open fixture book");
+        let epub = Epub::open(crate::TEST_BOOK).expect("open fixture book");
         let meta = read_metadata(&epub).expect("bundled epub metadata should read");
 
         let cover = meta.cover.expect("the bundled book declares a cover image");
@@ -463,7 +463,7 @@ mod test {
 
     #[test]
     fn serves_an_image_resource_as_raw_bytes() {
-        let epub = Epub::open(crate::BOOK).expect("open fixture book");
+        let epub = Epub::open(crate::TEST_BOOK).expect("open fixture book");
 
         let served = serve_epub_resource(&epub, "/OEBPS/374963762688302552_cover.jpg")
             .expect("the fixture's cover is reachable by path");
@@ -477,13 +477,13 @@ mod test {
 
     #[test]
     fn serving_an_unknown_path_is_a_miss() {
-        let epub = Epub::open(crate::BOOK).expect("open fixture book");
+        let epub = Epub::open(crate::TEST_BOOK).expect("open fixture book");
         assert!(serve_epub_resource(&epub, "/OEBPS/nope.xhtml").is_none());
     }
 
     #[test]
     fn serving_a_chapter_injects_the_reader_assets() {
-        let epub = Epub::open(crate::BOOK).expect("open fixture book");
+        let epub = Epub::open(crate::TEST_BOOK).expect("open fixture book");
         let hrefs = spine_hrefs(&epub).expect("fixture spine");
 
         let href = hrefs.get(2).expect("3d item in spine exists");
@@ -502,7 +502,7 @@ mod test {
 
     #[test]
     fn serving_a_chapter_rewrites_resource_paths_to_the_epub_route() {
-        let epub = Epub::open(crate::BOOK).expect("open fixture book");
+        let epub = Epub::open(crate::TEST_BOOK).expect("open fixture book");
         let hrefs = spine_hrefs(&epub).expect("fixture spine");
 
         let href = hrefs.get(2).expect("3d item in spine exists");
@@ -560,7 +560,7 @@ mod test {
 
     #[test]
     fn spine_hrefs_are_relative_zip_paths_in_reading_order() {
-        let epub = Epub::open(crate::BOOK).expect("open fixture book");
+        let epub = Epub::open(crate::TEST_BOOK).expect("open fixture book");
         let hrefs = spine_hrefs(&epub).expect("fixture spine");
 
         assert_eq!(hrefs.len(), 15); // same count load_spine produced
@@ -584,7 +584,7 @@ mod test {
 
     #[test]
     fn a_served_resource_is_typed_and_never_cached() {
-        let epub = Epub::open(crate::BOOK).expect("open fixture book");
+        let epub = Epub::open(crate::TEST_BOOK).expect("open fixture book");
         let hrefs = spine_hrefs(&epub).expect("fixture spine");
 
         let response = epub_response(serve_epub_resource(&epub, &format!("/{}", hrefs[2])));
@@ -600,7 +600,7 @@ mod test {
 
     #[test]
     fn a_missing_resource_is_a_typed_404() {
-        let epub = Epub::open(crate::BOOK).expect("open fixture book");
+        let epub = Epub::open(crate::TEST_BOOK).expect("open fixture book");
 
         let response = epub_response(serve_epub_resource(&epub, "/OEBPS/nope.xhtml"));
 
