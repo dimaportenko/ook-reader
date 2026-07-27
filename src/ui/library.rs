@@ -153,17 +153,32 @@ pub(crate) fn ImportControl() -> Element {
                 input {
                     r#type: "file",
                     accept: ".epub",
+                    multiple: true,
                     onchange: move |event| {
-                        let Some(file) = event.files().into_iter().next() else {
+                        let files = event.files();
+                        if files.is_empty() {
                             return;
-                        };
-                        match library.add_from_path(&file.path()) {
-                            Ok(book) => {
-                                status.set(Some(format!("Imported: {}", book.title)));
-                                refresh_books(&library, books);
-                            }
-                            Err(error) => status.set(Some(format!("Import failed: {error}"))),
                         }
+
+                        let mut imported = 0usize;
+                        let mut failed = 0usize;
+
+                        for file in files {
+                            match library.add_from_path(&file.path()) {
+                                Ok(_) => imported += 1,
+                                Err(_) => failed += 1,
+                            }
+                        }
+
+                        status
+                            .set(
+                                match failed {
+                                    0 => format!("Imported {imported} books").into(),
+                                    _ => format!("Imported {imported} books, {failed} failed").into(),
+                                },
+                            );
+
+                        refresh_books(&library, books);
                     },
                 }
             }
