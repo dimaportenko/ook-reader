@@ -43,13 +43,16 @@ reader can use (open a book, see text, turn a page, resume). The MVP slice seque
 | # | Milestone | Outcome | Status |
 |---|---|---|---|
 | 1 | [Foundation](milestones/01-foundation/README.md) | Rust/Dioxus NeoVim toolchain + a buildable desktop app | ⬜ |
-| 2 | [Basic EPUB Reader](milestones/02-basic-reader/README.md) | Open an `.epub` and read it with paging + saved position | ⬜ |
+| 2 | [Basic EPUB Reader](milestones/02-basic-reader/README.md) | Open an `.epub` and read it with paging + saved position | 🚧 |
 | 3 | [Reader Enhancements](milestones/03-reader-enhancements/README.md) | The features missing from other readers | ⬜ |
 | 4 | [Multi-platform](milestones/04-multiplatform/README.md) | Mobile (iOS/Android) + web (WASM) from the same codebase | ⏸ |
 
 ## Current focus
 
-Fresh start on the Dioxus/Rust stack — nothing built yet. Begin at
-**Milestone 1 → Dev Environment → Phase 0** (Rust + NeoVim toolchain), then Phase 2
-(Dioxus desktop scaffold). Rust + Dioxus fundamentals run in parallel.
+**Milestone 2 → Reading Position →
+[Phase 7](milestones/02-basic-reader/03-reading-position/phase-7-reading-position.md)** —
+the reader renders, paginates, and has a library with covers; what's left for the MVP is
+remembering where you stopped. Riding alongside: the two open items in the
+[July 2026 review backlog](milestones/02-basic-reader/review-2026-07-steps.md) (**R3** a
+real error type, **R6** hygiene), pickable in any order.
 </content>

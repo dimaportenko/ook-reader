@@ -5,16 +5,24 @@
 **Goal:** remember where the reader stopped in each book and restore it on reopen, and
 surface recently-read books first in the library.
 
-**Status:** ⬜ planned
+**Status:** 🚧 in progress
 
-## Phases / steps
+## Phases
 
-| Step | Focus | Status |
+| Phase | Outcome | Status |
 |---|---|---|
-| Recency | `added_at` + `last_opened_at` on `books`; list sorted by `COALESCE(last_opened_at, added_at)` | ⬜ |
-| Capture | Track `{spine_index, element selector}` — the first element visible on the current page | ⬜ |
-| Persist | Save the latest locator per book in `rusqlite` | ⬜ |
-| Restore | On open, mount the saved spine item and resolve the selector back to a page | ⬜ |
+| [Phase 7 — Reading Position](phase-7-reading-position.md) | Recency ordering + capture / persist / restore the reading locator | 🚧 |
+
+Planned as one phase (build log:
+[`phase-7-reading-position-steps.md`](phase-7-reading-position-steps.md)), built data-first
+in nine steps across four focuses:
+
+| Focus | Steps | What it covers |
+|---|---|---|
+| Recency | 1–2 | `added_at` + `last_opened_at` on `books`; list sorted by `COALESCE(last_opened_at, added_at)` |
+| Capture | 3–5 | Track `{spine_index, element selector}` — the first element visible on the current page |
+| Persist | 6 | Save the latest locator per book in `rusqlite` |
+| Restore | 7–8 | On open, mount the saved spine item and resolve the selector back to a page |
 
 ## Notes
 
@@ -35,11 +43,11 @@ surface recently-read books first in the library.
   one structurally hard area (see [`RESEARCH.md`](../../../../RESEARCH.md) §3.3).
 - EPUB CFI is skipped for v1 (no mature Rust crate; only needed for cross-reader
   portability).
-- **Schema-change decision pending.** `Library::init` is `CREATE TABLE IF NOT EXISTS` with
-  no migrator; the pre-release policy so far has been "delete the dev DB" (Step 7). Adding
-  `added_at` / `last_opened_at` forces the choice: reset again, or land the project's first
-  `ALTER TABLE` migration. Decide it on the cheap recency columns, before the position
-  table needs it.
-
-> Detailed phase files will be added when this feature is planned in depth.
+- **Schema-change decision: reset the dev DB, no migrator (2026-07-26).** `Library::init`
+  stays `CREATE TABLE IF NOT EXISTS`; the new columns go straight into it and
+  `library.sqlite3` is deleted by hand, extending the Phase 6 pre-release policy one more
+  phase. The declined alternative was a `PRAGMA user_version` migrator. The accepted cost:
+  the reset repeats when the `positions` table lands, and the first real user forces a
+  migrator against a bigger schema. Full framing in
+  [the phase doc](phase-7-reading-position.md#design-decisions-recorded-up-front).
 </content>
