@@ -164,9 +164,10 @@ pub(crate) fn ImportControl() -> Element {
 
                         let mut imported = 0usize;
                         let mut failed = 0usize;
+                        let added_at = library::now_secs();
 
                         for file in files {
-                            match library.add_from_path(&file.path(), library::now_secs()) {
+                            match library.add_from_path(&file.path(), added_at) {
                                 Ok(_) => imported += 1,
                                 Err(_) => failed += 1,
                             }
