@@ -181,9 +181,18 @@ impl Library {
     pub(crate) fn list(&self) -> rusqlite::Result<Vec<Book>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT id, path, title, author, cover_path, added_at, last_opened_at FROM books ORDER BY title")?;
+            .prepare("SELECT id, path, title, author, cover_path, added_at, last_opened_at FROM books ORDER BY COALESCE(last_opened_at, added_at) DESC, title")?;
         let rows = stmt.query_map([], Self::read_book)?;
         rows.collect()
+    }
+
+    pub(crate) fn touch_opened(&self, id: i64, now: i64) -> rusqlite::Result<bool> {
+        let updated = self.conn.execute(
+            "UPDATE books SET last_opened_at = ?2 WHERE id = ?1",
+            params![id, now],
+        )?;
+
+        Ok(updated == 1)
     }
 
     pub(crate) fn open_default() -> Library {
@@ -474,5 +483,44 @@ mod test {
         assert_ne!(second.path, first.path);
         // … but the day it joined the library is not "fresh metadata".
         assert_eq!(second.added_at, 1_000);
+    }
+
+    #[test]
+    fn opening_a_book_floats_it_to_the_top_of_the_list() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let (library, first_source, _) = library_with_source(&dir);
+        let second_source = dir.path().join("holmes-second-source.epub");
+        std::fs::copy(crate::TEST_BOOK, &second_source).expect("second fixture source");
+
+        let older = library
+            .add_from_path(&first_source, 1_000)
+            .expect("first import");
+        let newer = library
+            .add_from_path(&second_source, 2_000)
+            .expect("second import");
+
+        // Nothing opened yet: `added_at` stands in, so the newest import leads.
+        let ids: Vec<i64> = library.list().expect("list").iter().map(|b| b.id).collect();
+        assert_eq!(ids, vec![newer.id, older.id]);
+
+        // Open the *older* import, later than either import moment.
+        let touched = library
+            .touch_opened(older.id, 3_000)
+            .expect("touch succeeds");
+        assert!(touched, "an existing row reports true");
+
+        let books = library.list().expect("list");
+        assert_eq!(books[0].id, older.id, "the book you just read leads");
+        assert_eq!(books[0].last_opened_at, Some(3_000));
+        assert_eq!(
+            books[1].last_opened_at, None,
+            "the book you didn't open is untouched",
+        );
+
+        // Unknown id: no error, no change — same contract as `remove`.
+        let missing = library
+            .touch_opened(-1, 4_000)
+            .expect("missing id is Ok(false)");
+        assert!(!missing);
     }
 }

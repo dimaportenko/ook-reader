@@ -73,7 +73,7 @@ eyeball, and it's deliberately checkable *in devtools* before any database is wi
 
 *(smallest-first; the last step is the mandatory review-and-refactor pass)*
 
-- [ ] **Step 0 — Import several EPUBs at once.** *(Prerequisite, folded in mid-phase — not
+- [x] **Step 0 — Import several EPUBs at once.** *(Prerequisite, folded in mid-phase — not
       reading-position work.)* `multiple: true` on the file input and a loop that counts
       successes and failures rather than stopping at the first bad file, with a single
       `refresh_books` after the batch. Eyeball only — the behavior is the native `rfd`
@@ -81,7 +81,7 @@ eyeball, and it's deliberately checkable *in devtools* before any database is wi
       the dev database twice (Steps 1 and 3) and each reset means re-importing the whole
       shelf; paying off Feature 2's deferred "multiple selection" TODO now makes that one
       pick instead of N.
-- [ ] **Step 1 — Stamp `added_at`, and keep it stable across re-import.** Two nullable
+- [x] **Step 1 — Stamp `added_at`, and keep it stable across re-import.** Two nullable
       `INTEGER` columns in the schema, `add_from_path(source, now)`, and an `ON CONFLICT`
       clause that refreshes everything *except* when the book joined the library. `#[test]`.
 - [ ] **Step 2 — Recency: `touch_opened` + the sort.** `last_opened_at` written when a book

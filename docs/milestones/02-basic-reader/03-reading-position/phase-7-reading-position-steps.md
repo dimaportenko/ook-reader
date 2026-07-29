@@ -60,6 +60,9 @@ Then the reading-position arc proper:
 
 ## Step 0 — import several EPUBs at once
 
+> **Status:** done — committed in `afa4cb0` (TODO tick in `d451eac`); eyeball-verified, no
+> new tests (the behavior under test is a native file panel).
+
 A prerequisite, not a reading-position step. Everything after this deletes the dev database
 by hand — Step 1 for the two new `books` columns, Step 3 again for the `positions` table —
 and each deletion is followed by re-importing the whole shelf through a picker that takes
@@ -174,6 +177,8 @@ one would drag `Rc<Library>` across an await point — a real fight, and not thi
 ---
 
 ## Step 1 — stamp `added_at`, and keep it stable across re-import
+
+> **Status:** done — committed in `142b84d` (41 tests green).
 
 The smallest possible start, and the one that forces the schema decision while it's still
 cheap: give every book the moment it **joined the library**, and prove that re-importing
@@ -305,3 +310,153 @@ clearly (`0`, or distinct values where the test is about ordering later).
 both are Step 2. Nothing reads position yet — that's Step 3 onward. The only user-visible
 change from this step is that the library is empty until you re-import, which is the price
 of the recorded no-migrator decision.
+
+---
+
+## Step 2 — recency: `touch_opened` + the sort
+
+Step 1 gave every book a timestamp nothing reads. This step makes both timestamps *matter*:
+write `last_opened_at` when a book is opened, and sort the library by "the last time this
+book and I had anything to do with each other." It's the first step in the phase with a
+visible payoff — the shelf reorders itself around what you're actually reading — and it's
+still pure store work plus one call site, so it stays small.
+
+The one real design decision is what a **never-opened** book sorts as. `ORDER BY
+last_opened_at DESC` puts every fresh import at the *bottom*, under books you read months
+ago — exactly backwards, since the book you just imported is the one you most likely want.
+`COALESCE(last_opened_at, added_at)` says the right thing instead: fall back to the day it
+joined the library, so an import is "recent activity" until the first time you open it, and
+after that its own opens take over.
+
+**Runnable check.** A `#[test]` in `library.rs`. Unlike the earlier tests this one asserts
+**order**, so give the two books distinct timestamps — with a real clock they'd tie and
+`ORDER BY title` (equal titles, same fixture) would decide, making the assertion a coin
+flip. This is the same reason Step 1 injected `now`, now paying off a second time.
+
+```rust
+#[test]
+fn opening_a_book_floats_it_to_the_top_of_the_list() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let (library, first_source, _) = library_with_source(&dir);
+    let second_source = dir.path().join("holmes-second-source.epub");
+    std::fs::copy(crate::TEST_BOOK, &second_source).expect("second fixture source");
+
+    let older = library
+        .add_from_path(&first_source, 1_000)
+        .expect("first import");
+    let newer = library
+        .add_from_path(&second_source, 2_000)
+        .expect("second import");
+
+    // Nothing opened yet: `added_at` stands in, so the newest import leads.
+    let ids: Vec<i64> = library.list().expect("list").iter().map(|b| b.id).collect();
+    assert_eq!(ids, vec![newer.id, older.id]);
+
+    // Open the *older* import, later than either import moment.
+    let touched = library.touch_opened(older.id, 3_000).expect("touch succeeds");
+    assert!(touched, "an existing row reports true");
+
+    let books = library.list().expect("list");
+    assert_eq!(books[0].id, older.id, "the book you just read leads");
+    assert_eq!(books[0].last_opened_at, Some(3_000));
+    assert_eq!(
+        books[1].last_opened_at, None,
+        "the book you didn't open is untouched",
+    );
+
+    // Unknown id: no error, no change — same contract as `remove`.
+    let missing = library
+        .touch_opened(-1, 4_000)
+        .expect("missing id is Ok(false)");
+    assert!(!missing);
+}
+```
+
+Watch it fail first for the right reason: `touch_opened` doesn't exist, so this is a
+compile error, not a wrong-order failure. Once it compiles, the *ordering* assertions are
+what the step is actually about.
+
+Then the eyeball under `dx serve`: open a book that isn't first in the grid, close it, and
+it's now first. Plus `cargo clippy --all-targets -- -D warnings`.
+
+**Minimal implementation.** Three edits:
+
+1. **`touch_opened`** in `library.rs`, next to `remove` (whose `bool` convention it copies):
+
+   ```rust
+   pub(crate) fn touch_opened(&self, id: i64, now: i64) -> rusqlite::Result<bool> {
+       let updated = self.conn.execute(
+           "UPDATE books SET last_opened_at = ?2 WHERE id = ?1",
+           params![id, now],
+       )?;
+
+       Ok(updated == 1)
+   }
+   ```
+
+2. **The sort** in `list()` — the `ORDER BY` clause only, the `SELECT` is unchanged:
+
+   ```sql
+   ORDER BY COALESCE(last_opened_at, added_at) DESC, title
+   ```
+
+3. **The call site**, in `LibraryBooks`'s cover `onclick` (`src/ui/library.rs:50`), inside
+   the `Ok(…)` arm — you record having read a book only *after* it actually opened. The
+   closure needs its own handle, so clone the `Rc` in the same `{ … }` prelude that already
+   captures `id`/`title`/`path`, the way the Remove button does:
+
+   ```rust
+   onclick: {
+       let library = Rc::clone(&library);
+       let id = book.id;
+       // … title, path as today …
+
+       move |_| {
+           match open_epub(std::path::Path::new(&path)) {
+               Ok((epub, docs)) => {
+                   open_status.set(None);
+                   // Best-effort: failing to record the visit must not block the read.
+                   let _ = library.touch_opened(id, library::now_secs());
+                   refresh_books(&library, books);
+                   open_book.set(Some(OpenBook { … }));
+               }
+               Err(error) => open_status.set(Some(format!("Open failed: {error}"))),
+           }
+       }
+   },
+   ```
+
+**Why it works.**
+
+- **`COALESCE(a, b)` returns the first non-`NULL` argument**, evaluated per row inside the
+  `ORDER BY`. So each row sorts on a single "last activity" number without you storing one:
+  opened books sort by their open, never-opened books by their import. SQLite is happy to
+  sort by an expression — no extra column, no view, nothing to keep in sync. The cost is
+  that the expression isn't indexable as written; at library sizes (hundreds of rows, a
+  local file) that is not a real cost, and noticing *why* it's fine is more useful than
+  pre-optimizing it.
+- **`, title` is the tiebreaker, and it's load-bearing.** Two books imported in the same
+  gesture share a timestamp (Step 0's hand-off deliberately passes one `now_secs()` to the
+  whole batch), so without a second key SQLite may return them in any order — and "any
+  order" is allowed to *change* between runs, which reads as a flickering shelf.
+- **`Connection::execute` returns the number of rows it changed**, which is what turns a
+  bare `UPDATE` into a usable answer: `Ok(updated == 1)` distinguishes "recorded" from
+  "there's no such book" without a preceding `SELECT`. `remove` already reports `bool` the
+  same way, so the `Library` API stays consistent — worth keeping in mind for Step 9's API
+  review.
+- **`refresh_books` *before* `open_book.set`** — both writes happen in one event handler,
+  and Dioxus batches them into a single re-render, so the reordered grid is simply already
+  correct behind the reader when you close it. (Writing signals from an event handler is
+  fine; writing one during render is the infinite-loop trap.)
+- **`let _ = …` on the touch is deliberate**, and matches the phase doc's constraint about
+  the save path: the errors here are still `Box<dyn Error>`-era plumbing, and a book that
+  opens fine should not refuse to open because a bookkeeping `UPDATE` failed. **R3**
+  (`thiserror`) in the [review backlog](../review-2026-07-steps.md) is where that gets a
+  real answer.
+
+**Scope note.** Recency only — this step records *that* you opened a book, not *where* you
+were in it; the `positions` table and the `Locator` are Step 3. No relative-date UI ("2 days
+ago"), no user-chosen sort order, and no "currently reading" section. The existing tests
+need no edits: they assert list *contents* (`contains`, or a one-element `vec![…]`), which
+is exactly why they survive a sort change — a useful thing to notice about how they were
+written.

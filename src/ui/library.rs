@@ -43,16 +43,18 @@ pub(crate) fn LibraryBooks() -> Element {
                         button {
                             class: "book-cover",
                             onclick: {
+                                let library = Rc::clone(&library);
                                 let id = book.id;
                                 let title = book.title;
                                 let path = book.path;
 
                                 move |_| {
-                                    let result = open_epub(std::path::Path::new(&path));
-                                    match result
+                                    match open_epub(std::path::Path::new(&path))
                                     {
                                         Ok((epub, docs)) => {
                                             open_status.set(None);
+                                            let _ = library.touch_opened(id, library::now_secs());
+                                            refresh_books(&library, books);
                                             open_book
                                                 .set(
                                                     Some(OpenBook {
