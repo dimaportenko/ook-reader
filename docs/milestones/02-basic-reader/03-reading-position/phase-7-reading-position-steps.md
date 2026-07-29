@@ -315,6 +315,9 @@ of the recorded no-migrator decision.
 
 ## Step 2 — recency: `touch_opened` + the sort
 
+> **Status:** done — committed in `d4f2e7b` (42 tests green; shelf reordering
+> eyeball-verified).
+
 Step 1 gave every book a timestamp nothing reads. This step makes both timestamps *matter*:
 write `last_opened_at` when a book is opened, and sort the library by "the last time this
 book and I had anything to do with each other." It's the first step in the phase with a

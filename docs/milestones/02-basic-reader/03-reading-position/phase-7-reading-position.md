@@ -84,7 +84,7 @@ eyeball, and it's deliberately checkable *in devtools* before any database is wi
 - [x] **Step 1 — Stamp `added_at`, and keep it stable across re-import.** Two nullable
       `INTEGER` columns in the schema, `add_from_path(source, now)`, and an `ON CONFLICT`
       clause that refreshes everything *except* when the book joined the library. `#[test]`.
-- [ ] **Step 2 — Recency: `touch_opened` + the sort.** `last_opened_at` written when a book
+- [x] **Step 2 — Recency: `touch_opened` + the sort.** `last_opened_at` written when a book
       is opened; `list()` orders by `COALESCE(last_opened_at, added_at) DESC, title`.
       `#[test]` with injected timestamps + eyeball (open a book, close it, it's first).
 - [ ] **Step 3 — A `Locator` and somewhere to put it.** `Locator { spine_index, selector }`,
