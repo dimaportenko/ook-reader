@@ -13,7 +13,7 @@ Place to quickly drop things I would like to work later.
 - [ ] refactoring phase
 - [x] show cover image in books library
 - [ ] implement same book import guardrails
-- [ ] multiple selection for book addition
+- [x] multiple selection for book addition
 
 
 
