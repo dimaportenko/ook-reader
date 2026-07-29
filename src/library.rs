@@ -17,6 +17,8 @@ pub(crate) struct Book {
     pub(crate) title: String,
     pub(crate) author: Option<String>,
     pub(crate) cover_path: Option<String>,
+    pub(crate) added_at: i64,
+    pub(crate) last_opened_at: Option<i64>,
 }
 
 impl Book {
@@ -49,7 +51,9 @@ impl Library {
                 source_path TEXT NOT NULL UNIQUE,
                 title TEXT NOT NULL,
                 author TEXT,
-                cover_path TEXT
+                cover_path TEXT,
+                added_at INTEGER NOT NULL,
+                last_opened_at INTEGER
             )",
             [],
         )?;
@@ -67,12 +71,15 @@ impl Library {
             title: row.get(2)?,
             author: row.get(3)?,
             cover_path: row.get(4)?,
+            added_at: row.get(5)?,
+            last_opened_at: row.get(6)?,
         })
     }
 
     pub(crate) fn add_from_path(
         &self,
         source_path: &Path,
+        now: i64,
     ) -> Result<Book, Box<dyn std::error::Error>> {
         let source_path = source_path.canonicalize()?;
         let source_path_text = source_path.to_string_lossy().into_owned();
@@ -108,20 +115,21 @@ impl Library {
             });
 
             let book = self.conn.query_row(
-                "INSERT INTO books (path, source_path, title, author, cover_path)
-                VALUES (?1, ?2, ?3, ?4, ?5)
+                "INSERT INTO books (path, source_path, title, author, cover_path, added_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6)
                 ON CONFLICT(source_path) DO UPDATE SET
                     path = excluded.path,
                     title = excluded.title,
                     author = excluded.author,
                     cover_path = excluded.cover_path
-                RETURNING id, path, title, author, cover_path",
+                RETURNING id, path, title, author, cover_path, added_at, last_opened_at",
                 params![
                     &managed_path_text,
                     &source_path_text,
                     &meta.title,
                     meta.author.as_deref(),
-                    cover_path.as_deref()
+                    cover_path.as_deref(),
+                    now
                 ],
                 Self::read_book,
             )?;
@@ -173,7 +181,7 @@ impl Library {
     pub(crate) fn list(&self) -> rusqlite::Result<Vec<Book>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT id, path, title, author, cover_path  FROM books ORDER BY title")?;
+            .prepare("SELECT id, path, title, author, cover_path, added_at, last_opened_at FROM books ORDER BY title")?;
         let rows = stmt.query_map([], Self::read_book)?;
         rows.collect()
     }
@@ -202,6 +210,13 @@ fn cleanup_managed_file(path: &Path) {
     }
 }
 
+pub(crate) fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs() as i64)
+        .unwrap_or(0)
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -213,9 +228,11 @@ mod test {
         let second_source = dir.path().join("holmes-second-source.epub");
         std::fs::copy(crate::TEST_BOOK, &second_source).expect("second fixture source");
 
-        let first = library.add_from_path(&first_source).expect("first import");
+        let first = library
+            .add_from_path(&first_source, 1_000)
+            .expect("first import");
         let second = library
-            .add_from_path(&second_source)
+            .add_from_path(&second_source, 2_000)
             .expect("second import");
 
         // Distinct source paths are distinct books, with metadata read from the file.
@@ -236,12 +253,14 @@ mod test {
     fn file_backed_library_survives_reopen_and_reimport_is_idempotent() {
         let dir = tempfile::tempdir().expect("temp dir");
         let (library, source, books_dir) = library_with_source(&dir);
-        let first = library.add_from_path(&source).expect("first import");
+        let first = library.add_from_path(&source, 1_000).expect("first import");
         drop(library);
 
         let library = Library::open(dir.path().join("library.sqlite3"), &books_dir)
             .expect("database reopens");
-        let second = library.add_from_path(&source).expect("second import");
+        let second = library
+            .add_from_path(&source, 2_000)
+            .expect("second import");
         let books = library.list().expect("list succeeds");
 
         assert_eq!(second.id, first.id);
@@ -254,9 +273,11 @@ mod test {
         let (library, first_source, _) = library_with_source(&dir);
         let second_source = dir.path().join("holmes-second-source.epub");
         std::fs::copy(crate::TEST_BOOK, &second_source).expect("second fixture source");
-        let first = library.add_from_path(&first_source).expect("first import");
+        let first = library
+            .add_from_path(&first_source, 1_000)
+            .expect("first import");
         let second = library
-            .add_from_path(&second_source)
+            .add_from_path(&second_source, 2_000)
             .expect("second import");
 
         // Remove by the DB-assigned id, not by path.
@@ -276,7 +297,9 @@ mod test {
     fn import_opens_from_managed_copy_after_source_is_deleted() {
         let dir = tempfile::tempdir().expect("temp dir");
         let (library, source, books_dir) = library_with_source(&dir);
-        let added = library.add_from_path(&source).expect("import succeeds");
+        let added = library
+            .add_from_path(&source, 1_000)
+            .expect("import succeeds");
 
         assert!(std::path::Path::new(&added.path).starts_with(&books_dir));
         assert_ne!(std::path::Path::new(&added.path), source.as_path());
@@ -293,8 +316,8 @@ mod test {
     fn reimport_replaces_the_managed_copy_without_leaking_the_old_file() {
         let dir = tempfile::tempdir().expect("temp dir");
         let (library, source, books_dir) = library_with_source(&dir);
-        let first = library.add_from_path(&source).expect("first import");
-        let second = library.add_from_path(&source).expect("reimport");
+        let first = library.add_from_path(&source, 1_000).expect("first import");
+        let second = library.add_from_path(&source, 2_000).expect("reimport");
 
         // Same logical book, fresh bytes: id stable, managed path replaced.
         assert_eq!(second.id, first.id);
@@ -314,12 +337,14 @@ mod test {
     fn reimport_repairs_a_missing_managed_copy() {
         let dir = tempfile::tempdir().expect("temp dir");
         let (library, source, _) = library_with_source(&dir);
-        let first = library.add_from_path(&source).expect("first import");
+        let first = library.add_from_path(&source, 1_000).expect("first import");
 
         // Simulate a hand-deleted managed file: the row now points at nothing.
         std::fs::remove_file(&first.path).expect("delete managed copy");
 
-        let repaired = library.add_from_path(&source).expect("reimport repairs");
+        let repaired = library
+            .add_from_path(&source, 1_000)
+            .expect("reimport repairs");
 
         assert_eq!(repaired.id, first.id);
         rbook::Epub::open(&repaired.path).expect("repaired copy opens");
@@ -330,7 +355,9 @@ mod test {
         let dir = tempfile::tempdir().expect("temp dir");
         let (library, source, _) = library_with_source(&dir);
 
-        let added = library.add_from_path(&source).expect("import succeeds");
+        let added = library
+            .add_from_path(&source, 1_000)
+            .expect("import succeeds");
 
         let removed = library.remove(added.id).expect("remove succeeds");
 
@@ -344,7 +371,9 @@ mod test {
     fn remove_succeeds_when_the_managed_copy_is_already_missing() {
         let dir = tempfile::tempdir().expect("temp dir");
         let (library, source, _) = library_with_source(&dir);
-        let added = library.add_from_path(&source).expect("import succeeds");
+        let added = library
+            .add_from_path(&source, 1_000)
+            .expect("import succeeds");
         // Simulate a hand-deleted managed file: the row now points at nothing.
         std::fs::remove_file(&added.path).expect("delete managed copy");
 
@@ -370,7 +399,9 @@ mod test {
     fn import_writes_a_cover_file_next_to_the_managed_copy() {
         let dir = tempfile::tempdir().expect("temp dir");
         let (library, source, _) = library_with_source(&dir);
-        let added = library.add_from_path(&source).expect("import succeeds");
+        let added = library
+            .add_from_path(&source, 1_000)
+            .expect("import succeeds");
 
         let cover_path = added.cover_path.expect("bundled book has a cover");
         assert!(Path::new(&cover_path).starts_with(dir.path().join("books")));
@@ -384,8 +415,8 @@ mod test {
         let dir = tempfile::tempdir().expect("temp dir");
         let (library, source, _) = library_with_source(&dir);
 
-        let first = library.add_from_path(&source).expect("first import");
-        let second = library.add_from_path(&source).expect("reimport");
+        let first = library.add_from_path(&source, 1_000).expect("first import");
+        let second = library.add_from_path(&source, 2_000).expect("reimport");
 
         let first_cover = first.cover_path.expect("first import has a cover");
         let second_cover = second.cover_path.expect("reimport has a cover");
@@ -409,7 +440,9 @@ mod test {
         let dir = tempfile::tempdir().expect("temp dir");
         let (library, source, _) = library_with_source(&dir);
 
-        let added = library.add_from_path(&source).expect("import succeeds");
+        let added = library
+            .add_from_path(&source, 1_000)
+            .expect("import succeeds");
         let cover_path = added.cover_path.clone().expect("import has a cover");
 
         let removed = library.remove(added.id).expect("remove succeeds");
@@ -419,5 +452,27 @@ mod test {
         assert!(!Path::new(&added.path).exists(), "managed copy is deleted");
         assert!(!Path::new(&cover_path).exists(), "cover file is deleted");
         assert!(source.exists(), "the user's original source is untouched");
+    }
+
+    #[test]
+    fn import_stamps_added_at_and_reimport_preserves_it() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let (library, source, _) = library_with_source(&dir);
+
+        let first = library.add_from_path(&source, 1_000).expect("first import");
+
+        assert_eq!(first.added_at, 1_000);
+        assert_eq!(
+            first.last_opened_at, None,
+            "a freshly imported book has never been opened",
+        );
+
+        // Same source path → same row, fresh bytes and metadata …
+        let second = library.add_from_path(&source, 2_000).expect("reimport");
+
+        assert_eq!(second.id, first.id);
+        assert_ne!(second.path, first.path);
+        // … but the day it joined the library is not "fresh metadata".
+        assert_eq!(second.added_at, 1_000);
     }
 }
