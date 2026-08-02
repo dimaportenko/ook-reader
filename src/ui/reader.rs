@@ -216,9 +216,6 @@ mod test {
 
     #[test]
     fn bridge_parses_a_position_selector_whole() {
-        // The listener has to recognise the kind `page-position.js` posts. Nothing in
-        // the compiler checks that name across the two files — rename it on one side
-        // and the selector never reaches Rust, silently.
         assert!(BRIDGE_JS.contains("ook-position"));
 
         // A selector is colon- and space-rich. `strip_prefix` hands back the entire
