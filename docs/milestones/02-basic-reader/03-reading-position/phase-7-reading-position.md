@@ -112,7 +112,12 @@ eyeball, and it's deliberately checkable *in devtools* before any database is wi
       `position:<selector>` → `BridgeMsg::Position` → `ReaderData.anchor` (renamed from
       `locator` — the field holds only the selector half; `chapter` is the other half, and
       Step 6 pairs them). `BridgeMsg::parse` `#[test]` + eyeball.
-- [ ] **Step 6 — Persist it.** The reader saves `{chapter, selector}` for its book on every
+- [x] **Step 6a — A real error type (`thiserror`).** Closes **R3** from the review backlog,
+      pulled into this phase rather than deferred past it: `epub::Error`, `library::Error`,
+      every `Box<dyn Error>` on the import/open path replaced, and `read_metadata` made
+      infallible because it always was. Matchable-error `#[test]`; the existing suite is the
+      spec for the rest.
+- [ ] **Step 6b — Persist it.** The reader saves `{chapter, selector}` for its book on every
       position message. Eyeball + `sqlite3` inspection; storage is already tested at Step 3.
 - [ ] **Step 7 — Resolve a selector back to a page (JS).** `fragment-scroll.js` learns the
       `ook-sel:` hash prefix and `querySelector`. Asset `#[test]` + a devtools eyeball that
@@ -138,6 +143,10 @@ eyeball, and it's deliberately checkable *in devtools* before any database is wi
   `fragment-scroll.js` already reports the current page for an unknown id).
 - **`ORDER BY` ties.** Two books imported in the same second sort by title as the
   tiebreaker; the tests assert contents, not order, wherever the times tie.
-- **Errors on the save path** are still `Box<dyn Error>` — **R3** (`thiserror`) is
-  [still open in the review backlog](../review-2026-07-steps.md). Step 6 should not grow a
-  new `expect`; a failed save is a `_ = …` with a note, and R3 can be picked up separately.
+- **Errors on the save path** were described here as `Box<dyn Error>`. That was wrong:
+  `save_position` returns `rusqlite::Result<()>`, as do `list`, `remove`, `touch_opened` and
+  `position`. Every `Box<dyn Error>` is on the **import/open** path (`read_metadata`,
+  `spine_hrefs`, `add_from_path`, `open_epub`). **R3** (`thiserror`) is being done inside
+  this phase as Step 6a rather than deferred, so Step 6b logs a typed error instead of
+  discarding it. Still no new `expect` on the save path — a failed bookmark write must never
+  take down the reader.

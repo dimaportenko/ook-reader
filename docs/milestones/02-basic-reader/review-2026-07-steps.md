@@ -204,10 +204,19 @@ doing it earlier makes Steps 3 and 5 cleaner, since import and open are the two 
 these errors surface to the user. The `expect`s in `App`/`Reader` can stay until Step 5
 gives the UI somewhere to show a failure.
 
-> **Status:** pending — lands as **Phase 6 Step 12** in two halves, structural work first:
-> item **b** clears the Reader `expect` / moves `load_spine` to the open handler; item
-> **e** (last in the punch-list) adds `LibraryError` on `add_from_path` + infallible
-> `read_metadata`. Mark R3 done once both land.
+> **Status:** done — landed as [Phase 7 Step
+> 6a](03-reading-position/phase-7-reading-position-steps.md#step-6a--a-real-error-type-thiserror)
+> in `c5389ad` (46 tests green).
+> The original plan was Phase 6 Step 12 in two halves: item **b** (clear the Reader `expect`,
+> move `load_spine` to the open handler) landed; item **e** (`LibraryError` on
+> `add_from_path` + infallible `read_metadata`) did not, and Phase 6 closed without it.
+> Phase 7 Step 6a picked up the remainder and widened it to every `Box<dyn Error>` in the
+> codebase — `epub::Error`, `library::Error`, and the four call sites. There is no
+> `Box<dyn Error>` left in `src/`.
+>
+> One correction to the sketch above: `read_metadata` is not merely "made infallible", it
+> was **never fallible** — its body contains no `?` at all. Deleting the `Result` is
+> removing a lie, not changing a contract.
 
 ---
 

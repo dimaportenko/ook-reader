@@ -1131,3 +1131,418 @@ Steps 6–8. The readout is throwaway UI, not a feature.
 > saving while a chapter load is in flight, which is a state the reader is close to already
 > tracking via `pending_fragment` / `pending_last`. Worth deciding deliberately there rather
 > than discovering it as a mystery bad bookmark at Step 8.
+
+---
+
+## Step 6a — a real error type (`thiserror`)
+
+> **Status:** done — committed in `c5389ad` (46 tests green, clippy clean apart from the
+> two `dead_code` errors this step was never going to touch). Pulled into this phase on
+> request; closes **R3** from the
+> [July 2026 review backlog](../review-2026-07-steps.md#r3--a-real-error-type-with-thiserror).
+
+Step 6 was originally going to swallow save failures with `_ = …` and a note pointing at R3
+as future work. R3 is being done now instead, which makes it its own step: it touches three
+files and eight call sites, none of which have anything to do with reading position. Landing
+it separately keeps both commits reviewable and gives Step 6b a clean error to log.
+
+**A correction to what Step 6's plan said, and to the phase doc.** The phase's Known
+constraints claim "errors on the save path are still `Box<dyn Error>`." They are not.
+`save_position` returns `rusqlite::Result<()>`, which is already a perfectly matchable typed
+error — as do `list`, `remove`, `touch_opened`, and `position`. Every `Box<dyn Error>` in the
+codebase is on the **import/open** path:
+
+| Site | Today |
+|---|---|
+| `epub::read_metadata` | `Result<BookMeta, Box<dyn Error>>` |
+| `epub::spine_hrefs` | `Result<Vec<String>, Box<dyn Error>>` |
+| `Library::add_from_path` | `Result<Book, Box<dyn Error>>` (+ its inner closure) |
+| `ui::library::open_epub` | `Result<(Epub, Vec<String>), Box<dyn Error>>` |
+
+So this step does not improve the save path's *type* at all — it improves the import path,
+and it gives Step 6b a house style to follow. Worth knowing before you start, so the payoff
+lands where you're looking for it.
+
+**A thing you'll find on the way.** `read_metadata` cannot fail. Read its body: there is not
+a single `?` in it — the title falls back to `"Untitled"`, the author is an `Option`, and the
+cover swallows its error with `.ok()?` inside an `and_then`. It returns `Ok(…)`
+unconditionally. Its signature has been lying since it was written, and every caller pays
+with a `?` or an `.expect()` for a failure that cannot happen. **Delete the `Result`**, don't
+port it. R3's own status note called this out ("infallible `read_metadata`") and this is
+where it gets paid off.
+
+### Runnable check
+
+A real `#[test]` this time — the first one in this phase that tests behavior rather than
+wiring. It goes in `src/library.rs`'s test module and it asserts the thing `Box<dyn Error>`
+makes impossible: that a caller can **match on what went wrong**.
+
+```rust
+#[test]
+fn importing_a_file_that_is_not_an_epub_reports_a_matchable_error() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let books_dir = dir.path().join("books");
+    std::fs::create_dir_all(&books_dir).expect("books dir");
+    let library =
+        Library::open(dir.path().join("library.sqlite3"), &books_dir).expect("library opens");
+
+    // A file with the right extension and the wrong bytes — the realistic failure,
+    // and the one Feature 2's import panel can actually hand us.
+    let source = dir.path().join("not-a-book.epub");
+    std::fs::write(&source, b"definitely not a zip archive").expect("write fixture");
+
+    let error = library.add_from_path(&source, 1_000).unwrap_err();
+
+    // The whole point of the enum: the UI can tell "not an EPUB" from "disk full".
+    assert!(matches!(error, Error::Ebook(_)), "got {error:?}");
+    assert!(!error.to_string().is_empty(), "Display must carry a cause for logs");
+
+    // The failed import cleaned up after itself — no managed copy left behind.
+    let leftovers = std::fs::read_dir(&books_dir).expect("books dir readable").count();
+    assert_eq!(leftovers, 0, "a failed import must not leak its managed copy");
+}
+```
+
+`cargo test importing_a_file_that_is_not_an_epub` fails to compile first — `Error` doesn't
+exist yet. That's the red.
+
+The last assertion is a freebie worth taking: `add_from_path` copies the source into
+`books_dir` *before* it tries to open it, and unwinds that copy in its error branch. Nothing
+currently tests that branch, and this step rewrites the very `return Err(…)` that triggers it.
+
+Then the safety net, because everything else here is a behavior-preserving refactor:
+`cargo test` (45 → 46) and `cargo clippy --all-targets -- -D warnings`, which still reports
+the Step 3 `dead_code` pair until 6b.
+
+### Minimal implementation
+
+```toml
+# Cargo.toml
+thiserror = "2"
+```
+
+**1. `src/epub.rs` — one variant, because one thing can fail.**
+
+```rust
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum Error {
+    #[error("spine entry with a dangling idref")]
+    DanglingIdref,
+}
+```
+
+`spine_hrefs` returns `Result<Vec<String>, Error>`, and its
+`.ok_or("spine entry with a dangling idref")?` becomes `.ok_or(Error::DanglingIdref)?`.
+`read_metadata` returns a bare `BookMeta` — drop the `Result`, the `Ok(…)` wrapper, and the
+`?`/`.expect()` at all four call sites (`library.rs:126`, `library.rs:371`, `epub.rs:373`,
+`epub.rs:403`).
+
+**2. `src/library.rs` — the app's book-handling error.**
+
+```rust
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum Error {
+    #[error("database error: {0}")]
+    Sqlite(#[from] rusqlite::Error),
+
+    #[error("file error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("could not read the EPUB: {0}")]
+    Ebook(#[from] rbook::ebook::errors::EbookError),
+
+    #[error("could not read the EPUB's spine: {0}")]
+    Spine(#[from] epub::Error),
+}
+```
+
+`add_from_path` and its inner closure both return `Result<Book, Error>`, and
+`return Err(Box::new(error))` becomes `return Err(error.into())`.
+
+**3. `src/ui/library.rs` — `open_epub` returns `Result<(Epub, Vec<String>), library::Error>`.**
+
+Both of its `?`s convert through the enum above. Its `Display` already feeds
+`open_status.set(Some(format!("Open failed: {error}")))`, so the UI copy improves for free.
+
+### Why it works
+
+- **`#[from]` generates the `From` impl that `?` needs.** `?` desugars to "on `Err(e)`,
+  `return Err(From::from(e))`". `Box<dyn Error>` works today because the standard library
+  ships a blanket `From<E: Error> for Box<dyn Error>` — which is exactly why it accepts
+  *anything*, including that bare `&str` in `spine_hrefs`. A `&str` is not an error; it has
+  no `source()`, no variant to match, no type. That looseness is the thing being traded away.
+- **`?` performs exactly one `From` hop, never a chain.** This is why `library::Error` needs
+  *both* `Ebook(#[from] EbookError)` and `Spine(#[from] epub::Error)`. `Epub::open` inside
+  `add_from_path` yields rbook's `EbookError`; if the only route were
+  `EbookError → epub::Error → library::Error`, `?` would not compile, because it will not
+  chain two conversions to find a path. Distinct source types on distinct variants means no
+  ambiguity — the compiler picks the impl by the type of the value you gave it.
+- **`thiserror` is a derive, not a runtime.** It writes `Display` from your `#[error("…")]`
+  strings and `std::error::Error` with `source()` wired to the `#[from]` field. Nothing is
+  boxed, nothing is allocated, and the type stays `match`-able. Compare `anyhow`, which is
+  the opposite trade: one opaque type, great for applications that only ever print the error,
+  useless when a caller must branch on the cause. Writing this by hand is the point — it's
+  the `From` / `Display` / `?` machinery you'd otherwise never see.
+- **`{0}` in `#[error("database error: {0}")]`** interpolates the variant's first field, so
+  the wrapped error's own `Display` is nested inside yours. That's how the rbook message
+  survives all the way out to `open_status` in the UI.
+- **`rbook::ebook::errors::EbookError` is itself a `thiserror` enum** with
+  `#[error(transparent)]` variants for `Archive`, `Format`, `Reader` and `Io`. So a
+  malformed-EPUB message arrives already human-readable, and if you ever need to tell "not a
+  zip" from "bad OPF", the variants are right there to match on. Pinned version is 0.7.9 per
+  `Cargo.lock`.
+
+### Scope note
+
+Refactor only — no behavior changes, which is why the existing 45 tests are the spec and
+must pass unchanged. `Library`'s other methods keep returning `rusqlite::Result`; they are
+already typed, and widening them to `library::Error` would churn every call site for no
+gain. Do **not** touch the `expect`s in `open_default` — those are startup invariants
+(no home directory, unopenable database) where crashing *is* the correct response, and R3
+never asked for them.
+
+> **Naming, deferred to Step 9.** `library::Error` ends up covering `open_epub`, which does
+> no database work at all. It is the app's "something went wrong handling a book" error more
+> than it is the library module's. Live with it for now and let the review pass decide
+> whether it moves or gets renamed — after Step 8 has added whatever restore needs.
+
+### How it landed
+
+The plan held: four variants, four call sites, `read_metadata` returning a bare `BookMeta`,
+45 → 46 tests, and clippy still reporting exactly the two `dead_code` errors it reported
+before the step. Two things worth recording.
+
+**The test landed without the comments this doc sketched.** They were agent-written prose
+transplanted into `src/`, which is precisely what `CLAUDE.md` now forbids — the reasoning
+belongs here, in the doc, where it already is. The assertion messages carry what a failing
+run needs to know; the rest is this section's job.
+
+**`Error::Io` collapses two distinct failures.** Both `source_path.canonicalize()` and
+`fs::copy` yield `std::io::Error`, so "the file you picked is gone" and "the disk is full"
+arrive at the UI as the same variant, distinguishable only by reading the `Display` string.
+That is strictly better than `Box<dyn Error>` and not yet good enough to matter: nothing
+branches on it today. Worth splitting only when Feature 2's import panel wants to say
+something different for each — noted here so that decision starts from a known trade-off
+rather than a surprise.
+
+---
+
+## Step 6b — persist the position
+
+> **Status:** planned.
+
+Step 5 got the selector into Rust and stopped. Step 3 built `save_position` and has had it
+sitting unused ever since — it is one of the two `dead_code` warnings clippy has been
+reporting for three commits. This step introduces them to each other: on every position
+message, pair the selector the iframe just reported with the spine index the reader is on
+and write the row. After this the database knows where you are; Steps 7–8 teach the reader
+to read it back.
+
+The whole step is one match arm and one widened function signature. Its weight is in three
+decisions.
+
+### Decision 1 — the save happens in the bridge, not in an effect
+
+The tempting shape is a `use_effect` that reads `anchor()` and `chapter()` and saves when
+either changes. Don't. An effect re-runs when **any** signal it read last time changes, so
+that effect fires on a chapter change *before* the new chapter has reported anything — and
+it fires with the previous chapter's selector still in `anchor`. The effect form doesn't
+just permit the stale pair discussed below, it *manufactures* one on every chapter turn.
+
+The bridge arm has neither problem: it runs exactly once per message, and the selector it
+saves is the one that just arrived in that message.
+
+### Decision 2 — the stale pair is accepted, not prevented
+
+This is the hazard Step 5 handed over. On `chapter_next`, `apply` sets `chapter` *and*
+`page`; the `ook-set-page` effect fires immediately and posts `page: 0` to an iframe that
+still holds the **old** chapter's document. That document answers with its own selector, and
+the bridge pairs it with the already-advanced `chapter`. A row is written pointing at an
+element that does not exist in that spine entry.
+
+**It is corrected within a frame.** The chapter effect right behind it loads the new
+document, whose `load` handler calls `reportPosition` unconditionally — so a correct pair
+overwrites the wrong one immediately, and every chapter change ends on a good row. The only
+way a bad row survives is if the process dies inside that window.
+
+Weigh that against the phase's own recorded constraint: **restore is best-effort.** A
+selector that doesn't resolve falls back to the top of the chapter, never an error. So the
+worst realized consequence of losing that race is *reopening at the top of the right
+chapter* — which is exactly what a reader with no stored selector does anyway.
+
+The alternative was considered and declined for this step: have `page-position.js` include
+its own `document.location.pathname` in the message and have the parent drop any report
+whose path isn't `docs[chapter]`. That is a genuine identity check rather than a timing
+guess, it is about four lines, and it would make the pairing correct by construction. It is
+declined **here** because it belongs with the pending-state cleanup — the reader already has
+three overlapping notions of "a load is in flight" (`pending_fragment`, `pending_last`, and
+the implicit one at chapter change) and Step 9 is already booked to collapse them into one
+enum. Adding a fourth mechanism now and rewriting it in three steps is worse than living
+with a self-correcting race for three steps.
+
+> Record this as a decision, not an oversight. If Step 8's eyeball ever lands you at the top
+> of the wrong chapter, this paragraph is the suspect — and the fix is the `pathname` check
+> above.
+
+### Decision 3 — a failed save is logged, not swallowed and not fatal
+
+The original plan here was `_ = library.save_position(…)` with a note deferring to R3. With
+Step 6a landed there is no reason to discard the error — `save_position` returns
+`rusqlite::Result<()>`, whose `Display` says what SQLite objected to:
+
+```rust
+if let Err(error) = library.save_position(book_id, &locator, library::now_secs()) {
+    eprintln!("could not save reading position: {error}");
+}
+```
+
+Still no `expect`. A panic here would take down a reader mid-page-turn over a bookmark — the
+least important write in the app, on a path that runs several times a minute. And still no
+UI surface for the failure: there is nowhere sensible to put "your bookmark didn't save" in
+the reader chrome, and the next page turn retries anyway. `eprintln!` is the honest middle —
+the failure is visible in the terminal you're already running `dx serve` in, which is exactly
+where you'd look when the `sqlite3` query below shows a row that stopped moving.
+
+### Runnable check
+
+**There is no new `#[test]` in this step, and that is deliberate.** Everything testable is
+already tested: `position_round_trips_and_latest_save_wins` covers the upsert, and
+`bridge_parses_a_position_selector_whole` covers the message. What's new is the *wiring*
+between them, which lives inside a component and a `use_future` — nothing `cargo test` can
+reach. So the gate is a live database, watched.
+
+Before you start, look at what's there now:
+
+```sh
+sqlite3 ~/Library/Application\ Support/com.dimaportenko.ook-reader/library.sqlite3 \
+  "select * from positions;"
+```
+
+That prints nothing today — the table has existed since Step 3 and has never had a row
+written to it. That empty result *is* the failing test. Then `dx serve`, open a book, and
+run it again:
+
+1. **A row appears** after the chapter renders, with `book_id` matching the book you opened
+   and a `selector` that looks like `body > p:nth-child(1)`. This is the `load` report.
+2. **Turn a page, re-run the query — `selector` changed**, and `updated_at` moved. Turn back,
+   it changes again. A row that never changes means the save is only wired to the load path.
+3. **Still exactly one row per book.** `select count(*) from positions;` stays at the number
+   of books you have opened, not the number of pages you have turned. Two rows for one book
+   means the `ON CONFLICT` clause isn't matching — check that `book_id` is the primary key.
+4. **Open a second book, then go back to the first.** Two rows, each remembering its own
+   place, neither disturbed by the other.
+5. **`spine_index` tracks the chapter.** Jump a few chapters and watch it follow. This is the
+   half that the stale pair above can get wrong — if you catch a `spine_index` that doesn't
+   match the chapter label on screen, re-run the query a second later and confirm it
+   corrected itself.
+6. **No hitch on page turns.** The recorded decision is one `UPDATE` per turn with no
+   debounce; if paging feels heavier than it did yesterday, say so and it gets revisited.
+
+Then `cargo test` (46 after Step 6a, unchanged by this step) and
+`cargo clippy --all-targets -- -D warnings`. Clippy's output is itself a check here: the two
+`dead_code` errors standing since Step 3 should drop to **one**. `Locator` gets constructed
+and `save_position` gets called, so both go quiet; `position` stays unused and stays
+reported until Step 8 reads a locator back. Zero errors would mean you wired up more than
+this step asked for; still two would mean the save arm isn't being reached.
+
+### Minimal implementation
+
+Three edits, all in `src/ui/reader.rs`.
+
+1. **Pull the library out of context** in `Reader`, next to the existing `use_context`, and
+   pass it and the book id into the bridge:
+
+   ```rust
+   let library = use_context::<Rc<Library>>();
+   ```
+
+   ```rust
+   use_bridge(state, docs, library, book.id);
+   ```
+
+   Note this has to be read *before* `book` is partially moved — `book.docs` is already moved
+   into `docs` at the top of the function, so keep `book.id` handy or read it early. `id` is
+   `i64`, which is `Copy`, so `book.id` after the move of `book.docs` is fine; the field move
+   is per-field.
+
+2. **Widen `use_bridge`:**
+
+   ```rust
+   fn use_bridge(state: ReaderState, docs: Rc<Vec<String>>, library: Rc<Library>, book_id: i64) {
+       use_future(move || {
+           let docs = docs.clone();
+           let library = Rc::clone(&library);
+           async move {
+   ```
+
+3. **Save in the `Position` arm:**
+
+   ```rust
+   Some(BridgeMsg::Position(selector)) => {
+       let locator = library::Locator {
+           spine_index: *state.data.chapter().peek(),
+           selector: selector.clone(),
+       };
+       state.on_position(selector);
+       if let Err(error) = library.save_position(book_id, &locator, library::now_secs()) {
+           eprintln!("could not save reading position: {error}");
+       }
+   }
+   ```
+
+   …plus `library::{self, Library}` on the `use crate::{…}` line at the top.
+
+### Why it works
+
+- **`.peek()`, not `chapter()`.** Reading a signal the ordinary way *subscribes the current
+  reactive scope*, and inside `use_future` that means the future is torn down and restarted
+  when the signal changes. Restarting this future would drop the bridge mid-stream: a new
+  `document::eval(BRIDGE_JS)` registers a second `message` listener while the first one's
+  channel is gone. `peek` reads the value without recording the dependency. The `Link` arm a
+  few lines up already does exactly this, for exactly this reason — the pattern is
+  established, this step just follows it.
+- **The clone is the price of using the selector twice.** `on_position` takes `String` by
+  value (it stores it) and `Locator` owns its selector, so one of the two has to be a copy.
+  Building the `Locator` first and moving the original into `on_position` keeps the clone to
+  one and puts it where it reads as intentional. If you'd rather have no clone at all, drop
+  the `on_position` call — see the scope note.
+- **`Rc<Library>` survives the `.await` because this executor is single-threaded.** Dioxus
+  desktop spawns component futures on a local executor, so a non-`Send` type held across an
+  await point compiles fine. `docs: Rc<Vec<String>>` has been doing this since the link
+  handler landed. On a `Send`-requiring executor this would be a compile error and the fix
+  would be `Arc`.
+- **`Rc::clone(&library)` inside the closure, not `library`.** `use_future` takes a closure
+  that it may call more than once, so the closure has to *own* something it can hand out
+  repeatedly — it can't move `library` into the async block directly. Cloning an `Rc` per
+  call bumps a refcount; the `Library` itself is never duplicated. Same shape as the existing
+  `let docs = docs.clone();` one line up.
+- **`now_secs()` is called here, at the UI edge, not inside `save_position`.** That's the
+  phase's recorded "the store never reads the clock" decision. It exists so tests can inject
+  time and distinguish "preserved" from "restamped" — a store that calls `SystemTime::now()`
+  internally cannot be tested for that at all.
+- **The upsert makes repetition free.** `ON CONFLICT(book_id) DO UPDATE` means saving on
+  every single page turn writes one row forever rather than accumulating history. That's why
+  "no debounce" is affordable: the cost of a redundant save is an overwrite, not growth.
+
+### Scope note
+
+Save only. Nothing reads the position back — `Library::position` stays unused and clippy
+keeps warning about it until Step 8. No restore, no `ook-sel:` hash, no seeding of `chapter`
+on open.
+
+> **`anchor` is now write-only.** With the readout skipped at Step 5, nothing in the app
+> reads `ReaderData.anchor` — this step could take the selector straight from the message and
+> skip `on_position` entirely. Keeping it is defensible (it is the reader's own answer to
+> "where am I", it costs one `Option<String>`, and it is the natural place for a debug
+> readout to come back). Deleting it is also defensible. **Don't decide now** — Step 9 is the
+> review pass and it will have Step 8's restore code in front of it, which is the code most
+> likely to want this field. Just don't add a second reader of it in the meantime without
+> noticing you've settled the question.
+
+> **Hand-off to Step 7.** Step 7 is pure JS and touches no Rust: `fragment-scroll.js` learns
+> that a hash beginning `ook-sel:` is a selector for `querySelector` rather than an element
+> id, and reports the resulting page over the existing `ook-scroll` channel. It is verifiable
+> entirely in devtools — set `iframe.contentWindow.location.hash` by hand to a selector you
+> copied out of the `positions` table above and watch the page jump. Which means the row this
+> step starts writing is the input to Step 7's eyeball: turn some pages, read the selector out
+> of SQLite, and paste it into the hash. The database becomes the test fixture.
