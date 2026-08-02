@@ -201,7 +201,7 @@ fn refresh_books(library: &Library, mut books: Signal<Vec<Book>>) {
     }
 }
 
-fn open_epub(path: &std::path::Path) -> Result<(Epub, Vec<String>), Box<dyn std::error::Error>> {
+fn open_epub(path: &std::path::Path) -> Result<(Epub, Vec<String>), library::Error> {
     let epub = Epub::open(path)?;
     let docs = epub::spine_hrefs(&epub)?;
     Ok((epub, docs))

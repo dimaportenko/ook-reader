@@ -26,6 +26,12 @@ const PATH: &AsciiSet = &CONTROLS
     .add(b'{')
     .add(b'}');
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum Error {
+    #[error("spine entry with a dangling idref")]
+    DanglingIdref,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LinkTarget {
     pub(crate) spine_index: usize,
@@ -210,7 +216,7 @@ pub(crate) struct BookMeta {
     pub(crate) cover: Option<CoverImage>,
 }
 
-pub(crate) fn read_metadata(epub: &Epub) -> Result<BookMeta, Box<dyn std::error::Error>> {
+pub(crate) fn read_metadata(epub: &Epub) -> BookMeta {
     let metadata = epub.metadata();
 
     let title = metadata
@@ -228,20 +234,18 @@ pub(crate) fn read_metadata(epub: &Epub) -> Result<BookMeta, Box<dyn std::error:
         })
     });
 
-    Ok(BookMeta {
+    BookMeta {
         title,
         author,
         cover,
-    })
+    }
 }
 
-pub(crate) fn spine_hrefs(epub: &Epub) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+pub(crate) fn spine_hrefs(epub: &Epub) -> Result<Vec<String>, Error> {
     epub.spine()
         .into_iter()
         .map(|entry| {
-            let manifest_entry = entry
-                .manifest_entry()
-                .ok_or("spine entry with a dangling idref")?;
+            let manifest_entry = entry.manifest_entry().ok_or(Error::DanglingIdref)?;
             Ok(manifest_entry
                 .href()
                 .decode()
@@ -370,7 +374,7 @@ mod test {
     #[test]
     fn reads_title_and_author_from_metadata() {
         let epub = Rc::new(Epub::open(crate::TEST_BOOK).expect("open fixture book"));
-        let meta = read_metadata(&epub).expect("bundled epub metadata should read");
+        let meta = read_metadata(&epub);
 
         assert!(
             meta.title.contains("Sherlock Holmes"),
@@ -400,7 +404,7 @@ mod test {
     #[test]
     fn read_metadata_extracts_the_cover_image() {
         let epub = Epub::open(crate::TEST_BOOK).expect("open fixture book");
-        let meta = read_metadata(&epub).expect("bundled epub metadata should read");
+        let meta = read_metadata(&epub);
 
         let cover = meta.cover.expect("the bundled book declares a cover image");
         assert!(cover.media_type.starts_with("image/"));

@@ -10,6 +10,21 @@ use uuid::Uuid;
 
 use crate::epub;
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum Error {
+    #[error("database error: {0}")]
+    Sqlite(#[from] rusqlite::Error),
+
+    #[error("file error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("could not read the EPUB: {0}")]
+    Ebook(#[from] rbook::ebook::errors::EbookError),
+
+    #[error("could not read the EPUB's spine: {0}")]
+    Spine(#[from] epub::Error),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Book {
     pub(crate) id: i64,
@@ -95,11 +110,7 @@ impl Library {
         })
     }
 
-    pub(crate) fn add_from_path(
-        &self,
-        source_path: &Path,
-        now: i64,
-    ) -> Result<Book, Box<dyn std::error::Error>> {
+    pub(crate) fn add_from_path(&self, source_path: &Path, now: i64) -> Result<Book, Error> {
         let source_path = source_path.canonicalize()?;
         let source_path_text = source_path.to_string_lossy().into_owned();
 
@@ -116,14 +127,14 @@ impl Library {
 
         if let Err(error) = fs::copy(&source_path, &managed_path) {
             cleanup_managed_file(&managed_path);
-            return Err(Box::new(error));
+            return Err(error.into());
         }
 
         let mut cover_path: Option<String> = None;
 
-        let result = (|| -> Result<Book, Box<dyn std::error::Error>> {
+        let result = (|| -> Result<Book, Error> {
             let epub = Epub::open(&managed_path)?;
-            let meta = epub::read_metadata(&epub)?;
+            let meta = epub::read_metadata(&epub);
             let managed_path_text = managed_path.to_string_lossy().into_owned();
 
             cover_path = meta.cover.as_ref().and_then(|cover| {
@@ -368,7 +379,7 @@ mod test {
 
         std::fs::remove_file(&source).expect("delete source");
         let epub = rbook::Epub::open(&added.path).expect("managed copy opens");
-        let meta = crate::epub::read_metadata(&epub).expect("managed metadata");
+        let meta = crate::epub::read_metadata(&epub);
 
         assert!(meta.title.contains("Sherlock Holmes"));
         assert_eq!(added.title, meta.title);
@@ -634,5 +645,33 @@ mod test {
             .expect("save position");
         assert!(library.remove(book.id).expect("remove book"));
         assert_eq!(library.position(book.id).expect("position lookup"), None);
+    }
+
+    #[test]
+    fn importing_a_file_that_is_not_an_epub_reports_a_matchable_error() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let books_dir = dir.path().join("books");
+        std::fs::create_dir_all(&books_dir).expect("books dir");
+        let library =
+            Library::open(dir.path().join("library.sqlite3"), &books_dir).expect("library opens");
+
+        let source = dir.path().join("not-a-book.epub");
+        std::fs::write(&source, b"definitely not a zip archive").expect("write fixture");
+
+        let error = library.add_from_path(&source, 1_000).unwrap_err();
+
+        assert!(matches!(error, Error::Ebook(_)), "got {error:?}");
+        assert!(
+            !error.to_string().is_empty(),
+            "Display must carry a cause for logs"
+        );
+
+        let leftovers = std::fs::read_dir(&books_dir)
+            .expect("books dir readable")
+            .count();
+        assert_eq!(
+            leftovers, 0,
+            "a failed import must not leak its managed copy"
+        );
     }
 }
