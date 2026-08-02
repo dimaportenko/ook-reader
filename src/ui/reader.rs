@@ -45,7 +45,13 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
     let library = use_context::<Rc<Library>>();
     let mut open_book = use_context::<Signal<Option<OpenBook>>>();
     let docs = book.docs;
-    let state = nav::use_reader_state(docs.len());
+    let start = use_hook(|| {
+        library.position(book.id).unwrap_or_else(|error| {
+            eprintln!("could not read reading position: {error}");
+            None
+        })
+    });
+    let state = nav::use_reader_state(docs.len(), start);
     let chapter = state.data.chapter();
     let pending_fragment = state.data.pending_fragment();
     let pending_last = state.data.pending_last();

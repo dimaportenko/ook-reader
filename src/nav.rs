@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 
-use crate::epub;
+use crate::{epub, library::Locator};
 
 #[derive(Debug, PartialEq)]
 enum Seek {
@@ -31,9 +31,22 @@ pub(crate) struct ReaderState {
     pub(crate) chapter_count: usize,
 }
 
-pub(crate) fn use_reader_state(chapter_count: usize) -> ReaderState {
+pub(crate) const SELECTOR_FRAGMENT_PREFIX: &str = "ook-sel:";
+
+fn restored_data(start: Option<Locator>, chapter_count: usize) -> ReaderData {
+    match start {
+        Some(locator) if locator.spine_index < chapter_count => ReaderData {
+            chapter: locator.spine_index,
+            pending_fragment: Some(format!("{SELECTOR_FRAGMENT_PREFIX}{}", locator.selector)),
+            ..Default::default()
+        },
+        _ => ReaderData::default(),
+    }
+}
+
+pub(crate) fn use_reader_state(chapter_count: usize, start: Option<Locator>) -> ReaderState {
     ReaderState {
-        data: use_store(ReaderData::default),
+        data: use_store(move || restored_data(start, chapter_count)),
         chapter_count,
     }
 }
@@ -227,5 +240,49 @@ mod test {
                 seek: Seek::First
             }
         );
+    }
+
+    #[test]
+    fn a_stored_position_seeds_the_chapter_and_a_selector_fragment() {
+        let locator = Locator {
+            spine_index: 8,
+            selector: "body > div:nth-child(1) > p:nth-child(215)".to_string(),
+        };
+
+        let data = restored_data(Some(locator), 24);
+        assert_eq!(data.chapter, 8);
+        assert_eq!(
+            data.pending_fragment.as_deref(),
+            Some("ook-sel:body > div:nth-child(1) > p:nth-child(215)")
+        );
+        // The page is deliberately *not* restored. It is derived from the window
+        // size, so it is recomputed: `fragment-scroll.js` resolves the selector
+        // and reports the page back over `ook-scroll`.
+        assert_eq!(data.page, 0);
+
+        // No stored position — start at the top of the book.
+        let fresh = restored_data(None, 24);
+        assert_eq!(fresh.chapter, 0);
+        assert_eq!(fresh.pending_fragment, None);
+
+        // A spine index past the end falls back to the start rather than seeding
+        // an index that `docs[chapter()]` would panic on. Re-import keeps the row
+        // id and replaces the bytes, so a stored index can outlive the spine it
+        // named.
+        let stale = Locator {
+            spine_index: 24,
+            selector: "body > p:nth-child(3)".to_string(),
+        };
+        let data = restored_data(Some(stale), 24);
+        assert_eq!(data.chapter, 0);
+        assert_eq!(data.pending_fragment, None);
+    }
+
+    #[test]
+    fn the_fragment_prefix_matches_the_one_the_asset_looks_for() {
+        // Rust builds this prefix, `fragment-scroll.js` tests for it, and no
+        // compiler checks a string that crosses a language boundary. Same guard
+        // as `the_loader_and_the_cleanup_agree_on_where_the_blob_url_lives`.
+        assert!(crate::web::assets::INJECTED_ASSETS.contains(SELECTOR_FRAGMENT_PREFIX));
     }
 }
