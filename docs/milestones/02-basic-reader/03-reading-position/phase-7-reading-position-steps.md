@@ -697,6 +697,16 @@ no longer matches the replacement EPUB; best-effort restore in Step 8 owns that 
 
 ## Step 4 — report the first element on the current page (JS)
 
+> **Status:** landed in `4c53520` (44 tests green, injection assertion included).
+> **Not yet eyeball-verified** — the devtools round-trip below is the only check that can
+> prove the selector actually round-trips, and it has not been run. Tick the phase
+> checklist once it has.
+>
+> One bug was caught and fixed before the commit: `selectorFor` built its index from a
+> 0-based `indexOf` while `:nth-child()` counts from 1, so a first child produced
+> `:nth-child(0)` (matches nothing) and everything else pointed at the *previous* sibling.
+> Exactly the failure the round-trip check exists to catch.
+
 The store has a shape to fill; nothing produces a selector yet. This step adds the injected
 asset that answers *"which element starts the page I'm looking at?"* and posts it to the
 parent as `ook-position`. Nothing listens for that message yet — Step 5 teaches
