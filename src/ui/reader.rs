@@ -5,6 +5,7 @@ use dioxus::prelude::*;
 
 use crate::{
     epub,
+    library::{self, Library},
     nav::{self, ReaderDataStoreExt, ReaderState},
     ui::library::OpenBook,
 };
@@ -41,6 +42,7 @@ impl BridgeMsg {
 pub(crate) fn Reader(book: OpenBook) -> Element {
     epub::use_register_asset_handler(book.epub.clone());
 
+    let library = use_context::<Rc<Library>>();
     let mut open_book = use_context::<Signal<Option<OpenBook>>>();
     let docs = book.docs;
     let state = nav::use_reader_state(docs.len());
@@ -78,7 +80,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
     });
 
     use_revoke_blob_on_unmount();
-    use_bridge(state, docs);
+    use_bridge(state, docs, library, book.id);
 
     rsx! {
         div {
@@ -164,9 +166,10 @@ fn use_revoke_blob_on_unmount() {
     );
 }
 
-fn use_bridge(state: ReaderState, docs: Rc<Vec<String>>) {
+fn use_bridge(state: ReaderState, docs: Rc<Vec<String>>, library: Rc<Library>, book_id: i64) {
     use_future(move || {
         let docs = docs.clone();
+        let library = Rc::clone(&library);
         async move {
             let mut bridge = document::eval(BRIDGE_JS);
 
@@ -180,7 +183,18 @@ fn use_bridge(state: ReaderState, docs: Rc<Vec<String>>) {
                     }
                     Some(BridgeMsg::Scroll(page)) => state.on_scroll(page),
                     Some(BridgeMsg::Pages(p_count)) => state.on_pages(p_count),
-                    Some(BridgeMsg::Position(selector)) => state.on_position(selector),
+                    Some(BridgeMsg::Position(selector)) => {
+                        let locator = library::Locator {
+                            spine_index: *state.data.chapter().peek(),
+                            selector: selector.clone(),
+                        };
+                        state.on_position(selector);
+                        if let Err(error) =
+                            library.save_position(book_id, &locator, library::now_secs())
+                        {
+                            eprintln!("could not save reading position: {error}");
+                        }
+                    }
                     None => {}
                 }
             }
