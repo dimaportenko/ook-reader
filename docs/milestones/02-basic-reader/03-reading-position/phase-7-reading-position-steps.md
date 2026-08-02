@@ -930,3 +930,204 @@ chapter to hand, leave it alone and delete this section. Above that, or if a pag
 
 Options 1 and 2 are additive and preserve the current shape; 3–5 are rewrites. Do not reach
 past 2 without a number from the measurement above.
+
+---
+
+## Step 5 — bridge the selector into reader state
+
+> **Status:** done — committed in `3bd7457` (45 tests green). `on_position` was confirmed
+> receiving the selector from the iframe, so the four-file path is verified end to end.
+>
+> **Two deviations from the plan below, both deliberate.** Item 5 — the temporary readout
+> under the nav rows — was skipped; the state write was confirmed directly at `on_position`
+> instead, so the throwaway UI never had to be built or removed. And the one-line
+> `assert!(BRIDGE_JS.contains("ook-position"))` suggested under "Why it works" was folded
+> into the new test, closing the listener half of the cross-file `kind` contract.
+>
+> Clippy still reports the two Step 3 `dead_code` warnings (`Locator`, `save_position` /
+> `position`) — unchanged by this step, cleared when Step 6 calls them.
+
+Step 4 left a selector being shouted into a room with nobody in it: `page-position.js`
+posts `{ kind: "ook-position", selector }` to the parent on every page turn, and the parent
+ignores it. This step wires the whole existing message path end to end —
+`ook-position` → `dioxus.send("position:…")` → `BridgeMsg::Position` → a field on
+`ReaderData` — so the current page's anchor is available as ordinary Rust state. Nothing is
+saved yet; Step 6 does that.
+
+It is deliberately the smallest possible link in the chain, because the interesting content
+is not the plumbing (three files already do exactly this for `link`, `scroll`, and `pages`)
+but two decisions the plumbing forces:
+
+**A selector is a colon-rich string.** `body > div:nth-child(2) > p:nth-child(7)` contains
+three colons and four spaces. Any parser that reaches for `split(':')` mangles it. The
+existing `BridgeMsg::parse` already does the right thing by accident of good taste —
+`strip_prefix` returns the *entire* remainder — and the new test's job is to turn that
+accident into a promise.
+
+**The field is not a `Locator`.** `library::Locator` is `{ spine_index, selector }`; what
+the iframe reports is only the selector half, because the iframe has no idea which spine
+entry it is. The spine index is already in `ReaderData.chapter`, and Step 6 pairs them at
+save time. So the field is named for what it holds:
+
+> **Rename from the upfront plan.** The phase doc's checklist says `ReaderData.locator`.
+> Call it `anchor: Option<String>` instead. At Step 6 both a `library::Locator` and this
+> field are in scope in the same function, and giving a bare `String` the name of a
+> two-field struct would make that code read wrong. "Anchor" also says what the element
+> *is*: the thing the page is pinned to.
+
+**Runnable check.** A `#[test]` next to `bridge_parses_each_message_kind` in
+`src/ui/reader.rs`. It fails to compile first (`BridgeMsg::Position` does not exist), which
+is the right kind of red.
+
+```rust
+#[test]
+fn bridge_parses_a_position_selector_whole() {
+    // A selector is colon- and space-rich. `strip_prefix` hands back the entire
+    // remainder of the message, so nothing here gets split in half.
+    assert_eq!(
+        BridgeMsg::parse("position:body > div:nth-child(2) > p:nth-child(7)"),
+        Some(BridgeMsg::Position(
+            "body > div:nth-child(2) > p:nth-child(7)".to_string()
+        )),
+    );
+
+    // An empty payload is not a position. Reject it here rather than storing a
+    // selector that can never resolve — Step 6 writes this straight to SQLite.
+    assert_eq!(BridgeMsg::parse("position:"), None);
+}
+```
+
+```sh
+cargo test bridge_parses_a_position_selector_whole
+```
+
+Then the eyeball under `dx serve`, which is what proves the *other* three quarters of the
+path (the JS branch, the `dioxus.send`, the state write) — none of which `cargo test` can
+reach. Item 5 of the implementation adds a temporary readout under the nav rows:
+
+1. Open a book. A selector appears under the page controls within a moment of the chapter
+   rendering — that is the `load` report from Step 4 arriving.
+2. Turn a page. The selector **changes**, and changes again on the way back. A selector that
+   never updates means the `ook-set-page` report is not reaching the parent; a selector that
+   is always `body > p:nth-child(1)` means it is reaching the parent but `firstElementOnPage`
+   is answering about the wrong page.
+3. Jump to a chapter via the TOC. The selector updates there too, and the reader still
+   navigates normally — the new message kind must not disturb `link`/`scroll`/`pages`.
+4. Nothing flickers or spins. If the app pegs a core and the page number twitches, you have
+   built the render loop described under "Why it works" below.
+
+Then `cargo test` and `cargo clippy --all-targets -- -D warnings`.
+
+**Minimal implementation.** Five edits, none longer than four lines.
+
+1. **`src/web/assets/ook-events-listener.js`** — a fourth branch, exactly like its
+   neighbours:
+
+   ```js
+   if (e.data.kind === "ook-position") {
+     dioxus.send("position:" + e.data.selector);
+   }
+   ```
+
+2. **The variant**, in `src/ui/reader.rs`:
+
+   ```rust
+   pub(crate) enum BridgeMsg {
+       Link(String),
+       Scroll(usize),
+       Pages(usize),
+       Position(String),
+   }
+   ```
+
+3. **The parse arm**, appended to the `if let` chain before the final `else`:
+
+   ```rust
+   } else if let Some(selector) = msg.strip_prefix("position:") {
+       (!selector.is_empty()).then(|| BridgeMsg::Position(selector.to_string()))
+   } else {
+   ```
+
+4. **The state**, in `src/nav.rs` — one field and one method:
+
+   ```rust
+   #[derive(Store, Default)]
+   pub(crate) struct ReaderData {
+       // … existing fields …
+       /// Selector for the first element on the current page, as last reported by
+       /// the chapter iframe. `None` until the first report of a freshly loaded
+       /// chapter arrives.
+       pub(crate) anchor: Option<String>,
+   }
+   ```
+
+   ```rust
+   pub(crate) fn on_position(self, selector: String) {
+       self.data.anchor().set(Some(selector));
+   }
+   ```
+
+   …and the handler arm in `use_bridge`:
+
+   ```rust
+   Some(BridgeMsg::Position(selector)) => state.on_position(selector),
+   ```
+
+5. **The temporary readout**, in `Reader`'s body and `rsx!` — this is the eyeball, and it is
+   scaffolding: it stays useful through Steps 6–8 and comes out at Step 9.
+
+   ```rust
+   let anchor = state.data.anchor();
+   let anchor_label = anchor().unwrap_or_else(|| "—".to_string());
+   ```
+
+   ```rust
+   p {
+       style: "text-align: center; font-size: 12px; opacity: 0.6;",
+       "{anchor_label}"
+   }
+   ```
+
+**Why it works.**
+
+- **`strip_prefix` is the whole parser.** It returns `Option<&str>` holding *everything*
+  after the prefix — colons, spaces, parentheses and all. The alternative shape,
+  `msg.split(':')` plus `next()`, would return `"body > div"` and silently drop the rest,
+  and the bug would only show up as a restore landing in the wrong place two steps from now.
+  The `"position:"` prefix is a framing marker, not a delimiter, and this is the difference.
+- **`(!selector.is_empty()).then(|| …)`** is `bool` → `Option` in one expression:
+  `then` runs the closure only when the bool is `true`, so the `String` allocation never
+  happens for the rejected case. Its sibling `then_some(value)` takes an eager value and
+  would allocate first and discard it. Reach for `then` whenever the payload costs anything
+  to build.
+- **The message field name is a cross-file contract.** `e.data.selector` in the listener has
+  to match the `{ kind: "ook-position", selector }` that `page-position.js` posts. Nothing in
+  the compiler checks that — the same hazard `the_loader_and_the_cleanup_agree_on_where_the_blob_url_lives`
+  exists to catch for `__ookBlobUrl`. `epub.rs`'s injection test already asserts the served
+  document contains `ook-position`; adding `assert!(BRIDGE_JS.contains("ook-position"))` to
+  the reader test closes the other half of the loop for one line.
+- **`Option<String>` needs no new machinery in the store.** `pending_fragment` is already
+  exactly this shape, so `#[derive(Store)]` generates the same `anchor()` lens: call it to
+  read (which subscribes whatever is reading), `.set(…)` to write.
+- **Why this does not build a render loop, and how it easily could.** The chain in play is:
+  `page` changes → the `ook-set-page` effect posts to the iframe → `page-position.js` reports
+  → the bridge writes `anchor`. That terminates *because the `ook-set-page` effect reads only
+  `page()`*. A Dioxus effect re-runs when a signal it read during its last run changes; add
+  `anchor()` to that effect's body and the write feeds the post that caused it, forever. The
+  readout in item 5 is safe for the same reason inverted: it reads `anchor` during **render**,
+  and re-rendering does not re-run effects. (Writing a signal *during* render is the other
+  half of this trap — the bridge writes from a `use_future`, which is not render.)
+
+**Scope note.** State only. No `save_position` call, no `Library` in the reader, no restore —
+Steps 6–8. The readout is throwaway UI, not a feature.
+
+> **Hand-off to Step 6 — the stale-pair hazard.** Step 6 saves
+> `Locator { spine_index: chapter(), selector: anchor() }`, and those two values can briefly
+> disagree. On a chapter change `apply` sets `chapter` *and* `page`, so the `ook-set-page`
+> effect fires while the iframe still holds the **previous** chapter's document; that document
+> answers with its own selector, and pairing it with the already-advanced `chapter` persists a
+> position that points into the wrong file. Step 5 is unharmed (a stale string in state is
+> overwritten by the next report), so this is Step 6's problem to solve — most likely by not
+> saving while a chapter load is in flight, which is a state the reader is close to already
+> tracking via `pending_fragment` / `pending_last`. Worth deciding deliberately there rather
+> than discovering it as a mystery bad bookmark at Step 8.

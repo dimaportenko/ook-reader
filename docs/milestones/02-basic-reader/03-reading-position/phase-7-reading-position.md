@@ -108,9 +108,10 @@ eyeball, and it's deliberately checkable *in devtools* before any database is wi
       that builds an `nth-child` chain for the first element whose `offsetLeft` lands on the
       current page. Asset-injection `#[test]` + a devtools round-trip eyeball
       (build a selector → `querySelector` finds the same element back).
-- [ ] **Step 5 — Bridge the selector into reader state.** `ook-position` →
-      `position:<selector>` → `BridgeMsg::Position` → `ReaderData.locator`.
-      `BridgeMsg::parse` `#[test]` + eyeball.
+- [x] **Step 5 — Bridge the selector into reader state.** `ook-position` →
+      `position:<selector>` → `BridgeMsg::Position` → `ReaderData.anchor` (renamed from
+      `locator` — the field holds only the selector half; `chapter` is the other half, and
+      Step 6 pairs them). `BridgeMsg::parse` `#[test]` + eyeball.
 - [ ] **Step 6 — Persist it.** The reader saves `{chapter, selector}` for its book on every
       position message. Eyeball + `sqlite3` inspection; storage is already tested at Step 3.
 - [ ] **Step 7 — Resolve a selector back to a page (JS).** `fragment-scroll.js` learns the
