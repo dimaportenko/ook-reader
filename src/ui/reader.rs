@@ -18,6 +18,7 @@ pub(crate) enum BridgeMsg {
     Link(String),
     Scroll(usize),
     Pages(usize),
+    Position(String),
 }
 
 impl BridgeMsg {
@@ -28,6 +29,8 @@ impl BridgeMsg {
             page.parse().ok().map(BridgeMsg::Scroll)
         } else if let Some(page_count) = msg.strip_prefix("pages:") {
             page_count.parse().ok().map(BridgeMsg::Pages)
+        } else if let Some(selector) = msg.strip_prefix("position:") {
+            (!selector.is_empty()).then(|| BridgeMsg::Position(selector.to_string()))
         } else {
             None
         }
@@ -177,6 +180,7 @@ fn use_bridge(state: ReaderState, docs: Rc<Vec<String>>) {
                     }
                     Some(BridgeMsg::Scroll(page)) => state.on_scroll(page),
                     Some(BridgeMsg::Pages(p_count)) => state.on_pages(p_count),
+                    Some(BridgeMsg::Position(selector)) => state.on_position(selector),
                     None => {}
                 }
             }
@@ -208,5 +212,26 @@ mod test {
         assert!(CHAPTER_LOADER_JS.contains("window.__ookBlobUrl"));
         assert!(BLOB_CLEANUP_JS.contains("window.__ookBlobUrl"));
         assert!(BLOB_CLEANUP_JS.contains("revokeObjectURL"));
+    }
+
+    #[test]
+    fn bridge_parses_a_position_selector_whole() {
+        // The listener has to recognise the kind `page-position.js` posts. Nothing in
+        // the compiler checks that name across the two files — rename it on one side
+        // and the selector never reaches Rust, silently.
+        assert!(BRIDGE_JS.contains("ook-position"));
+
+        // A selector is colon- and space-rich. `strip_prefix` hands back the entire
+        // remainder of the message, so nothing here gets split in half.
+        assert_eq!(
+            BridgeMsg::parse("position:body > div:nth-child(2) > p:nth-child(7)"),
+            Some(BridgeMsg::Position(
+                "body > div:nth-child(2) > p:nth-child(7)".to_string()
+            )),
+        );
+
+        // An empty payload is not a position. Reject it here rather than storing a
+        // selector that can never resolve — Step 6 writes this straight to SQLite.
+        assert_eq!(BridgeMsg::parse("position:"), None);
     }
 }

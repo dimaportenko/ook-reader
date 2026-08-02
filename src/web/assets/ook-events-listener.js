@@ -9,4 +9,7 @@ window.addEventListener("message", (e) => {
   if (e.data.kind === "ook-pages") {
     dioxus.send("pages:" + e.data.count);
   }
+  if (e.data.kind === "ook-position") {
+    dioxus.send("position:" + e.data.selector);
+  }
 });

@@ -22,6 +22,7 @@ pub(crate) struct ReaderData {
     pub(crate) page_count: usize,
     pub(crate) pending_fragment: Option<String>,
     pub(crate) pending_last: bool,
+    pub(crate) anchor: Option<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -102,6 +103,10 @@ impl ReaderState {
             page.set(pages.saturating_sub(1));
             pending_last.set(false);
         }
+    }
+
+    pub(crate) fn on_position(self, selector: String) {
+        self.data.anchor().set(Some(selector));
     }
 }
 
