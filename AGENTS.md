@@ -24,6 +24,21 @@ give a **runnable check first** — a test, or a `dx serve` you can eyeball — 
 behavior is visible and the user can verify their code as they write it. Then the minimal
 implementation for that step.
 
+## Rule: no comments in code unless asked
+
+On the rare occasions you are asked to write or edit code, write the code and **nothing
+else** — no explanatory comments, no doc comments, no `//` notes about why a line exists.
+The user writes their own comments; yours are noise in a file they are learning from.
+
+This is about *code you produce*, not about the value of comments in general. The
+"explain why, not what" preference under [What this is](#what-this-is) still governs the
+comments the user writes by hand, and you should still explain the *why* — in chat, in
+review notes, in `docs/`, and in commit messages, which is where that reasoning belongs.
+Never delete or rewrite the user's existing comments unless asked.
+
+If you think a line genuinely needs a comment to be safe, say so in your reply and let the
+user write it.
+
 ## Rule: commits are authored by the user alone
 
 Commit messages in this repo carry **no co-author or AI-attribution trailer** — no
