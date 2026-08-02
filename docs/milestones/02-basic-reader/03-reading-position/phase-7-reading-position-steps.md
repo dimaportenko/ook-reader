@@ -470,6 +470,11 @@ written.
 
 ## Step 3 — a `Locator` and somewhere to put it
 
+> **Status:** done — committed in `d5dc134` (44 tests green). Two `dead_code` warnings are
+> expected and accepted until Step 6 gives `Locator`, `save_position` and `position` their
+> first caller — a knowing exception to this phase's "clippy clean" bar, because the step's
+> whole point is that nothing consumes the store yet.
+
 This step establishes the persistence boundary before any DOM code exists. A locator is
 owned Rust data — a spine index plus a selector — and the database keeps exactly one of
 them per book. Saving again replaces the old value; deleting the book deletes its locator.

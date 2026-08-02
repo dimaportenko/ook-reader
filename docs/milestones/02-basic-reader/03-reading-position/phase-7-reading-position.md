@@ -93,7 +93,7 @@ eyeball, and it's deliberately checkable *in devtools* before any database is wi
 - [x] **Step 2 — Recency: `touch_opened` + the sort.** `last_opened_at` written when a book
       is opened; `list()` orders by `COALESCE(last_opened_at, added_at) DESC, title`.
       `#[test]` with injected timestamps + eyeball (open a book, close it, it's first).
-- [ ] **Step 3 — A `Locator` and somewhere to put it.** `Locator { spine_index, selector }`,
+- [x] **Step 3 — A `Locator` and somewhere to put it.** `Locator { spine_index, selector }`,
       the `positions` table, `save_position` / `position`, and removing a book drops its
       position. Round-trip `#[test]`.
 - [ ] **Step 4 — Report the first element on the current page (JS).** A new injected asset
