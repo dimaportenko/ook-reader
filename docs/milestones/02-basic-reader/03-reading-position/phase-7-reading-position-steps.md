@@ -1583,3 +1583,198 @@ to remove it.
 > copied out of the `positions` table above and watch the page jump. Which means the row this
 > step starts writing is the input to Step 7's eyeball: turn some pages, read the selector out
 > of SQLite, and paste it into the hash. The database becomes the test fixture.
+
+---
+
+## Step 7 — resolve a selector back to a page (JS)
+
+> **Status:** done — committed in `cbdda5e` (46 tests green, clippy still at the one
+> expected `dead_code` error for `position`).
+>
+> **Fixture note, worth more than the code.** The first eyeball attempt reported nothing and
+> looked like a failure; it was the test setup. Two traps, both worth remembering:
+>
+> - **Hamlet's stored row cannot demonstrate this step.** It is `spine_index 0` with selector
+>   `body > div:nth-child(1)` — the title page's outer div, at `offsetLeft: 0`, which is page
+>   0, which is the page you are already on. A perfect resolve looks identical to a total
+>   miss. The useful row was Sherlock Holmes: `spine_index 8`, `p:nth-child(215)`, far enough
+>   into a chapter that landing on it is visible. Pick a fixture whose success and failure
+>   look different.
+> - **`hashchange` does not fire when the hash is assigned its existing value.** Setting the
+>   same fragment three times in the console fires the listener once; attempts two and three
+>   are no-ops at the browser level and `reportFragmentPage` never runs. Clear with
+>   `location.hash = ""` first, or just call `reportFragmentPage()` — it is a top-level
+>   function declaration in a classic script, so it is on `window`.
+>
+> A selector copied from devtools' "Copy → Selector Path" is also not a selector this app
+> wrote; only the three rows in `positions` are. Both traps produce the same symptom —
+> nothing happens — which is exactly the symptom a genuine bug in `elementFor` would produce.
+> That ambiguity is the argument for the assertion this step added: the automated check
+> proves the marker reaches the document, so an eyeball miss is never about *that*.
+
+Pure JS, no Rust. `fragment-scroll.js` learns that a hash beginning `ook-sel:` names a
+selector for `querySelector` rather than an element id, resolves it, and reports the page
+over the `ook-scroll` channel it already uses.
+
+**The reason this step is small is that the restore pipeline already exists.** Follow it
+backwards from the thing Step 8 wants: `on_scroll` sets `page` and clears
+`pending_fragment`; `on_scroll` fires on `ook-scroll`; `ook-scroll` is posted by
+`reportFragmentPage`; `reportFragmentPage` runs on `load` and `hashchange`; the hash is set
+by `chapter-loader.js` from `pending_fragment`. Every link the user has ever clicked has
+travelled that path. Restore needs the same path carrying a different kind of payload — so
+rather than build a second one, this step widens what a fragment is allowed to be, and
+Step 8 becomes "seed `chapter` and `pending_fragment` from the stored row."
+
+That reuse is worth more than the code it saves. `pending_fragment` being `Some` is also
+what hides the iframe (`class: if pending_last() || pending_fragment().is_some()`), so a
+restore that rides this channel inherits the no-flash-of-the-wrong-page behavior for free.
+A parallel channel would have had to reinvent it.
+
+### Runnable check
+
+**One assertion, folded into the existing injection test** — the same shape as Step 5's
+`BRIDGE_JS.contains("ook-position")` assertion, and for the same reason. In
+`serving_a_chapter_injects_the_reader_assets`, next to its siblings:
+
+```rust
+assert!(xhtml.contains("ook-sel:")); // fragment-scroll.js
+```
+
+That is red today: no asset contains the string. It is a weak assertion about a strong
+thing — `ook-sel:` is a contract between `fragment-scroll.js` and the Rust that will build
+the hash in Step 8, and no compiler checks a string that crosses a language boundary. The
+test count stays at 46; this is an assertion, not a test.
+
+**The real check is in devtools, and the fixture is your own database.** Read the row out:
+
+```sh
+sqlite3 ~/Library/Application\ Support/com.dimaportenko.ook-reader/library.sqlite3 \
+  "select spine_index, selector from positions;"
+```
+
+Then `dx serve`, open that book, navigate to that chapter, and in the iframe's console:
+
+1. **The happy path.** Set the hash to the prefix plus the selector you just read, encoding
+   the whole thing — prefix included — because that is what `chapter-loader.js` does with
+   the fragment it is handed:
+
+   ```js
+   location.hash = encodeURIComponent("ook-sel:body > div:nth-child(1) > p:nth-child(67)")
+   ```
+
+   The page should jump to the page holding that paragraph. This is the round trip closing:
+   Step 4 wrote that selector by looking at what was on the page, and Step 7 finds the page
+   by looking at that selector.
+
+2. **The garbage path, which matters more.** Set a selector that cannot parse:
+
+   ```js
+   location.hash = encodeURIComponent("ook-sel:not a ((valid selector")
+   ```
+
+   Nothing should appear in the console, and the reader should stay exactly where it is —
+   *not* freeze. Why this is the checkpoint that earns its keep is in **Why it works**.
+
+3. **The old path still works.** Click an internal link in the table of contents. Ordinary
+   id fragments must behave exactly as they did — this step adds a branch, it does not
+   replace one.
+
+Then `cargo clippy --all-targets -- -D warnings`: still exactly **one** `dead_code` error
+(`position`). This step touches no Rust, so a change in that number means something
+unintended came along.
+
+### Minimal implementation
+
+All of it in `src/web/assets/fragment-scroll.js`. Pull the lookup out of
+`reportFragmentPage` into its own function, because it now has two ways to fail and the
+reporting logic should not have to care which:
+
+```js
+const SELECTOR_PREFIX = "ook-sel:";
+
+function elementFor(target) {
+  if (!target.startsWith(SELECTOR_PREFIX)) {
+    return document.getElementById(target);
+  }
+
+  try {
+    return document.querySelector(target.slice(SELECTOR_PREFIX.length));
+  } catch {
+    return null;
+  }
+}
+```
+
+`reportFragmentPage` then changes by two lines — the `id` binding becomes a `target`, and
+the `getElementById` call becomes `elementFor(target)`:
+
+```js
+function reportFragmentPage() {
+  const target = decodeURIComponent(location.hash.slice(1));
+  if (!target) return;
+
+  const el = elementFor(target);
+  const page = el ? Math.round(el.offsetLeft / window.innerWidth) : currentPage();
+
+  document.documentElement.scrollLeft = 0;
+  window.parent.postMessage({ kind: "ook-scroll", page: page }, "*");
+}
+```
+
+**Keep your existing comments.** The one above the `el ? … : currentPage()` line explains
+why an unresolvable fragment reports the current page rather than staying silent, and that
+reasoning now covers three cases instead of one — a missing id, a selector that matches
+nothing, and a selector that will not parse. It might be worth a few words from you saying
+so, since the comment currently names only the first.
+
+### Why it works
+
+- **`querySelector` throws where `getElementById` returns `null`, and that asymmetry is the
+  entire reason for the `try`.** A malformed selector raises `SyntaxError`. An uncaught
+  throw inside `reportFragmentPage` skips the `postMessage` at the bottom — and that
+  message is the *only* thing that clears `pending_fragment`. So the failure is not "the
+  reader lands on the wrong page." It is: `pending_fragment` stays `Some` forever, the
+  iframe keeps its `invisible` class forever, and the reader opens to a blank rectangle
+  with no error anywhere. Catching turns the worst case back into the documented one — the
+  phase's **Known constraints** already promise that restore is best-effort and an
+  unresolvable target falls back rather than erroring.
+- **This is not a hypothetical.** The same Known constraints note says re-importing a book
+  keeps the row id but replaces the bytes, so a stored selector can outlive the document it
+  described. The selector is a string from a database, and by the time it reaches
+  `querySelector` it is untrusted input.
+- **Decode before you test the prefix.** `encodeURIComponent` escapes `:` to `%3A`, so a
+  raw `location.hash` never contains a literal `ook-sel:` even when the fragment did.
+  `startsWith` on the still-encoded string silently never matches, every restore quietly
+  falls through to `getElementById`, and you get the current page every time — a bug that
+  looks like "restore doesn't work" and has nothing to do with selectors. The existing
+  `decodeURIComponent` on the line above is already in the right place; the point is not to
+  move the prefix check above it.
+- **`ook-sel:` is a namespace, not a delimiter.** `slice(SELECTOR_PREFIX.length)` takes
+  everything after the marker, which is what keeps `body > p:nth-child(1)` intact — the
+  same lesson `strip_prefix` taught in Step 5, in the other language. A `split(":")` here
+  would hand back `body > p` and drop the rest, and the symptom would be landing on the
+  wrong page rather than a parse error.
+- **A document that happened to contain `id="ook-sel:x"` loses, and that is the safe
+  direction.** It would be read as the selector `x`, match nothing or an `<x>` element, and
+  fall back to the current page. The reverse choice — checking ids first — would let a
+  document silently hijack the restore channel.
+- **The round trip closes because both sides compute the page the same way.**
+  `page-position.js` picks its element with `Math.round(el.offsetLeft / window.innerWidth)`
+  and `fragment-scroll.js` reads it back with the identical expression. That is not a
+  coincidence to be grateful for; it is a duplicated formula in two files that must agree,
+  and it is exactly what Step 9's "two halves of the page↔element conversion living in two
+  JS files" item is about. Notice it here so the refactor is obvious later.
+
+### Scope note
+
+No Rust beyond the one assertion, and nothing in the app produces an `ook-sel:` hash yet —
+you are setting it by hand. **Step 8** is what seeds `chapter` and `pending_fragment` from
+the stored locator on open, which is when the mechanism proved here becomes a feature. The
+`position` method stays dead and clippy stays at one warning until then.
+
+Deliberately not handled: an element that resolves but is not currently laid out (a zero-box
+element inside a `display: none` ancestor) reports page 0 rather than nothing, because
+`offsetLeft` is 0 for it. `page-position.js` never *writes* such a selector — it skips
+elements with no `getClientRects()` — so the case needs a document that changed under a
+stored locator. It is the same re-import hazard as everything else here, and it fails the
+same best-effort way.

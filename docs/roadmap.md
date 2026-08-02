@@ -52,7 +52,8 @@ reader can use (open a book, see text, turn a page, resume). The MVP slice seque
 **Milestone 2 → Reading Position →
 [Phase 7](milestones/02-basic-reader/03-reading-position/phase-7-reading-position.md)** —
 the reader renders, paginates, and has a library with covers; what's left for the MVP is
-remembering where you stopped. Riding alongside: the two open items in the
-[July 2026 review backlog](milestones/02-basic-reader/review-2026-07-steps.md) (**R3** a
-real error type, **R6** hygiene), pickable in any order.
+remembering where you stopped. The position is now saved; what remains is reading it back.
+Riding alongside: one open item in the
+[July 2026 review backlog](milestones/02-basic-reader/review-2026-07-steps.md) — **R6**
+hygiene. **R3** (a real error type) was pulled into this phase as Step 6a and is done.
 </content>
