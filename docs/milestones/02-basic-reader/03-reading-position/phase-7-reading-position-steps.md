@@ -29,9 +29,10 @@ any database is wired to them.
 
 **Step 0 — Import several EPUBs at once** *(prerequisite, folded in mid-phase)*. Not
 reading-position work at all — a Feature 2 leftover (`TODO.md`: "multiple selection for book
-addition") pulled forward because this phase wipes the dev database **twice**, at Step 1 and
-again at Step 3. `multiple: true` on the file input, a loop that survives one bad file, one
-refresh at the end. Eyeball. Numbered `0` so the arc below keeps its numbering.
+addition") pulled forward because Step 1's column change wipes the dev database and makes a
+whole-shelf re-import unavoidable. `multiple: true` on the file input, a loop that survives
+one bad file, one refresh at the end. Eyeball. Numbered `0` so the arc below keeps its
+numbering.
 
 Then the reading-position arc proper:
 
@@ -63,11 +64,12 @@ Then the reading-position arc proper:
 > **Status:** done — committed in `afa4cb0` (TODO tick in `d451eac`); eyeball-verified, no
 > new tests (the behavior under test is a native file panel).
 
-A prerequisite, not a reading-position step. Everything after this deletes the dev database
-by hand — Step 1 for the two new `books` columns, Step 3 again for the `positions` table —
-and each deletion is followed by re-importing the whole shelf through a picker that takes
-**one file per click**. Two wipes × N books is a tax on every remaining step in the phase,
-so it's worth twenty minutes now.
+A prerequisite, not a reading-position step. Step 1 deletes the dev database by hand for
+the two new `books` columns, then re-imports the whole shelf through a picker that takes
+**one file per click**. One wipe × N books is already enough tax to make this worth twenty
+minutes. The original plan also counted Step 3, but that was mistaken: a missing
+`positions` table can be added with `CREATE TABLE IF NOT EXISTS` against the existing
+database, unlike columns on an already-existing table.
 
 It's also honest about where it came from: this is Feature 2's unchecked
 `TODO.md` line, "multiple selection for book addition." Phase 6 declined it on purpose
@@ -463,3 +465,225 @@ ago"), no user-chosen sort order, and no "currently reading" section. The existi
 need no edits: they assert list *contents* (`contains`, or a one-element `vec![…]`), which
 is exactly why they survive a sort change — a useful thing to notice about how they were
 written.
+
+---
+
+## Step 3 — a `Locator` and somewhere to put it
+
+This step establishes the persistence boundary before any DOM code exists. A locator is
+owned Rust data — a spine index plus a selector — and the database keeps exactly one of
+them per book. Saving again replaces the old value; deleting the book deletes its locator.
+Nothing in the reader uses it yet, which is deliberate: the store contract can be proved in
+isolation before JavaScript starts producing selectors in Steps 4–5.
+
+There is one SQLite trap worth making explicit: writing `REFERENCES books(id) ON DELETE
+CASCADE` in the schema is not enough. SQLite foreign-key enforcement is disabled by
+default **per connection**. `Library::init` must enable it, or the cascade test leaves an
+orphan row while the schema looks perfectly correct.
+
+> **Correction to the upfront plan.** Do **not** delete the dev database for this step.
+> Step 1 needed a reset because `CREATE TABLE IF NOT EXISTS books` cannot add columns to an
+> existing table. Step 3 adds a whole new table, so `CREATE TABLE IF NOT EXISTS positions`
+> safely creates it the next time the app opens. Schema initialization is enough here; a
+> migration is not.
+
+**Runnable checks.** Add two `#[test]`s in `src/library.rs`. The first fixes the
+save/read/latest-wins contract; the second proves the foreign key is really active rather
+than merely written in the DDL.
+
+```rust
+#[test]
+fn position_round_trips_and_latest_save_wins() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let (library, source, _) = library_with_source(&dir);
+    let book = library.add_from_path(&source, 1_000).expect("import");
+
+    assert_eq!(library.position(book.id).expect("empty position"), None);
+
+    let first = Locator {
+        spine_index: 2,
+        selector: "body > p:nth-child(3)".to_string(),
+    };
+    library
+        .save_position(book.id, &first, 2_000)
+        .expect("first save");
+    assert_eq!(library.position(book.id).expect("first read"), Some(first));
+
+    let latest = Locator {
+        spine_index: 4,
+        selector: "body > div:nth-child(2) > p:nth-child(7)".to_string(),
+    };
+    library
+        .save_position(book.id, &latest, 3_000)
+        .expect("latest save");
+    assert_eq!(
+        library.position(book.id).expect("latest read"),
+        Some(latest),
+    );
+
+    // `updated_at` is intentionally not part of `Locator`, but the injected clock is
+    // still a storage contract worth proving inside this module-level test.
+    let updated_at: i64 = library
+        .conn
+        .query_row(
+            "SELECT updated_at FROM positions WHERE book_id = ?1",
+            params![book.id],
+            |row| row.get(0),
+        )
+        .expect("stored timestamp");
+    assert_eq!(updated_at, 3_000);
+}
+
+#[test]
+fn removing_a_book_cascades_to_its_position() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let (library, source, _) = library_with_source(&dir);
+    let book = library.add_from_path(&source, 1_000).expect("import");
+    let locator = Locator {
+        spine_index: 2,
+        selector: "body > p:nth-child(3)".to_string(),
+    };
+
+    library
+        .save_position(book.id, &locator, 2_000)
+        .expect("save position");
+    assert!(library.remove(book.id).expect("remove book"));
+    assert_eq!(library.position(book.id).expect("position lookup"), None);
+}
+```
+
+Run the focused checks while iterating:
+
+```sh
+cargo test position_round_trips_and_latest_save_wins
+cargo test removing_a_book_cascades_to_its_position
+```
+
+Watch the first one fail to compile because `Locator`, `save_position`, and `position` do
+not exist. After the implementation, run the full safety net:
+
+```sh
+cargo test
+cargo clippy --all-targets -- -D warnings
+```
+
+**Minimal implementation.** All edits are in `src/library.rs`.
+
+1. Add the owned value type beside `Book`:
+
+   ```rust
+   #[derive(Debug, Clone, PartialEq, Eq)]
+   pub(crate) struct Locator {
+       pub(crate) spine_index: usize,
+       pub(crate) selector: String,
+   }
+   ```
+
+   `usize` matches the reader's spine indexing; `String` is owned because the value crosses
+   the DOM → Rust → SQLite boundary and must outlive any message buffer.
+
+   **`usize` needs a Cargo feature.** rusqlite gates the `ToSql`/`FromSql` impls for
+   `usize` and `u64` behind `fallible_uint` (off by default) — SQLite's only integer type is
+   `i64`, and unlike every narrower type those conversions can fail in both directions.
+   Without the feature, the `params!` in item 3 is a compile error: *the trait bound `usize:
+   rusqlite::ToSql` is not satisfied*. Add it to `Cargo.toml` before writing the store:
+
+   ```toml
+   rusqlite = { version = "0.40", features = ["bundled", "fallible_uint"] }
+   ```
+
+2. At the start of `Library::init`, enable foreign keys for this connection:
+
+   ```rust
+   conn.pragma_update(None, "foreign_keys", true)?;
+   ```
+
+   Then, after creating `books`, create the dependent table:
+
+   ```sql
+   CREATE TABLE IF NOT EXISTS positions (
+       book_id INTEGER PRIMARY KEY REFERENCES books(id) ON DELETE CASCADE,
+       spine_index INTEGER NOT NULL,
+       selector TEXT NOT NULL,
+       updated_at INTEGER NOT NULL
+   )
+   ```
+
+3. Add the latest-wins write:
+
+   ```rust
+   pub(crate) fn save_position(
+       &self,
+       book_id: i64,
+       locator: &Locator,
+       now: i64,
+   ) -> rusqlite::Result<()> {
+       self.conn.execute(
+           "INSERT INTO positions (book_id, spine_index, selector, updated_at)
+            VALUES (?1, ?2, ?3, ?4)
+            ON CONFLICT(book_id) DO UPDATE SET
+                spine_index = excluded.spine_index,
+                selector = excluded.selector,
+                updated_at = excluded.updated_at",
+           params![book_id, locator.spine_index, locator.selector.as_str(), now],
+       )?;
+
+       Ok(())
+   }
+   ```
+
+4. Add the optional read. `OptionalExtension` is already imported for `remove`, so no new
+   import is needed:
+
+   ```rust
+   pub(crate) fn position(&self, book_id: i64) -> rusqlite::Result<Option<Locator>> {
+       self.conn
+           .query_row(
+               "SELECT spine_index, selector FROM positions WHERE book_id = ?1",
+               params![book_id],
+               |row| {
+                   Ok(Locator {
+                       spine_index: row.get(0)?,
+                       selector: row.get(1)?,
+                   })
+               },
+           )
+           .optional()
+   }
+   ```
+
+**Why it works.**
+
+- **`book_id PRIMARY KEY` expresses one position per book.** It is both the identity of the
+  row and the conflict target. The upsert therefore has only two outcomes: insert the first
+  locator or overwrite that book's existing locator. There is no history to accidentally
+  accumulate and no preliminary `SELECT` race.
+- **`excluded` is the attempted new row**, the same mechanism Step 1 used for re-import.
+  Here every mutable position field is copied from it because "latest wins" is the whole
+  contract. `updated_at` changes in the same statement, so locator and timestamp cannot
+  disagree halfway through a save.
+- **`OptionalExtension::optional()` changes only `QueryReturnedNoRows` into `None`.** Real
+  database failures remain `Err`; "this book has no saved position yet" is ordinary state,
+  not an error. That gives Step 8 a natural fallback to chapter 0/page 0.
+- **The cascade is database-owned cleanup.** `remove` already deletes the `books` row;
+  with foreign keys enabled, SQLite deletes the dependent `positions` row in the same
+  operation. Putting this in the schema avoids a second manual delete path that could be
+  forgotten or partially fail.
+- **The clock stays at the edge.** `save_position` takes `now`, just like `add_from_path`
+  and `touch_opened`, so Step 6 can call `now_secs()` while this test supplies exact values.
+  The store remains deterministic.
+- **`fallible_uint` keeps `usize` out of the call sites.** The alternatives were an
+  `i64`/`u32` field with casts at every crossing, or `as` casts at the SQL boundary. Both
+  lose, for the same reason: every existing spine index in the codebase is already a `usize`
+  — `ReaderData.chapter`, `chapter_count`, `nav.rs`'s arithmetic, and
+  `epub::LinkTarget.spine_index`, which `follow_link` assigns straight into `chapter()`
+  (`src/nav.rs:88`). A non-`usize` `Locator` would be the only spine index that needs
+  converting, at three sites, and the conversion it relocates is `i64 as usize` on restore —
+  the direction where a corrupt row becomes a huge index instead of an error. With the
+  feature on, rusqlite runs `i64::try_from` on write and a checked narrowing on read, so a
+  bad value surfaces as `FromSqlError::OutOfRange` at the boundary that owns it.
+
+**Scope note.** Storage only. Do not change `ReaderData`, bridge messages, injected assets,
+or the open-book handler yet. Step 4 discovers a selector in JavaScript, Step 5 carries it
+into Rust state, and Step 6 calls `save_position`. Re-import can still leave a locator that
+no longer matches the replacement EPUB; best-effort restore in Step 8 owns that behavior.

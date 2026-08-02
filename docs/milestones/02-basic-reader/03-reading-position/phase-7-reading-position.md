@@ -37,12 +37,13 @@ eyeball, and it's deliberately checkable *in devtools* before any database is wi
 
 ## Design decisions (recorded up front)
 
-- **Reset the dev DB; no migrator yet.** The new columns go straight into
-  `CREATE TABLE IF NOT EXISTS books` and `library.sqlite3` gets deleted by hand — the
-  pre-release policy from Phase 6 Step 7, extended one more phase. Cost, accepted knowingly:
-  the ritual repeats at Step 3 (the `positions` table), and the first real user forces a
-  migrator against a *bigger* schema than today's. The alternative considered and declined
-  was a `PRAGMA user_version` migrator (~20 lines, `ALTER TABLE` per version).
+- **Reset the dev DB for Step 1; no migrator yet.** The new columns went straight into
+  `CREATE TABLE IF NOT EXISTS books` and `library.sqlite3` was deleted by hand — the
+  pre-release policy from Phase 6 Step 7, extended one more phase. Step 3 does **not** repeat
+  the reset: creating the missing `positions` table is idempotent schema initialization,
+  unlike adding columns to an existing table. The first real user still forces a migrator
+  for column changes. The alternative considered and declined was a `PRAGMA user_version`
+  migrator (~20 lines, `ALTER TABLE` per version).
 - **The store never reads the clock.** `add_from_path(source, now)` and
   `touch_opened(id, now)` take the timestamp as a parameter; a `now_secs()` helper at the
   UI edge is the only place `SystemTime::now()` is called. This is not ceremony — a test
@@ -54,6 +55,13 @@ eyeball, and it's deliberately checkable *in devtools* before any database is wi
   `books` because it keeps the row that describes the *file* separate from the row that
   describes the *reading*, and leaves room for history/bookmarks later without widening
   `books` again.
+- **`spine_index` stays a `usize`, paid for with rusqlite's `fallible_uint` feature.**
+  rusqlite gates `ToSql`/`FromSql` for `usize`/`u64` because SQLite's only integer is `i64`
+  and both conversions can fail. Enabling it is one word in `Cargo.toml` and keeps `Locator`
+  assignable straight into `ReaderData.chapter`, the way `epub::LinkTarget` already is;
+  an `i64` or `u32` field would instead be the codebase's only non-`usize` spine index and
+  push an unchecked `as usize` onto the restore path. The conversion still happens — it just
+  happens checked, inside the store boundary.
 - **The locator is a `nth-child` selector chain**, e.g. `body > div:nth-child(2) >
   p:nth-child(7)`, resolved with `document.querySelector`. Stable because the document is
   the same bytes every time — we serve it from the same managed copy. A flat index into
@@ -68,7 +76,6 @@ eyeball, and it's deliberately checkable *in devtools* before any database is wi
 - **Save on every page change, no debounce.** One tiny `UPDATE` against a local SQLite file
   per page turn, on a path that already does a `postMessage` round trip. Revisit only if
   the eyeball shows a hitch.
-
 ## Planned steps
 
 *(smallest-first; the last step is the mandatory review-and-refactor pass)*
@@ -77,10 +84,9 @@ eyeball, and it's deliberately checkable *in devtools* before any database is wi
       reading-position work.)* `multiple: true` on the file input and a loop that counts
       successes and failures rather than stopping at the first bad file, with a single
       `refresh_books` after the batch. Eyeball only — the behavior is the native `rfd`
-      panel, which no `#[test]` can click. Lands **before** Step 1 because this phase resets
-      the dev database twice (Steps 1 and 3) and each reset means re-importing the whole
-      shelf; paying off Feature 2's deferred "multiple selection" TODO now makes that one
-      pick instead of N.
+      panel, which no `#[test]` can click. Lands **before** Step 1 because its column change
+      resets the dev database and requires re-importing the whole shelf; paying off Feature
+      2's deferred "multiple selection" TODO makes that one pick instead of N.
 - [x] **Step 1 — Stamp `added_at`, and keep it stable across re-import.** Two nullable
       `INTEGER` columns in the schema, `add_from_path(source, now)`, and an `ON CONFLICT`
       clause that refreshes everything *except* when the book joined the library. `#[test]`.

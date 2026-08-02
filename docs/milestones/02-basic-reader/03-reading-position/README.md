@@ -43,11 +43,12 @@ in nine steps across four focuses:
   one structurally hard area (see [`RESEARCH.md`](../../../../RESEARCH.md) §3.3).
 - EPUB CFI is skipped for v1 (no mature Rust crate; only needed for cross-reader
   portability).
-- **Schema-change decision: reset the dev DB, no migrator (2026-07-26).** `Library::init`
-  stays `CREATE TABLE IF NOT EXISTS`; the new columns go straight into it and
-  `library.sqlite3` is deleted by hand, extending the Phase 6 pre-release policy one more
-  phase. The declined alternative was a `PRAGMA user_version` migrator. The accepted cost:
-  the reset repeats when the `positions` table lands, and the first real user forces a
-  migrator against a bigger schema. Full framing in
+- **Schema-change decision: reset the dev DB for the new columns, no migrator
+  (2026-07-26).** `CREATE TABLE IF NOT EXISTS books` cannot alter an existing table, so
+  `library.sqlite3` was deleted by hand for Step 1, extending the Phase 6 pre-release policy
+  one more phase. Step 3 is different: `CREATE TABLE IF NOT EXISTS positions` can add a
+  missing table idempotently, so it needs no second reset. The declined alternative was a
+  `PRAGMA user_version` migrator; the first real user still forces one for column changes.
+  Full framing in
   [the phase doc](phase-7-reading-position.md#design-decisions-recorded-up-front).
 </content>

@@ -30,6 +30,12 @@ impl Book {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Locator {
+    pub(crate) spine_index: usize,
+    pub(crate) selector: String,
+}
+
 pub(crate) struct Library {
     conn: Connection,
     books_dir: PathBuf,
@@ -44,6 +50,8 @@ impl Library {
     }
 
     fn init(conn: Connection, books_dir: PathBuf) -> rusqlite::Result<Self> {
+        conn.pragma_update(None, "foreign_keys", true)?;
+
         conn.execute(
             "CREATE TABLE IF NOT EXISTS books (
                 id INTEGER PRIMARY KEY,
@@ -57,6 +65,17 @@ impl Library {
             )",
             [],
         )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS positions (
+                book_id INTEGER PRIMARY KEY REFERENCES books(id) ON DELETE CASCADE,
+                spine_index INTEGER NOT NULL,
+                selector TEXT NOT NULL,
+                updated_at INTEGER NOT NULL
+            )",
+            [],
+        )?;
+
         Ok(Self { conn, books_dir })
     }
 
@@ -203,6 +222,40 @@ impl Library {
 
         std::fs::create_dir_all(&books_dir).expect("app data dir should be creatable");
         Library::open(data_dir.join("library.sqlite3"), books_dir).expect("library db should open")
+    }
+
+    pub(crate) fn save_position(
+        &self,
+        book_id: i64,
+        locator: &Locator,
+        now: i64,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT INTO positions (book_id, spine_index, selector, updated_at)
+            VALUES (?1, ?2, ?3, ?4)
+            ON CONFLICT(book_id) DO UPDATE SET
+                spine_index = excluded.spine_index,
+                selector = excluded.selector,
+                updated_at = excluded.updated_at",
+            params![book_id, locator.spine_index, locator.selector, now],
+        )?;
+
+        Ok(())
+    }
+
+    pub(crate) fn position(&self, book_id: i64) -> rusqlite::Result<Option<Locator>> {
+        self.conn
+            .query_row(
+                "SELECT spine_index, selector FROM positions WHERE book_id = ?1",
+                params![book_id],
+                |row| {
+                    Ok(Locator {
+                        spine_index: row.get(0)?,
+                        selector: row.get(1)?,
+                    })
+                },
+            )
+            .optional()
     }
 }
 
@@ -522,5 +575,64 @@ mod test {
             .touch_opened(-1, 4_000)
             .expect("missing id is Ok(false)");
         assert!(!missing);
+    }
+
+    #[test]
+    fn position_round_trips_and_latest_save_wins() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let (library, source, _) = library_with_source(&dir);
+        let book = library.add_from_path(&source, 1_000).expect("import");
+
+        assert_eq!(library.position(book.id).expect("empty position"), None);
+
+        let first = Locator {
+            spine_index: 2,
+            selector: "body > p:nth-child(3)".to_string(),
+        };
+        library
+            .save_position(book.id, &first, 2_000)
+            .expect("first save");
+        assert_eq!(library.position(book.id).expect("first read"), Some(first));
+
+        let latest = Locator {
+            spine_index: 4,
+            selector: "body > div:nth-child(2) > p:nth-child(7)".to_string(),
+        };
+        library
+            .save_position(book.id, &latest, 3_000)
+            .expect("latest save");
+        assert_eq!(
+            library.position(book.id).expect("latest read"),
+            Some(latest),
+        );
+
+        // `updated_at` is intentionally not part of `Locator`, but the injected clock is
+        // still a storage contract worth proving inside this module-level test.
+        let updated_at: i64 = library
+            .conn
+            .query_row(
+                "SELECT updated_at FROM positions WHERE book_id = ?1",
+                params![book.id],
+                |row| row.get(0),
+            )
+            .expect("stored timestamp");
+        assert_eq!(updated_at, 3_000);
+    }
+
+    #[test]
+    fn removing_a_book_cascades_to_its_position() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let (library, source, _) = library_with_source(&dir);
+        let book = library.add_from_path(&source, 1_000).expect("import");
+        let locator = Locator {
+            spine_index: 2,
+            selector: "body > p:nth-child(3)".to_string(),
+        };
+
+        library
+            .save_position(book.id, &locator, 2_000)
+            .expect("save position");
+        assert!(library.remove(book.id).expect("remove book"));
+        assert_eq!(library.position(book.id).expect("position lookup"), None);
     }
 }

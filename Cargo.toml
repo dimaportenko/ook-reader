@@ -10,7 +10,10 @@ edition = "2021"
 dioxus = { version = "0.7", features = [] }
 rbook = "0.7"
 percent-encoding = "2.3"
-rusqlite = { version = "0.40", features = ["bundled"] }
+# `fallible_uint` adds the ToSql/FromSql impls for `usize`/`u64`, which rusqlite gates
+# because SQLite's only integer is `i64` and both conversions can fail. It buys a checked
+# conversion for `Locator::spine_index` instead of an `as usize` cast at the restore site.
+rusqlite = { version = "0.40", features = ["bundled", "fallible_uint"] }
 directories = "6"
 uuid = { version = "1", features = ["v4"] }
 
