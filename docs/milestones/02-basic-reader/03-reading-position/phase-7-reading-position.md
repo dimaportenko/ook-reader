@@ -104,7 +104,7 @@ eyeball, and it's deliberately checkable *in devtools* before any database is wi
 - [x] **Step 3 — A `Locator` and somewhere to put it.** `Locator { spine_index, selector }`,
       the `positions` table, `save_position` / `position`, and removing a book drops its
       position. Round-trip `#[test]`.
-- [ ] **Step 4 — Report the first element on the current page (JS).** A new injected asset
+- [x] **Step 4 — Report the first element on the current page (JS).** A new injected asset
       that builds an `nth-child` chain for the first element whose `offsetLeft` lands on the
       current page. Asset-injection `#[test]` + a devtools round-trip eyeball
       (build a selector → `querySelector` finds the same element back).

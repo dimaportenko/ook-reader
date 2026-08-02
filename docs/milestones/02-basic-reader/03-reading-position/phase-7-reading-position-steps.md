@@ -697,10 +697,9 @@ no longer matches the replacement EPUB; best-effort restore in Step 8 owns that 
 
 ## Step 4 — report the first element on the current page (JS)
 
-> **Status:** landed in `4c53520` (44 tests green, injection assertion included).
-> **Not yet eyeball-verified** — the devtools round-trip below is the only check that can
-> prove the selector actually round-trips, and it has not been run. Tick the phase
-> checklist once it has.
+> **Status:** done — committed in `4c53520` (44 tests green, injection assertion included);
+> devtools round-trip verified — `document.querySelector(selectorFor(el)) === el` returns
+> `true`, across page turns.
 >
 > One bug was caught and fixed before the commit: `selectorFor` built its index from a
 > 0-based `indexOf` while `:nth-child()` counts from 1, so a first child produced
