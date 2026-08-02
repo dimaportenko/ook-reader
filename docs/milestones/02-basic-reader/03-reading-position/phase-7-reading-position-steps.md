@@ -692,3 +692,232 @@ cargo clippy --all-targets -- -D warnings
 or the open-book handler yet. Step 4 discovers a selector in JavaScript, Step 5 carries it
 into Rust state, and Step 6 calls `save_position`. Re-import can still leave a locator that
 no longer matches the replacement EPUB; best-effort restore in Step 8 owns that behavior.
+
+---
+
+## Step 4 — report the first element on the current page (JS)
+
+The store has a shape to fill; nothing produces a selector yet. This step adds the injected
+asset that answers *"which element starts the page I'm looking at?"* and posts it to the
+parent as `ook-position`. Nothing listens for that message yet — Step 5 teaches
+`ook-events-listener.js` to forward it — so this step is provably inert in the app and
+verified in devtools.
+
+The measurement is the crux, and `pagination.css` is what makes it work. `body` is a
+multi-column container whose `column-width` plus `column-gap` add up to exactly `100vw`, and
+paging is `transform: translateX(var(--ook-page) * -100vw)`. A CSS transform is a *paint*
+operation — it does not move layout boxes. So `el.offsetLeft` keeps reporting the element's
+position in the untransformed column flow no matter which page is on screen, and
+`Math.round(el.offsetLeft / window.innerWidth)` is a stable page index. That is the same
+measurement `fragment-scroll.js:17` already makes, now run in the other direction.
+
+The tempting alternative, `getBoundingClientRect().left`, *does* include the transform: it
+measures against the viewport, so it answers "where is this on screen right now" and changes
+every time you turn a page. Both are correct measurements of different questions; this step
+needs the layout one.
+
+**Runnable checks.** Two, of different kinds — say which is proving what.
+
+1. **A Rust `#[test]` proves injection, not behavior.** `serving_a_chapter_injects_the_reader_assets`
+   in `src/epub.rs` already asserts one marker string per asset. Add a line for this one:
+
+   ```rust
+   assert!(xhtml.contains("ook-position")); // page-position.js
+   ```
+
+   It fails until the asset exists and is listed in `INJECTED_ASSETS`. That is genuinely all
+   a Rust test can prove here — the JS never executes under `cargo test`.
+
+2. **A devtools round-trip proves the behavior.** Under `dx serve`, open a book, open
+   devtools, and switch the console's context to the chapter iframe (the context dropdown —
+   the frame is the blob/`epub://` document, not the top page). Then:
+
+   ```js
+   // The selector must find its way back to the element it was built from.
+   const el = firstElementOnPage(currentPage());
+   const sel = selectorFor(el);
+   [sel, document.querySelector(sel) === el];
+   // → ["body > div:nth-child(2) > p:nth-child(7)", true]
+   ```
+
+   Turn a page and run it again — the selector should change and still round-trip `true`.
+   To see the message itself, run this in the **parent** context first, then turn pages:
+
+   ```js
+   addEventListener("message", (e) => e.data?.kind === "ook-position" && console.log(e.data.selector));
+   ```
+
+Then `cargo test` and `cargo clippy --all-targets -- -D warnings`.
+
+**Minimal implementation.** A new asset plus one line registering it.
+
+1. **`src/web/assets/page-position.js`** — named for its neighbours `page-count.js` /
+   `page-listener.js`, which is the same "one small fact about the current page" family:
+
+   ```js
+   // Which page an element lives on. `offsetLeft` is layout position inside body's
+   // column flow; the `translateX` that paginates is paint-only and does not move it,
+   // so this is stable no matter which page is currently shown.
+   function pageOf(el) {
+     return Math.round(el.offsetLeft / window.innerWidth);
+   }
+
+   // `body > div:nth-child(2) > p:nth-child(7)`, built leaf-first and unshifted so the
+   // finished chain reads root-to-leaf.
+   function selectorFor(el) {
+     const parts = [];
+     while (el && el !== document.body) {
+       const parent = el.parentElement;
+       if (!parent) return null; // detached from the document: no path back to body
+       const index = Array.prototype.indexOf.call(parent.children, el) + 1;
+       parts.unshift(`${el.localName}:nth-child(${index})`);
+       el = parent;
+     }
+     return ["body", ...parts].join(" > ");
+   }
+
+   function firstElementOnPage(page) {
+     for (const el of document.body.getElementsByTagName("*")) {
+       if (!el.getClientRects().length) continue; // no box: display:none, <style>, …
+       if (pageOf(el) === page) return el;
+     }
+     return null;
+   }
+
+   function reportPosition(page) {
+     const el = firstElementOnPage(page);
+     if (!el) return; // an empty or fully-hidden page has nothing to anchor to
+     const selector = selectorFor(el);
+     if (!selector) return;
+     window.parent.postMessage({ kind: "ook-position", selector: selector }, "*");
+   }
+
+   // The page we are on right now, read back from the variable pagination.css
+   // paginates by — same read `fragment-scroll.js` does.
+   function currentPage() {
+     const style = getComputedStyle(document.documentElement);
+     return Number(style.getPropertyValue("--ook-page")) || 0;
+   }
+
+   window.addEventListener("load", () => reportPosition(currentPage()));
+   window.addEventListener("message", function (e) {
+     if (!e.data || e.data.kind !== "ook-set-page") return;
+     reportPosition(e.data.page);
+   });
+   ```
+
+2. **Register it** in `src/web/assets.rs`, after `fragment-scroll.js`:
+
+   ```rust
+   wrap_js!("./assets/page-position.js"),
+   ```
+
+**Why it works.**
+
+- **`nth-child` is 1-based and counts element siblings only**, which is why the index comes
+  from `parent.children` (an `HTMLCollection` of elements) and not `parent.childNodes` (which
+  includes the whitespace text nodes between tags). Get that wrong and every selector in a
+  prettily-indented EPUB is off by one — and it would still *look* plausible.
+- **`el.localName`, not `el.tagName`.** In an HTML document `tagName` is upper-cased
+  (`"P"`), and while CSS type selectors are case-insensitive in HTML, they are **not** in
+  XHTML — which is exactly what these documents are served as
+  (`application/xhtml+xml`). `localName` gives you `"p"` in both.
+- **The tag name is redundant but load-bearing.** `body > :nth-child(2)` would select the
+  same element; writing `body > div:nth-child(2)` makes the selector *self-checking* — if the
+  document ever changes shape, it fails to match instead of silently matching a different
+  element. A wrong restore is worse than a failed one, because Step 8 can fall back from a
+  failure.
+- **`getClientRects().length` is the "does this element have a box" test.** A `<style>` in
+  the body, a `display: none` wrapper, or an unrendered element all report `offsetLeft === 0`
+  and would otherwise claim to be the first element on page 0. Checking for a layout box is
+  cheaper and more direct than reasoning about which tags can appear.
+- **`getElementsByTagName("*")` yields document order**, so the first match is the earliest
+  element on that page — the natural anchor. A container that *starts* on page 0 and spans to
+  page 3 has its `offsetLeft` on page 0, so it correctly loses to its own child that actually
+  begins page 3.
+- **The page comes from `e.data.page`, not from re-reading `--ook-page`.** Both
+  `page-listener.js` and this asset handle the same `ook-set-page` message, and listeners fire
+  in registration order — which here is injection order in `INJECTED_ASSETS`. Reading the
+  variable would silently depend on that ordering staying put; taking the number off the
+  message that caused the change depends on nothing. `load` is the one case with no message,
+  so it reads the variable.
+- **Injection is the only Rust-testable part.** The asset is a string `include_str!`d into a
+  `const` — `cargo test` can prove it reaches the served XHTML and nothing more. Being
+  explicit that the marker assertion is a *plumbing* test, and that behavior rides on the
+  devtools round-trip, is the honest version of "this step is tested."
+
+**Scope note.** The iframe side only. No `BridgeMsg::Position`, no `ook-events-listener.js`
+change, no `ReaderData` field, no saving — Steps 5 and 6. Restoring *from* a selector is
+Step 7, and it goes in `fragment-scroll.js` rather than here, because reading the hash is
+already that asset's job. Also deferred: no debounce (see the phase doc's save-on-every-page
+decision), and no handling of a re-imported book whose DOM no longer matches — Step 8 owns
+that as best-effort.
+
+One thing to notice for **Step 9's refactor pass**: `currentPage()` is now copy-pasted
+between `fragment-scroll.js` and `page-position.js`, and `pageOf` duplicates the
+`offsetLeft / innerWidth` arithmetic that `fragment-scroll.js:17` inlines. Three assets now
+share the same idea of what a page is. That is fine while each asset stays independently
+injectable, but it is the kind of duplication the review step should either extract or
+consciously accept.
+
+### ⏱️ Performance: `firstElementOnPage` is a linear scan — to measure at Step 9
+
+`firstElementOnPage` walks **every** element in the chapter body, in document order, reading
+`getClientRects()` and `offsetLeft` on each until one lands on the target page. Written for
+obvious correctness, not for speed. Recording the concern here so Step 9 tests it rather than
+rewrites it on a hunch.
+
+**Why it is probably fine.** Both reads force layout, but the loop never *writes* to the DOM
+— so layout is computed once on the first read and every later read hits the clean cached
+value. The cost is O(n) property reads, not O(n) reflows, which is the difference between a
+fraction of a millisecond and visible jank. It runs once per page turn, not per frame.
+
+**Where it would hurt.** A long chapter (a whole book in one XHTML file — some EPUBs do this)
+scanned for a *late* page: the loop has no early exit, so finding page 0 is instant while
+finding the last page touches every element. Worst case is the anchor cost growing with how
+far into the chapter the reader is.
+
+**The measurement** — under `dx serve`, in the chapter iframe's console, on the longest
+chapter available, at the *end* of it:
+
+```js
+const p = currentPage();
+const t = performance.now();
+for (let i = 0; i < 100; i++) firstElementOnPage(p);
+(performance.now() - t) / 100; // ms per call
+```
+
+Also worth capturing alongside it: `document.body.getElementsByTagName("*").length`, so the
+number has a document size attached to it. **Threshold:** under ~1 ms per call on the worst
+chapter to hand, leave it alone and delete this section. Above that, or if a page turn ever
+*feels* like it hitches, take the cheap fixes first.
+
+**Fixes, cheapest first.**
+
+1. **Early exit.** In a column flow `offsetLeft` is non-decreasing in document order, so once
+   `pageOf(el) > page` nothing later can match — `break`. Turns the late-page worst case into
+   "scan up to the target", and costs one line.
+2. **Narrow the candidate set.** `"*"` includes every `<em>`, `<span>`, `<a>`; a
+   `querySelectorAll("p, h1, h2, h3, h4, h5, h6, li, img, blockquote, div, section")` is
+   roughly an order of magnitude fewer elements *and* yields a sturdier anchor — a block is a
+   better restore target than an inline fragment of one.
+3. **`document.elementFromPoint(x, y)`.** The browser's own hit-testing, O(1) from JS: because
+   pagination is a `translateX`, the current page's content is in the viewport, so a probe
+   point inside the text column returns the topmost element painted there directly. Caveats:
+   it returns the *deepest* element (walk up to a block), returns `body`/`html`/`null` if the
+   probe lands in a margin, and can only answer for the page currently **painted** — fine for
+   `reportPosition`, useless for asking about an off-screen page. Its sibling
+   `document.caretPositionFromPoint` returns a text node plus character offset, a finer anchor
+   than any element selector, which is the direction a future precise-locator feature wants
+   anyway (see the milestone README's deferred "precise, shareable locators").
+4. **`IntersectionObserver`.** The idiomatic "which elements are on screen" answer: no forced
+   layout from JS at all, the browser reports intersections asynchronously. Rejected for
+   *this* step because it is async — it fires after paint, and `reportPosition` wants an
+   answer synchronously in the `ook-set-page` handler. It becomes the right tool if position
+   tracking ever needs to be continuous rather than one reading per page turn.
+5. **Precompute on `load`.** Build `[element, page]` for all block candidates once, then a
+   page turn is an array lookup. Needs invalidation on resize and font-size change, since both
+   repaginate — the most code and the most state, hence last.
+
+Options 1 and 2 are additive and preserve the current shape; 3–5 are rewrites. Do not reach
+past 2 without a number from the measurement above.

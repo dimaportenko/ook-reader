@@ -76,6 +76,14 @@ eyeball, and it's deliberately checkable *in devtools* before any database is wi
 - **Save on every page change, no debounce.** One tiny `UPDATE` against a local SQLite file
   per page turn, on a path that already does a `postMessage` round trip. Revisit only if
   the eyeball shows a hitch.
+- **Finding the anchor is a linear scan, accepted unmeasured.** `firstElementOnPage` walks
+  `body.getElementsByTagName("*")` in document order and reads `offsetLeft` on each element
+  until one lands on the target page. That is O(n) *layout reads*, not O(n) reflows — the
+  loop never writes to the DOM, so layout is computed once on the first read and every
+  later read hits the clean cached value. Once per page turn, on a chapter-sized document,
+  that should be invisible; it is chosen for being obviously correct, not for being fast.
+  **Not yet measured** — see the measurement and the alternatives under Step 9 below.
+
 ## Planned steps
 
 *(smallest-first; the last step is the mandatory review-and-refactor pass)*
@@ -116,7 +124,9 @@ eyeball, and it's deliberately checkable *in devtools* before any database is wi
 - [ ] **Step 9 — Review & refactor** (mandatory phase-closer): the pending-state shape in
       `ReaderData` (three flags that are really one enum), the two halves of the
       page↔element conversion now living in two JS files, the `Library` API surface, and
-      the error handling on the save path.
+      the error handling on the save path. **Also: measure `firstElementOnPage`** on a long
+      chapter — the scan cost is documented as a decision above and as a to-test item in
+      [the steps doc](phase-7-reading-position-steps.md#step-4--report-the-first-element-on-the-current-page-js).
 
 ## Known constraints
 

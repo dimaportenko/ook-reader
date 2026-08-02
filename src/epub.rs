@@ -495,6 +495,7 @@ mod test {
         assert!(xhtml.contains("--ook-page: 0")); // pagination.css
         assert!(xhtml.contains("ook-pages")); // page-count.js
         assert!(xhtml.contains("hashchange")); // fragment-scroll.js
+        assert!(xhtml.contains("ook-position")); // page-position.js
         assert!(xhtml.find("--ook-page: 0").unwrap() < xhtml.find("</head>").unwrap());
         assert!(xhtml.contains("A SCANDAL IN BOHEMIA")); // the chapter survived
         assert!(served.content_type.starts_with("application/xhtml+xml"));
