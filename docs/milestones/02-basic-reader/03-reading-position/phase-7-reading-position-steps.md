@@ -1329,7 +1329,8 @@ rather than a surprise.
 
 ## Step 6b — persist the position
 
-> **Status:** planned.
+> **Status:** done — committed in `f1f95f3` (46 tests green, unchanged as planned; clippy's
+> `dead_code` count dropped from two to one).
 
 Step 5 got the selector into Rust and stopped. Step 3 built `save_position` and has had it
 sitting unused ever since — it is one of the two `dead_code` warnings clippy has been
@@ -1538,6 +1539,42 @@ on open.
 > review pass and it will have Step 8's restore code in front of it, which is the code most
 > likely to want this field. Just don't add a second reader of it in the meantime without
 > noticing you've settled the question.
+
+### How it landed
+
+The plan held with no deviations — three edits, all in `src/ui/reader.rs`, and the code is
+the sketch above verbatim. What's worth recording is the evidence, since this step's gate was
+a live database rather than a test.
+
+The row, two minutes after the first page turn:
+
+```
+book_id  spine_index  selector                                   updated_at
+16       11           body > div:nth-child(1) > p:nth-child(67)   2026-08-02 21:20:18
+```
+
+That single row answers four of the six checkpoints at once. It exists, which the empty table
+before this step did not. Its selector is `p:nth-child(67)` rather than the first element,
+so the save is wired to the page-turn path and not only to the `load` report. Its
+`spine_index` is 11 rather than 0, so the chapter half tracks. And there is exactly one row
+against 21 books — which the schema makes structural rather than lucky, since `book_id` is
+the table's `INTEGER PRIMARY KEY` and the `ON CONFLICT` clause has nothing else to match on.
+Per-book isolation and no-hitch paging were confirmed by hand.
+
+Clippy was the other half of the gate and it moved exactly as predicted: two `dead_code`
+errors down to one. `Locator` is now constructed and `save_position` now called, so both went
+quiet; `position` stays reported until Step 8 reads a locator back. Zero would have meant
+more than this step asked for; two would have meant the save arm was never reached.
+
+**One dependency this step introduced that the plan didn't name.** `App` renders
+`Reader { key: "{book.id}", … }`, so switching books remounts the component and the
+`use_future` re-captures a fresh `book_id`. Without that key the bridge would keep saving
+under the first book's id after you opened a second one, and checkpoint 4 would have failed
+in a way the schema could not protect against. The key predates this step; this step is the
+first thing whose correctness rests on it. Worth remembering at Step 9 if anything proposes
+to remove it.
+
+---
 
 > **Hand-off to Step 7.** Step 7 is pure JS and touches no Rust: `fragment-scroll.js` learns
 > that a hash beginning `ook-sel:` is a selector for `querySelector` rather than an element

@@ -117,7 +117,7 @@ eyeball, and it's deliberately checkable *in devtools* before any database is wi
       every `Box<dyn Error>` on the import/open path replaced, and `read_metadata` made
       infallible because it always was. Matchable-error `#[test]`; the existing suite is the
       spec for the rest.
-- [ ] **Step 6b — Persist it.** The reader saves `{chapter, selector}` for its book on every
+- [x] **Step 6b — Persist it.** The reader saves `{chapter, selector}` for its book on every
       position message. Eyeball + `sqlite3` inspection; storage is already tested at Step 3.
 - [ ] **Step 7 — Resolve a selector back to a page (JS).** `fragment-scroll.js` learns the
       `ook-sel:` hash prefix and `querySelector`. Asset `#[test]` + a devtools eyeball that
