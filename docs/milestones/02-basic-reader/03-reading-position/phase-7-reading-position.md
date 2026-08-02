@@ -119,14 +119,16 @@ eyeball, and it's deliberately checkable *in devtools* before any database is wi
       spec for the rest.
 - [x] **Step 6b — Persist it.** The reader saves `{chapter, selector}` for its book on every
       position message. Eyeball + `sqlite3` inspection; storage is already tested at Step 3.
-- [ ] **Step 7 — Resolve a selector back to a page (JS).** `fragment-scroll.js` learns the
+- [x] **Step 7 — Resolve a selector back to a page (JS).** `fragment-scroll.js` learns the
       `ook-sel:` hash prefix and `querySelector`. Asset `#[test]` + a devtools eyeball that
       sets the hash by hand and watches the page jump — the whole restore mechanism proved
       before the database touches it.
-- [ ] **Step 8 — Restore on open.** Seed chapter + pending target from the stored locator;
+- [x] **Step 8 — Restore on open.** Seed chapter + pending target from the stored locator;
       the iframe stays hidden until `ook-scroll` lands. Nav `#[test]`s for the pending-state
       transitions + the end-to-end eyeball: quit the app, relaunch, open the book, land on
-      the same page. **Ticks the milestone exit criterion.**
+      the same page. **Ticks the milestone exit criterion** — code landed in `e56d0b8`, but
+      the criterion stays unticked until the end-to-end eyeball is actually run; see the
+      status note in [the steps doc](phase-7-reading-position-steps.md#step-8--restore-on-open).
 - [ ] **Step 9 — Review & refactor** (mandatory phase-closer): the pending-state shape in
       `ReaderData` (three flags that are really one enum), the two halves of the
       page↔element conversion now living in two JS files, the `Library` API surface, and

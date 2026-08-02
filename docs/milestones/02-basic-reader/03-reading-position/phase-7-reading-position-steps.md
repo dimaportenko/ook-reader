@@ -1778,3 +1778,201 @@ element inside a `display: none` ancestor) reports page 0 rather than nothing, b
 elements with no `getClientRects()` — so the case needs a document that changed under a
 stored locator. It is the same re-import hazard as everything else here, and it fails the
 same best-effort way.
+
+---
+
+## Step 8 — restore on open
+
+> **Status:** code committed in `e56d0b8` (48 tests green — both new `nav` tests among them
+> — and clippy at **zero** errors for the first time this phase, `Library::position` having
+> been dead since Step 3).
+>
+> **The end-to-end eyeball is not yet confirmed.** What the automated gate proves is that
+> `restored_data` computes the right seed and that the `ook-sel:` prefix reaches the injected
+> assets. What it cannot prove is that quitting the app, relaunching, and opening the book
+> lands on the same page without a flash — that is the Milestone 2 exit criterion, and no
+> `#[test]` in this repo can reach a webview to check it. Until someone runs the three checks
+> under **Runnable check** above, treat the criterion as unticked.
+
+The payoff step. `Reader` reads the stored `Locator` once at mount and **seeds** `chapter`
+and `pending_fragment` from it, so the first render is already pointed at the right chapter
+with the right target attached. Ticks the Milestone 2 exit criterion: quit, relaunch, open
+the book, land where you stopped.
+
+**Seed, don't correct.** The tempting shape is a `use_effect` that fires after mount and
+sets `chapter`. That produces a visible wrong-chapter flash and a wasted fetch: render at
+chapter 0 → the loader effect fetches chapter 0 → the effect sets chapter 8 → the loader
+effect fetches chapter 8. `use_store`'s initializer runs **once, before the first render**,
+so seeding there means chapter 8 is the only chapter the loader ever sees. Restore stops
+being a correction applied to a wrong state and becomes the state the reader was born in.
+
+That is also what makes the no-flash behavior fall out for free. `pending_fragment` being
+`Some` is what drives `class: if pending_last() || pending_fragment().is_some()` on the
+iframe, so a seeded fragment means the iframe is `invisible` from the very first frame and
+stays hidden until `ook-scroll` lands and `on_scroll` clears it. Nothing new to build — the
+same latch that has hidden TOC-link jumps since Phase 5.
+
+### Runnable check
+
+**Pure `#[test]`s in `nav.rs`** — the decision "given a stored locator, what state does the
+reader start in?" is ordinary Rust with no Dioxus in it, provided you put it in a free
+function rather than inlining it into the hook. That is the whole reason to extract
+`restored_data`: a hook is not unit-testable, a function taking `(Option<Locator>, usize)`
+and returning `ReaderData` is.
+
+Two tests, bundled the way `page_nav_rolls_over_chapter_boundaries` bundles its cases:
+
+```rust
+#[test]
+fn a_stored_position_seeds_the_chapter_and_a_selector_fragment() {
+    let locator = Locator {
+        spine_index: 8,
+        selector: "body > div:nth-child(1) > p:nth-child(215)".to_string(),
+    };
+
+    let data = restored_data(Some(locator), 24);
+    assert_eq!(data.chapter, 8);
+    assert_eq!(
+        data.pending_fragment.as_deref(),
+        Some("ook-sel:body > div:nth-child(1) > p:nth-child(215)")
+    );
+    // The page is deliberately *not* restored. It is derived from the window
+    // size, so it is recomputed: `fragment-scroll.js` resolves the selector and
+    // reports the page back over `ook-scroll`.
+    assert_eq!(data.page, 0);
+
+    // No stored position — start at the top of the book.
+    let fresh = restored_data(None, 24);
+    assert_eq!(fresh.chapter, 0);
+    assert_eq!(fresh.pending_fragment, None);
+
+    // A spine index past the end falls back to the start rather than seeding an
+    // index that `docs[chapter()]` would panic on. Re-import keeps the row id
+    // and replaces the bytes, so a stored index can outlive the spine it named.
+    let stale = Locator {
+        spine_index: 24,
+        selector: "body > p:nth-child(3)".to_string(),
+    };
+    let data = restored_data(Some(stale), 24);
+    assert_eq!(data.chapter, 0);
+    assert_eq!(data.pending_fragment, None);
+}
+
+#[test]
+fn the_fragment_prefix_matches_the_one_the_asset_looks_for() {
+    // Rust builds this prefix, `fragment-scroll.js` tests for it, and no
+    // compiler checks a string that crosses a language boundary. Same guard as
+    // `the_loader_and_the_cleanup_agree_on_where_the_blob_url_lives`.
+    assert!(crate::web::assets::INJECTED_ASSETS.contains(SELECTOR_FRAGMENT_PREFIX));
+}
+```
+
+Red before the implementation: `restored_data` and `SELECTOR_FRAGMENT_PREFIX` don't exist,
+so it won't compile. **48 tests** when green (46 + 2).
+
+**Then the end-to-end eyeball, which is the actual milestone criterion.** Sherlock Holmes is
+the fixture to use — its stored row is `spine_index 8` with `p:nth-child(215)`, deep enough
+into a chapter that a successful restore is unmistakable. (Step 7's status note explains why
+Hamlet's row cannot demonstrate anything: it resolves to page 0, which is where you'd land
+anyway.)
+
+1. Open the book, turn to somewhere distinctive, **quit the app entirely**.
+2. Relaunch, open the same book. It should land on that chapter *and* that page, with **no
+   flash** of chapter 1 and no flash of page 1 of the right chapter.
+3. Open a book with no stored row — it opens at the top, as before.
+
+Finally `cargo clippy --all-targets -- -D warnings`: this step should take it to **zero
+errors**. `Library::position` has been dead since Step 3 and this is the step that calls it,
+so the lone `dead_code` error disappearing is itself a signal the wiring is real.
+
+### Minimal implementation
+
+**`nav.rs`** — the prefix constant, the pure seed function, and one new parameter on the hook:
+
+```rust
+pub(crate) const SELECTOR_FRAGMENT_PREFIX: &str = "ook-sel:";
+
+fn restored_data(start: Option<Locator>, chapter_count: usize) -> ReaderData {
+    match start {
+        Some(locator) if locator.spine_index < chapter_count => ReaderData {
+            chapter: locator.spine_index,
+            pending_fragment: Some(format!("{SELECTOR_FRAGMENT_PREFIX}{}", locator.selector)),
+            ..Default::default()
+        },
+        _ => ReaderData::default(),
+    }
+}
+
+pub(crate) fn use_reader_state(chapter_count: usize, start: Option<Locator>) -> ReaderState {
+    ReaderState {
+        data: use_store(move || restored_data(start, chapter_count)),
+        chapter_count,
+    }
+}
+```
+
+Add `library::Locator` to the `use crate::{...}` at the top.
+
+**`reader.rs`** — read the row once, hand it to the hook:
+
+```rust
+let start = use_hook(|| {
+    library.position(book.id).unwrap_or_else(|error| {
+        eprintln!("could not read reading position: {error}");
+        None
+    })
+});
+let state = nav::use_reader_state(docs.len(), start);
+```
+
+This goes after the `use_context::<Rc<Library>>()` line and before `use_bridge` — which
+takes `library` by value, so it has to stay last.
+
+### Why it works
+
+- **`use_store`'s initializer is `impl FnOnce() -> T` and runs exactly once**, on the first
+  render of this component. That is what makes seeding possible at all, and it is why the
+  `move` closure can capture an owned `Option<Locator>` rather than needing a `Clone` on
+  every render — `FnOnce` means the store takes the value and never asks for it again.
+- **`use_hook` is the "compute once at mount, get a copy each render" primitive.** Without
+  it, `library.position(book.id)` would hit SQLite on every single render of `Reader` — a
+  query per page turn, per chapter change, per resize. The `Clone + 'static` bound is on the
+  *return* type, not the closure, which is why borrowing `library` inside it is fine. You
+  have already met its sibling: `use_hook_with_cleanup` is what `use_revoke_blob_on_unmount`
+  is built from.
+- **The match guard is a panic guard, not politeness.** `docs_for_iframe[chapter()]` in the
+  loader effect is a direct index. Seed `chapter` with a stale `spine_index` and the reader
+  panics on open, which for the user means a book that can never be opened again — the worst
+  possible failure for a bookmark feature. `Some(locator) if locator.spine_index <
+  chapter_count` is the cheapest place to stop that, because it is the only place the
+  untrusted number enters reactive state.
+- **`unwrap_or_else` over `.ok().flatten()`.** Both yield `Option<Locator>`; only one tells
+  you the database is broken. It mirrors the save path's `eprintln!` in `use_bridge`, so both
+  halves of the round trip fail the same visible-but-non-fatal way. A failed *read* must not
+  block opening the book any more than a failed *write* may take down the reader.
+- **`..Default::default()` in the struct literal** fills `page`, `page_count`,
+  `pending_last`, and `anchor`, so adding a seventh field to `ReaderData` later cannot
+  silently forget to initialize it here — it keeps compiling and keeps meaning "start
+  neutral." Spelling all six out would be a maintenance trap.
+- **The restore rides the existing pipeline end to end**, which is why this step is small.
+  Seeded `pending_fragment` → the loader effect sets `frame.src = blob#ook-sel%3A…` →
+  `fragment-scroll.js` fires on `load` → `elementFor` takes the selector branch Step 7 added
+  → `Math.round(offsetLeft / innerWidth)` → `ook-scroll` → `on_scroll` sets `page` and
+  clears `pending_fragment` → the iframe un-hides. Every arrow already existed; this step
+  supplies the first one.
+- **Failure is already handled, three levels deep.** A selector that matches nothing, or one
+  that will not parse, returns `null` from `elementFor`, reports `currentPage()`, and still
+  posts `ook-scroll` — so `pending_fragment` still clears and the iframe still un-hides, at
+  the top of the chapter. That is the **Known constraints** promise about best-effort restore
+  being kept by code that was already written, not by a new branch here.
+
+### Scope note
+
+Not in this step: **saving the position when the reader closes.** Right now a position is
+only written on an `ook-position` message, which page turns produce — so a book you open and
+close without turning a page keeps its old row. That is correct behavior, not a gap.
+
+Also not here: the `pending_fragment` / `pending_last` / `anchor` trio is now three flags
+encoding one "what is the reader waiting for?" question, and seeding makes that shape more
+obviously wrong, not less. **Step 9** collapses them into an enum, alongside measuring
+`firstElementOnPage` and reuniting the two halves of the page↔element conversion.
