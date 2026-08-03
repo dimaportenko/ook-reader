@@ -53,8 +53,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
     });
     let state = nav::use_reader_state(docs.len(), start);
     let chapter = state.data.chapter();
-    let pending_fragment = state.data.pending_fragment();
-    let pending_last = state.data.pending_last();
+    let pending = state.data.pending();
     let (page, page_count) = (state.data.page(), state.data.page_count());
     let docs_for_iframe = docs.clone();
 
@@ -80,9 +79,8 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
 
     use_effect(move || {
         let url = epub::chapter_url(&docs_for_iframe[chapter()]);
-        let fragment = pending_fragment();
         let loader = document::eval(CHAPTER_LOADER_JS);
-        _ = loader.send((url, fragment));
+        _ = loader.send((url, pending().fragment()));
     });
 
     use_revoke_blob_on_unmount();
@@ -100,7 +98,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                 id: "reader-frame",
                 "sandbox": "allow-same-origin allow-scripts",
                 style: "flex: 1; width: 100%; border: none;",
-                class: if pending_last() || pending_fragment().is_some() { "invisible" },
+                class: if pending().is_settling() { "invisible" },
             }
 
             div {
@@ -190,11 +188,13 @@ fn use_bridge(state: ReaderState, docs: Rc<Vec<String>>, library: Rc<Library>, b
                     Some(BridgeMsg::Scroll(page)) => state.on_scroll(page),
                     Some(BridgeMsg::Pages(p_count)) => state.on_pages(p_count),
                     Some(BridgeMsg::Position(selector)) => {
+                        if state.data.pending().peek().is_settling() {
+                            continue;
+                        }
                         let locator = library::Locator {
                             spine_index: *state.data.chapter().peek(),
-                            selector: selector.clone(),
+                            selector,
                         };
-                        state.on_position(selector);
                         if let Err(error) =
                             library.save_position(book_id, &locator, library::now_secs())
                         {

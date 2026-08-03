@@ -15,14 +15,33 @@ enum Nav {
     Chapter { index: usize, seek: Seek },
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) enum Pending {
+    #[default]
+    Nothing,
+    Fragment(String),
+    LastPage,
+}
+
+impl Pending {
+    pub(crate) fn fragment(self) -> Option<String> {
+        match self {
+            Pending::Fragment(fragment) => Some(fragment),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn is_settling(&self) -> bool {
+        *self != Pending::Nothing
+    }
+}
+
 #[derive(Store, Default)]
 pub(crate) struct ReaderData {
     pub(crate) chapter: usize,
     pub(crate) page: usize,
     pub(crate) page_count: usize,
-    pub(crate) pending_fragment: Option<String>,
-    pub(crate) pending_last: bool,
-    pub(crate) anchor: Option<String>,
+    pub(crate) pending: Pending,
 }
 
 #[derive(Clone, Copy)]
@@ -37,7 +56,7 @@ fn restored_data(start: Option<Locator>, chapter_count: usize) -> ReaderData {
     match start {
         Some(locator) if locator.spine_index < chapter_count => ReaderData {
             chapter: locator.spine_index,
-            pending_fragment: Some(format!("{SELECTOR_FRAGMENT_PREFIX}{}", locator.selector)),
+            pending: Pending::Fragment(format!("{SELECTOR_FRAGMENT_PREFIX}{}", locator.selector)),
             ..Default::default()
         },
         _ => ReaderData::default(),
@@ -83,7 +102,7 @@ impl ReaderState {
                 seek: Seek::Last,
             } => {
                 chapter.set(index);
-                self.data.pending_last().set(true);
+                self.data.pending().set(Pending::LastPage);
             }
         }
     }
@@ -101,25 +120,27 @@ impl ReaderState {
     pub(crate) fn follow_link(self, target: epub::LinkTarget) {
         self.data.chapter().set(target.spine_index);
         self.data.page().set(0);
-        self.data.pending_fragment().set(target.fragment);
+        self.data.pending().set(match target.fragment {
+            Some(fragment) => Pending::Fragment(fragment),
+            None => Pending::Nothing,
+        });
     }
 
     pub(crate) fn on_scroll(self, p: usize) {
+        let mut pending = self.data.pending();
         self.data.page().set(p);
-        self.data.pending_fragment().set(None);
-    }
-
-    pub(crate) fn on_pages(self, pages: usize) {
-        let (mut page, mut pending_last) = (self.data.page(), self.data.pending_last());
-        self.data.page_count().set(pages);
-        if pending_last() {
-            page.set(pages.saturating_sub(1));
-            pending_last.set(false);
+        if matches!(pending(), Pending::Fragment(_)) {
+            pending.set(Pending::Nothing);
         }
     }
 
-    pub(crate) fn on_position(self, selector: String) {
-        self.data.anchor().set(Some(selector));
+    pub(crate) fn on_pages(self, pages: usize) {
+        let (mut page, mut pending) = (self.data.page(), self.data.pending());
+        self.data.page_count().set(pages);
+        if matches!(pending(), Pending::LastPage) {
+            page.set(pages.saturating_sub(1));
+            pending.set(Pending::Nothing);
+        }
     }
 }
 
@@ -252,8 +273,8 @@ mod test {
         let data = restored_data(Some(locator), 24);
         assert_eq!(data.chapter, 8);
         assert_eq!(
-            data.pending_fragment.as_deref(),
-            Some("ook-sel:body > div:nth-child(1) > p:nth-child(215)")
+            data.pending,
+            Pending::Fragment("ook-sel:body > div:nth-child(1) > p:nth-child(215)".into())
         );
         // The page is deliberately *not* restored. It is derived from the window
         // size, so it is recomputed: `fragment-scroll.js` resolves the selector
@@ -263,7 +284,7 @@ mod test {
         // No stored position — start at the top of the book.
         let fresh = restored_data(None, 24);
         assert_eq!(fresh.chapter, 0);
-        assert_eq!(fresh.pending_fragment, None);
+        assert_eq!(fresh.pending, Pending::Nothing);
 
         // A spine index past the end falls back to the start rather than seeding
         // an index that `docs[chapter()]` would panic on. Re-import keeps the row
@@ -275,7 +296,7 @@ mod test {
         };
         let data = restored_data(Some(stale), 24);
         assert_eq!(data.chapter, 0);
-        assert_eq!(data.pending_fragment, None);
+        assert_eq!(data.pending, Pending::Nothing);
     }
 
     #[test]
