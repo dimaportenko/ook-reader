@@ -1,7 +1,3 @@
-function pageOf(el) {
-  return Math.round(el.offsetLeft / window.innerWidth);
-}
-
 function selectorFor(el) {
   const parts = [];
   while (el && el !== document.body) {
@@ -42,11 +38,6 @@ function reportPosition(page) {
   }
 
   window.parent.postMessage({ kind: "ook-position", selector }, "*");
-}
-
-function currentPage() {
-  const style = getComputedStyle(document.documentElement);
-  return Number(style.getPropertyValue("--ook-page")) || 0;
 }
 
 window.addEventListener("load", () => reportPosition(currentPage()));

@@ -460,7 +460,7 @@ mod test {
         assert!(INJECTED_ASSETS.contains("location.hash"));
         assert!(INJECTED_ASSETS.contains("ook-scroll"));
         // A fragment naming an id the document does not have must still post a
-        // page, because that message is what clears `pending_fragment`. Staying
+        // page, because that message is what clears `Pending::Fragment`. Staying
         // silent leaves it to be re-applied to the next chapter.
         assert!(INJECTED_ASSETS.contains("currentPage"));
     }
