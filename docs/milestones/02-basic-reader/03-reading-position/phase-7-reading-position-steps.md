@@ -1980,9 +1980,11 @@ obviously wrong, not less. **Step 9** collapses them into an enum, alongside mea
 
 ## Step 9 — review & refactor
 
-> **Status:** in progress — **9a done** (`aa58c21`), 9b and 9c outstanding. Baseline before
-> any edit: **48 tests green**, `cargo clippy --all-targets -- -D warnings` **clean**. That
-> pair is the safety net for everything below — it must read identically afterwards.
+> **Status:** in progress — **9a done** (`aa58c21`), **9b-i/ii done** (`920b20e`), 9b-iii
+> (the measurement) and 9c outstanding. Baseline before any edit: **48 tests green**,
+> `cargo clippy --all-targets -- -D warnings` **clean**; now **49 green** after 9b's one new
+> test. That pair is the safety net for everything below — it must read identically
+> afterwards.
 
 The mandatory phase-closer. The last eight steps got restore *working*; this one makes it
 good. Nothing here changes what the reader does, with **one deliberate exception** (9a-iii),
@@ -2195,6 +2197,17 @@ the `Library` surface (9c).
 ---
 
 ### 9b — one page formula, in one file, measured
+
+> **Status:** i and ii done — committed in `920b20e` (**49 tests green**, 48 → 49 as
+> predicted; clippy `-D warnings` clean). **iii is outstanding**: the `firstElementOnPage`
+> measurement has not been run, so the phase doc's "unmeasured" caveat stays until it is.
+>
+> Two leftovers cleaned up in the same commit. The `--ook-page` comment ("`page-listener.js`
+> is the only thing that writes it") was attached to `currentPage` in `fragment-scroll.js`
+> and would have been deleted along with the function it explains — it moved to
+> `page-geometry.js` with it, because that fact is exactly what makes 9a-iii a bug. And two
+> comments (`epub.rs`, `fragment-scroll.js`) still named `pending_fragment` after 9a
+> renamed it to `Pending::Fragment`.
 
 #### Runnable check
 
