@@ -126,15 +126,26 @@ eyeball, and it's deliberately checkable *in devtools* before any database is wi
 - [x] **Step 8 — Restore on open.** Seed chapter + pending target from the stored locator;
       the iframe stays hidden until `ook-scroll` lands. Nav `#[test]`s for the pending-state
       transitions + the end-to-end eyeball: quit the app, relaunch, open the book, land on
-      the same page. **Ticks the milestone exit criterion** — code landed in `e56d0b8`, but
-      the criterion stays unticked until the end-to-end eyeball is actually run; see the
-      status note in [the steps doc](phase-7-reading-position-steps.md#step-8--restore-on-open).
-- [ ] **Step 9 — Review & refactor** (mandatory phase-closer): the pending-state shape in
-      `ReaderData` (three flags that are really one enum), the two halves of the
-      page↔element conversion now living in two JS files, the `Library` API surface, and
-      the error handling on the save path. **Also: measure `firstElementOnPage`** on a long
-      chapter — the scan cost is documented as a decision above and as a to-test item in
-      [the steps doc](phase-7-reading-position-steps.md#step-4--report-the-first-element-on-the-current-page-js).
+      the same page. **Ticks the milestone exit criterion** — code landed in `e56d0b8`, and
+      the eyeball was run alongside 9a's four transitions in `aa58c21`.
+- [ ] **Step 9 — Review & refactor** (mandatory phase-closer), split into three sittings —
+      detail in [the steps doc](phase-7-reading-position-steps.md#step-9--review--refactor):
+  - [x] **9a — one `Pending` enum.** `pending_fragment` + `pending_last` collapsed into one
+        field (the pair was reachable in a state neither wanted), the write-only `anchor`
+        field went, and — the one deliberate behavior change — the reader stopped **saving
+        over the position it is restoring from**. Committed in `aa58c21`; the suite held at
+        48 and all four `Pending` transitions were eyeballed, the fourth of which was Step
+        8's outstanding end-to-end check.
+  - [ ] **9b — one page formula, measured.** The page↔element conversion is extracted to a
+        shared `page-geometry.js`; today two injected files declare the same top-level
+        `currentPage` into the same document. New red-today `#[test]` in `web/assets.rs`.
+        **Also: measure `firstElementOnPage`** on a long chapter — the scan cost is
+        documented as a decision above and as a to-test item in
+        [the steps doc](phase-7-reading-position-steps.md#step-4--report-the-first-element-on-the-current-page-js).
+  - [ ] **9c — one error type at the `Library` boundary.** Six methods still return
+        `rusqlite::Result`, so the UI names rusqlite; `Error` already has the `#[from]`.
+        Plus the `get_` accessor rename and one policy for swallowed best-effort errors
+        (there are four spellings today).
 
 ## Known constraints
 

@@ -33,7 +33,7 @@ The rework itself is a three-document chain filed under the feature it reworks,
 
 - [x] Import an `.epub` and see it in a library list
 - [x] Open it and turn pages
-- [ ] Reopen the app → it resumes at the same spot
+- [x] Reopen the app → it resumes at the same spot
 
 ## Stack (from research)
 

@@ -1783,16 +1783,15 @@ same best-effort way.
 
 ## Step 8 — restore on open
 
-> **Status:** code committed in `e56d0b8` (48 tests green — both new `nav` tests among them
-> — and clippy at **zero** errors for the first time this phase, `Library::position` having
-> been dead since Step 3).
+> **Status:** done — code committed in `e56d0b8` (48 tests green — both new `nav` tests among
+> them — and clippy at **zero** errors for the first time this phase, `Library::position`
+> having been dead since Step 3).
 >
-> **The end-to-end eyeball is not yet confirmed.** What the automated gate proves is that
-> `restored_data` computes the right seed and that the `ook-sel:` prefix reaches the injected
-> assets. What it cannot prove is that quitting the app, relaunching, and opening the book
-> lands on the same page without a flash — that is the Milestone 2 exit criterion, and no
-> `#[test]` in this repo can reach a webview to check it. Until someone runs the three checks
-> under **Runnable check** above, treat the criterion as unticked.
+> **The end-to-end eyeball was run under 9a** and behaved: quit, relaunch, open the book,
+> land on the same chapter and page. The automated gate only ever proved that `restored_data`
+> computes the right seed and that the `ook-sel:` prefix reaches the injected assets; no
+> `#[test]` in this repo can reach a webview, so the criterion waited on a human. **Milestone
+> 2's last exit criterion is ticked** as of `aa58c21`.
 
 The payoff step. `Reader` reads the stored `Locator` once at mount and **seeds** `chapter`
 and `pending_fragment` from it, so the first render is already pointed at the right chapter
@@ -1976,3 +1975,358 @@ Also not here: the `pending_fragment` / `pending_last` / `anchor` trio is now th
 encoding one "what is the reader waiting for?" question, and seeding makes that shape more
 obviously wrong, not less. **Step 9** collapses them into an enum, alongside measuring
 `firstElementOnPage` and reuniting the two halves of the page↔element conversion.
+
+---
+
+## Step 9 — review & refactor
+
+> **Status:** in progress — **9a done** (`aa58c21`), 9b and 9c outstanding. Baseline before
+> any edit: **48 tests green**, `cargo clippy --all-targets -- -D warnings` **clean**. That
+> pair is the safety net for everything below — it must read identically afterwards.
+
+The mandatory phase-closer. The last eight steps got restore *working*; this one makes it
+good. Nothing here changes what the reader does, with **one deliberate exception** (9a-iii),
+which is a correctness fix the review turned up and which is called out as such rather than
+smuggled in under "refactor."
+
+The punch-list is grouped into three sittings, ordered by dependency: **9a** the Rust state
+shape, **9b** the JS geometry, **9c** the `Library` surface. 9a comes first because the
+correctness fix in 9a-iii is a two-line change *after* the enum exists and an awkward one
+before it.
+
+### The review, in one paragraph
+
+Three of the four items the phase doc predicted are real and worth the edit. `ReaderData`
+carries three fields to answer one question ("what is the reader waiting for?"), and one of
+them is written and never read. The page↔element formula lives in two JS files, and those
+two files also declare the *same top-level function name* into the *same* document. The
+`Library` surface returns two different error types depending on which method you call. The
+fourth predicted item — error handling on the save path — turned out to be mostly fine
+after Step 6a; what is left is that the four call sites swallow errors four different ways.
+The genuinely new finding is 9a-iii: **the reader saves a page-0 position on every chapter
+load, including the load that is restoring you.**
+
+---
+
+### 9a — one `Pending`, and stop saving over the restore
+
+> **Status:** done — committed in `aa58c21` (**48 tests green**, unchanged as planned; clippy
+> `-D warnings` clean). All four `dx serve` transitions confirmed, so this also closes Step
+> 8's outstanding end-to-end eyeball and **ticks Milestone 2's last exit criterion**.
+>
+> Two things the punch-list below got wrong, corrected in place above so the snippets
+> compile: `is_settling` has to take `&self` (`clippy::wrong_self_convention` only allows a
+> by-value `is_*` on a `Copy` type, and `Pending` holds a `String`), which in turn makes the
+> `.clone()` in the bridge guard unnecessary — `.peek()` derefs straight through.
+
+#### Runnable check
+
+**The suite is the net, not the target.** `cargo test` must come back at **48 green** and
+clippy clean, before and after. One existing test names the fields being removed and has to
+be re-expressed against the new shape — that is a rewrite of the assertion, not of the
+behavior:
+
+```rust
+// in nav::test::a_stored_position_seeds_the_chapter_and_a_selector_fragment
+assert_eq!(
+    data.pending,
+    Pending::Fragment("ook-sel:body > div:nth-child(1) > p:nth-child(215)".to_string())
+);
+// … and the two "no stored position" cases:
+assert_eq!(fresh.pending, Pending::Nothing);
+```
+
+Then the `dx serve` eyeball, four transitions — each one is a different `Pending` state, so
+this is the list precisely because the enum is what it is:
+
+1. **Page next past the end of a chapter** → next chapter, page 1 of N. (`Pending::Nothing`
+   throughout.)
+2. **Page prev off the front of a chapter** → previous chapter, *last* page, no flash of
+   page 1. (`Pending::LastPage`.)
+3. **A TOC link** → jumps to the target, iframe hidden until it lands. (`Pending::Fragment`.)
+4. **Quit, relaunch, open the book** → same chapter, same page. (`Pending::Fragment`, seeded.)
+
+Number 4 is also the outstanding Step 8 eyeball — the Milestone 2 exit criterion. Running it
+here closes both.
+
+#### The punch-list
+
+**i. Collapse `pending_fragment` + `pending_last` into one enum.**
+
+```rust
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) enum Pending {
+    #[default]
+    Nothing,
+    Fragment(String),
+    LastPage,
+}
+
+impl Pending {
+    pub(crate) fn fragment(self) -> Option<String> {
+        match self {
+            Pending::Fragment(fragment) => Some(fragment),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn is_settling(&self) -> bool {
+        *self != Pending::Nothing
+    }
+}
+```
+
+The two methods take `self` differently on purpose. `fragment` takes it by value to move the
+`String` out; `is_settling` takes `&self` because `clippy::wrong_self_convention` only allows a
+by-value `is_*` on a `Copy` type, and `Pending` holds a `String`.
+
+`ReaderData` loses two fields and gains one:
+
+```rust
+#[derive(Store, Default)]
+pub(crate) struct ReaderData {
+    pub(crate) chapter: usize,
+    pub(crate) page: usize,
+    pub(crate) page_count: usize,
+    pub(crate) pending: Pending,
+}
+```
+
+The call sites, each a small translation:
+
+| where | before | after |
+|---|---|---|
+| `restored_data` | `pending_fragment: Some(format!(…))` | `pending: Pending::Fragment(format!(…))` |
+| `apply`, `Seek::Last` | `pending_last().set(true)` | `pending().set(Pending::LastPage)` |
+| `follow_link` | `pending_fragment().set(target.fragment)` | `match target.fragment { Some(f) => Pending::Fragment(f), None => Pending::Nothing }` |
+| `on_scroll` | `pending_fragment().set(None)` | clear **only** if `matches!(pending(), Pending::Fragment(_))` |
+| `on_pages` | `if pending_last()` | `if matches!(pending(), Pending::LastPage)` |
+| `Reader`, loader effect | `pending_fragment()` | `pending().fragment()` |
+| `Reader`, iframe class | `pending_last() \|\| pending_fragment().is_some()` | `pending().is_settling()` |
+
+The guards in `on_scroll` and `on_pages` are not new caution — they are the old behavior
+written down. `on_scroll` never touched `pending_last` and `on_pages` never touched
+`pending_fragment`; with one field the *absence* of a guard would be the change.
+
+**ii. Delete `anchor`.** `on_position` writes it, nothing reads it. It was Step 5's landing
+spot for the selector, and Step 6b then persisted straight from the bridge, so the field has
+been vestigial for two steps. Deleting it removes the field, the `on_position` method, and
+one line from the bridge's `Position` arm.
+
+**iii. Don't save a position while a restore is settling.** *(A behavior change — the one
+exception.)* In `use_bridge`:
+
+```rust
+Some(BridgeMsg::Position(selector)) => {
+    if state.data.pending().peek().is_settling() {
+        continue;
+    }
+    …
+}
+```
+
+#### Why it works
+
+- **The enum makes an invalid state unrepresentable, and one of those invalid states was
+  reachable.** `pending_fragment: Some(_)` together with `pending_last: true` is a state the
+  struct permits and the code never wanted. It is reachable: seed a fragment on open, then
+  press *prev* before `ook-scroll` arrives — `apply` sets `pending_last` and leaves the
+  fragment alone. The loader effect then re-runs with the *old chapter's* fragment against
+  the *new* chapter, which is exactly the hazard the comment in `fragment-scroll.js` warns
+  about ("a fragment left pending gets re-applied to whatever chapter comes next"). With one
+  field, a write to `pending` replaces whatever was there. The bug is not fixed by a check;
+  it stops being expressible.
+
+- **Three booleans-worth of state, one question.** `pending_fragment`, `pending_last` and
+  `anchor` are three answers to "what is the reader waiting for?", and the iframe's
+  visibility already had to reconstruct the real answer by hand:
+  `pending_last() || pending_fragment().is_some()`. That expression *is* the enum, spelled
+  out at the one call site that needed it. Naming it `is_settling()` puts it where every
+  future call site can reach it, and matches the vocabulary the phase doc already uses.
+
+- **`Pending::fragment(self)` takes `self` by value on purpose.** Calling a store —
+  `pending()` — clones the value out (`Readable::cloned`), so you already own a `Pending` at
+  every call site. Taking `&self` would force `Option<&str>` and then a `.to_string()` right
+  back, because `document::eval(...).send()` needs an owned `Option<String>`. Moving the
+  `String` out of the enum hands the allocation straight to the loader with no second copy.
+
+- **The subscription granularity changes, and here it does not matter.** A store creates one
+  signal per *field*; two fields meant a write to `pending_last` did not wake readers of
+  `pending_fragment`. Now they share one signal. `Reader` reads both in the same component
+  body, so every write already re-rendered it — nothing gets woken that was not woken
+  before. Worth knowing as a general rule though: merging store fields coarsens
+  subscriptions, and the time to *not* do it is when two independent subtrees read the two
+  fields separately.
+
+- **9a-iii is a real bug, and the ordering of two `load` listeners is why.** Assets are
+  injected in order (`assets.rs`), `fragment-scroll.js` before `page-position.js`, and DOM
+  listeners for the same event fire in registration order. So on every chapter load:
+  `reportFragmentPage` posts `ook-scroll` with the restored page — then, immediately,
+  `page-position.js`'s load handler runs `reportPosition(currentPage())`, and `currentPage()`
+  reads `--ook-page`, which is still **0**. It cannot be anything else: `--ook-page` is only
+  written by `page-listener.js`, which is only fed by the Rust `use_effect`, which cannot
+  have run yet — the `ook-scroll` message posted one line earlier has not made it across the
+  bridge. The result is a `position:` message for the first element of page 0, written to
+  SQLite, overwriting the row that is *currently being restored from*.
+
+- **It self-heals, right up until it doesn't.** Normally `on_scroll` lands a moment later,
+  the effect posts `ook-set-page`, position is re-reported and the correct row is written
+  back. Two paths where it does not: the app is killed inside that window, or the stored
+  selector fails to resolve — in which case `reportFragmentPage` falls back to
+  `currentPage()`, which is 0, and the page-0 write becomes the permanent record. That second
+  path is the one that matters, because the phase's **Known constraints** promise restore is
+  best-effort after a re-import. Best-effort should mean *"we could not use your bookmark
+  this time"*, not *"we deleted your bookmark."* Skipping the save while `is_settling()` makes
+  the reader read-only about position until it has actually arrived somewhere the user chose.
+
+- **`.peek()`, not `()`, inside the bridge.** `use_bridge` runs in a `use_future`, outside
+  any render. Reading a store the subscribing way there is at best pointless and at worst a
+  subscription owned by a future that outlives the render that created it. The `Link` arm
+  already reads `state.data.chapter().peek()` for exactly this reason — follow it.
+
+#### Scope note
+
+Not here: the `Reader` component is long enough that the two `use_effect`s and the label
+formatting could each be their own function. Left alone deliberately — it is legible, and
+this step already changes enough of `nav.rs` that stacking a component split on top would
+make the eyeball impossible to attribute. Also not here: `firstElementOnPage`'s cost (9b) and
+the `Library` surface (9c).
+
+---
+
+### 9b — one page formula, in one file, measured
+
+#### Runnable check
+
+**A new test that is red today**, in a fresh `#[cfg(test)] mod test` at the bottom of
+`src/web/assets.rs` — which is where an assertion about *what gets injected* belongs, rather
+than borrowing `nav.rs`'s test module as the prefix check currently does:
+
+```rust
+#[test]
+fn the_page_formula_is_defined_once_across_the_injected_assets() {
+    assert_eq!(INJECTED_ASSETS.matches("function currentPage").count(), 1);
+    assert_eq!(
+        INJECTED_ASSETS
+            .matches("el.offsetLeft / window.innerWidth")
+            .count(),
+        1
+    );
+}
+```
+
+Both are **2** today. Test count goes 48 → 49.
+
+#### The punch-list
+
+**i. Extract `src/web/assets/page-geometry.js`** and inject it first:
+
+```js
+function pageOf(el) {
+  return Math.round(el.offsetLeft / window.innerWidth);
+}
+
+function currentPage() {
+  const style = getComputedStyle(document.documentElement);
+  return Number(style.getPropertyValue("--ook-page")) || 0;
+}
+```
+
+Then delete `pageOf` and `currentPage` from `page-position.js`, delete `currentPage` from
+`fragment-scroll.js`, and replace that file's inline
+`Math.round(el.offsetLeft / window.innerWidth)` with `pageOf(el)`.
+
+**ii. Leave `page-count.js` alone.** Its `Math.ceil(document.body.scrollWidth /
+window.innerWidth)` looks like the same formula and is not: it is a **count** over the whole
+body, the other is an **index** for one element. `ceil` vs `round` is the tell — with three
+pages you want `3`, and with an element two-thirds of the way across page 2 you want `2`.
+Merging them would be the refactor that introduces the bug.
+
+**iii. Measure `firstElementOnPage`** — the phase doc's outstanding to-test item. In the
+iframe console, on the longest chapter of a long book:
+
+```js
+const n = document.body.getElementsByTagName("*").length;
+const t = performance.now();
+firstElementOnPage(currentPage());
+console.log(n, "elements", performance.now() - t, "ms");
+```
+
+Record both numbers here. The decision rule, fixed in advance so the measurement is not read
+after the fact to say whatever you want: **under ~2 ms, close the item and delete the
+"unmeasured" caveat from the phase doc.** Over ~10 ms, note the candidates without building
+them — `offsetLeft` is monotonic in document order for a column layout, so a binary search
+over the element list is the obvious first move, and caching per chapter the second. It runs
+once per page turn on a path that already does a `postMessage` round trip, so the bar it has
+to clear is low.
+
+#### Why it works
+
+- **Two files, one global scope, one name.** Injected assets are separate `<script>` tags in
+  the same document, so their top-level declarations all land on `window`. `function
+  currentPage()` twice is legal — function declarations are `var`-scoped and redeclaration
+  silently keeps the last one. That is the whole problem: it is *silently* fine today and
+  loudly broken the moment anyone writes the modern form. `const currentPage = () => …` in
+  both files is `SyntaxError: Identifier 'currentPage' has already been declared`, which
+  aborts the entire second script — pagination or restore just stops, in a webview, with no
+  console open. One definition removes the trap instead of documenting it.
+- **Injection order barely matters, and knowing why is the point.** Hoisting is per-script,
+  so `page-geometry.js` must be parsed before anything *executes* a call — but both consumers
+  only call these inside `load` / `message` / `hashchange` handlers, which fire after every
+  script has parsed. Putting it first is for the reader, not the engine.
+- **The duplicated formula was already flagged as a contract.** Step 7's "why" noted that
+  `page-position.js` picks its element with `Math.round(el.offsetLeft / window.innerWidth)`
+  and `fragment-scroll.js` reads the page back with the identical expression, and that the
+  round trip only closes because they agree. One function turns an agreement into an
+  identity, and the new test turns "they agree" into something a machine checks.
+
+---
+
+### 9c — one error type at the `Library` boundary
+
+#### Runnable check
+
+Behavior-preserving: **48 (or 49 after 9b) green, clippy clean**, plus an eyeball of import,
+open, and remove, because those are the three paths whose signatures change.
+
+#### The punch-list
+
+**i. Every `Library` method returns `Result<T, library::Error>`.** Today `add_from_path`
+returns `Result<_, Error>` and `open` / `list` / `remove` / `touch_opened` / `save_position`
+/ `position` return `rusqlite::Result<_>`. `Error` already has `#[from] rusqlite::Error`, so
+each conversion is the `?` that is already there. The payoff: no caller outside `library.rs`
+names `rusqlite`, and the day one of these grows a non-SQLite failure mode, the signature
+does not churn.
+
+**ii. `Book::get_book_cover_name` → `Book::cover_name`.** The Rust API guidelines reserve a
+`get_` prefix for the checked/unchecked pairs (`get` / `get_unchecked`); a plain accessor is
+named for the thing it returns. One call site.
+
+**iii. Move `open_default` up next to `open` and `init`.** It is a constructor sitting between
+`touch_opened` and `save_position`. Constructors, then queries.
+
+**iv. Pick one way to swallow a best-effort error.** There are currently four:
+`let _ = library.touch_opened(…)`, `if library.remove(id).is_ok()`,
+`if let Ok(list) = library.list()`, and two `eprintln!`s in `reader.rs`. Split them by who
+needs to know: **the user** (a failed `remove` or `list` is a visible surprise — route it to
+the `open_status` signal that already exists) versus **the log** (`touch_opened`,
+`save_position` — a failed bookmark write must never take down the reader, and there is
+nothing useful to show). One small helper for the second group, so the decision is made once.
+
+#### Why it works
+
+- **A module-level error type is a boundary, and a boundary that leaks is not one.** The UI
+  layer currently has to know that the library is SQLite-backed in order to name the error it
+  might get back. `thiserror`'s `#[from]` already did the hard part in Step 6a; this is
+  collecting the benefit.
+- **Different swallow syntax for the same intent reads as different intent.** `let _ =` says
+  "cannot fail"; `.is_ok()` says "the failure changes control flow"; `if let Ok` says "no
+  data, no update." Three spellings across four sites means a reader has to check each one to
+  learn there was only ever one policy. Naming the policy is the change.
+
+#### Scope note
+
+R6 from the [July review backlog](../review-2026-07-steps.md) — case-insensitive content
+types and the "Page 1 of 0" label — is *not* folded in here. It is real, it is small, and it
+is a **behavior** fix, which is exactly what a refactor step must not contain. It stays in
+the backlog and rides into the next phase.
