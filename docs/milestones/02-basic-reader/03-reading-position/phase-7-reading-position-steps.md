@@ -1981,10 +1981,11 @@ obviously wrong, not less. **Step 9** collapses them into an enum, alongside mea
 ## Step 9 — review & refactor
 
 > **Status:** in progress — **9a done** (`aa58c21`), **9b-i/ii done** (`920b20e`), **9c-i
-> done** (`3545af5`); 9b-iii (the measurement) and 9c-ii/iii/iv outstanding. Baseline before
-> any edit: **48 tests green**, `cargo clippy --all-targets -- -D warnings` **clean**; now
-> **49 green** after 9b's one new test. That pair is the safety net for everything below —
-> it must read identically afterwards.
+> done** (`3545af5`), **9c-ii/iii done** (`1f64ff7`); 9b-iii (the measurement) and 9c-iv
+> outstanding. Baseline before any edit: **48 tests green**,
+> `cargo clippy --all-targets -- -D warnings` **clean**; now **49 green** after 9b's one new
+> test. That pair is the safety net for everything below — it must read identically
+> afterwards.
 
 The mandatory phase-closer. The last eight steps got restore *working*; this one makes it
 good. Nothing here changes what the reader does, with **one deliberate exception** (9a-iii),
@@ -2297,9 +2298,11 @@ to clear is low.
 
 ### 9c — one error type at the `Library` boundary
 
-> **Status:** **i done** — committed in `3545af5` (**49 tests green**, unchanged as planned;
-> clippy `-D warnings` clean). `rusqlite` now appears nowhere outside `library.rs`, which is
-> the check that says the boundary actually closed. **ii, iii and iv are outstanding.**
+> **Status:** **i done** — committed in `3545af5`; **ii and iii done** — committed in
+> `1f64ff7` (both at **49 tests green**, unchanged as planned; clippy `-D warnings` clean).
+> `rusqlite` now appears nowhere outside `library.rs`, which is the check that says the
+> boundary actually closed, and iii's move is byte-identical — diffed at zero context, every
+> line pairs except the two halves of ii's rename. **iv is outstanding.**
 >
 > One correction to the punch-list below, found while doing it: **`read_book` does not
 > convert.** It is passed to `query_map`, whose bound is
