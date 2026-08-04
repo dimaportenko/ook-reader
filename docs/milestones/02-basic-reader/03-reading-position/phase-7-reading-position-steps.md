@@ -1980,11 +1980,11 @@ obviously wrong, not less. **Step 9** collapses them into an enum, alongside mea
 
 ## Step 9 — review & refactor
 
-> **Status:** in progress — **9a done** (`aa58c21`), **9b-i/ii done** (`920b20e`), 9b-iii
-> (the measurement) and 9c outstanding. Baseline before any edit: **48 tests green**,
-> `cargo clippy --all-targets -- -D warnings` **clean**; now **49 green** after 9b's one new
-> test. That pair is the safety net for everything below — it must read identically
-> afterwards.
+> **Status:** in progress — **9a done** (`aa58c21`), **9b-i/ii done** (`920b20e`), **9c-i
+> done** (`3545af5`); 9b-iii (the measurement) and 9c-ii/iii/iv outstanding. Baseline before
+> any edit: **48 tests green**, `cargo clippy --all-targets -- -D warnings` **clean**; now
+> **49 green** after 9b's one new test. That pair is the safety net for everything below —
+> it must read identically afterwards.
 
 The mandatory phase-closer. The last eight steps got restore *working*; this one makes it
 good. Nothing here changes what the reader does, with **one deliberate exception** (9a-iii),
@@ -2296,6 +2296,24 @@ to clear is low.
 ---
 
 ### 9c — one error type at the `Library` boundary
+
+> **Status:** **i done** — committed in `3545af5` (**49 tests green**, unchanged as planned;
+> clippy `-D warnings` clean). `rusqlite` now appears nowhere outside `library.rs`, which is
+> the check that says the boundary actually closed. **ii, iii and iv are outstanding.**
+>
+> One correction to the punch-list below, found while doing it: **`read_book` does not
+> convert.** It is passed to `query_map`, whose bound is
+> `F: FnMut(&Row<'_>) -> rusqlite::Result<T>`, so its signature belongs to rusqlite, not to
+> us. The line item i actually draws is *the `pub(crate)` surface speaks `library::Error`,
+> internal rusqlite callbacks keep rusqlite's types* — with `?` on the seam between them.
+>
+> Two methods needed more than a signature edit. `list` ended in `rows.collect()` and
+> `position` in `.optional()`, both forwarding a rusqlite-typed `Result` as a **tail
+> expression** — and a tail expression gets no `From` conversion; only `?` does. Both become
+> `Ok(…?)`. For `collect` in particular there is no way around it: its `FromIterator` impl
+> for `Result` is `impl<A, E, V: FromIterator<A>> FromIterator<Result<A, E>> for Result<V, E>`
+> — one `E` for the items and the collection, no `From` bound — so the collect happens at
+> rusqlite's error type and the `?` converts afterwards.
 
 #### Runnable check
 
