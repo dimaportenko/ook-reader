@@ -60,11 +60,11 @@ impl Library {
     pub(crate) fn open(
         db_path: impl AsRef<std::path::Path>,
         books_dir: impl AsRef<std::path::Path>,
-    ) -> rusqlite::Result<Self> {
+    ) -> Result<Self, Error> {
         Self::init(Connection::open(db_path)?, books_dir.as_ref().to_path_buf())
     }
 
-    fn init(conn: Connection, books_dir: PathBuf) -> rusqlite::Result<Self> {
+    fn init(conn: Connection, books_dir: PathBuf) -> Result<Self, Error> {
         conn.pragma_update(None, "foreign_keys", true)?;
 
         conn.execute(
@@ -187,7 +187,7 @@ impl Library {
         result
     }
 
-    pub(crate) fn remove(&self, id: i64) -> rusqlite::Result<bool> {
+    pub(crate) fn remove(&self, id: i64) -> Result<bool, Error> {
         let removed: Option<(String, Option<String>)> = self
             .conn
             .query_row(
@@ -208,15 +208,15 @@ impl Library {
         Ok(false)
     }
 
-    pub(crate) fn list(&self) -> rusqlite::Result<Vec<Book>> {
+    pub(crate) fn list(&self) -> Result<Vec<Book>, Error> {
         let mut stmt = self
             .conn
             .prepare("SELECT id, path, title, author, cover_path, added_at, last_opened_at FROM books ORDER BY COALESCE(last_opened_at, added_at) DESC, title")?;
         let rows = stmt.query_map([], Self::read_book)?;
-        rows.collect()
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
-    pub(crate) fn touch_opened(&self, id: i64, now: i64) -> rusqlite::Result<bool> {
+    pub(crate) fn touch_opened(&self, id: i64, now: i64) -> Result<bool, Error> {
         let updated = self.conn.execute(
             "UPDATE books SET last_opened_at = ?2 WHERE id = ?1",
             params![id, now],
@@ -240,7 +240,7 @@ impl Library {
         book_id: i64,
         locator: &Locator,
         now: i64,
-    ) -> rusqlite::Result<()> {
+    ) -> Result<(), Error> {
         self.conn.execute(
             "INSERT INTO positions (book_id, spine_index, selector, updated_at)
             VALUES (?1, ?2, ?3, ?4)
@@ -254,8 +254,9 @@ impl Library {
         Ok(())
     }
 
-    pub(crate) fn position(&self, book_id: i64) -> rusqlite::Result<Option<Locator>> {
-        self.conn
+    pub(crate) fn position(&self, book_id: i64) -> Result<Option<Locator>, Error> {
+        Ok(self
+            .conn
             .query_row(
                 "SELECT spine_index, selector FROM positions WHERE book_id = ?1",
                 params![book_id],
@@ -266,7 +267,7 @@ impl Library {
                     })
                 },
             )
-            .optional()
+            .optional()?)
     }
 }
 
