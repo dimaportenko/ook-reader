@@ -105,7 +105,7 @@ pub(crate) fn LibraryBooks() -> Element {
 #[component]
 fn BookCover(book: Book) -> Element {
     rsx! {
-        if let Some(name) = book.get_book_cover_name() {
+        if let Some(name) = book.cover_name() {
             div {
                 class: "book-cover__container",
                 img {

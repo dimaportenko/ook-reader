@@ -37,7 +37,7 @@ pub(crate) struct Book {
 }
 
 impl Book {
-    pub(crate) fn get_book_cover_name(&self) -> Option<&str> {
+    pub(crate) fn cover_name(&self) -> Option<&str> {
         self.cover_path
             .as_deref()
             .and_then(|cover| std::path::Path::new(cover).file_name())
@@ -92,6 +92,16 @@ impl Library {
         )?;
 
         Ok(Self { conn, books_dir })
+    }
+
+    pub(crate) fn open_default() -> Library {
+        let dirs = directories::ProjectDirs::from("com", "dimaportenko", "ook-reader")
+            .expect("a home directory should exist");
+        let data_dir = dirs.data_dir();
+        let books_dir = data_dir.join("books");
+
+        std::fs::create_dir_all(&books_dir).expect("app data dir should be creatable");
+        Library::open(data_dir.join("library.sqlite3"), books_dir).expect("library db should open")
     }
 
     pub(crate) fn books_dir(&self) -> &Path {
@@ -223,16 +233,6 @@ impl Library {
         )?;
 
         Ok(updated == 1)
-    }
-
-    pub(crate) fn open_default() -> Library {
-        let dirs = directories::ProjectDirs::from("com", "dimaportenko", "ook-reader")
-            .expect("a home directory should exist");
-        let data_dir = dirs.data_dir();
-        let books_dir = data_dir.join("books");
-
-        std::fs::create_dir_all(&books_dir).expect("app data dir should be creatable");
-        Library::open(data_dir.join("library.sqlite3"), books_dir).expect("library db should open")
     }
 
     pub(crate) fn save_position(
