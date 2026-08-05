@@ -2202,6 +2202,8 @@ the `Library` surface (9c).
 > **Status:** i and ii done — committed in `920b20e` (**49 tests green**, 48 → 49 as
 > predicted; clippy `-D warnings` clean). **iii is outstanding**: the `firstElementOnPage`
 > measurement has not been run, so the phase doc's "unmeasured" caveat stays until it is.
+> Its snippet was corrected before running — the original timed page 0, which is the one
+> page the scan returns from immediately. See iii below.
 >
 > Two leftovers cleaned up in the same commit. The `--ook-page` comment ("`page-listener.js`
 > is the only thing that writes it") was attached to `currentPage` in `fragment-scroll.js`
@@ -2256,15 +2258,51 @@ body, the other is an **index** for one element. `ceil` vs `round` is the tell �
 pages you want `3`, and with an element two-thirds of the way across page 2 you want `2`.
 Merging them would be the refactor that introduces the bug.
 
-**iii. Measure `firstElementOnPage`** — the phase doc's outstanding to-test item. In the
-iframe console, on the longest chapter of a long book:
+**iii. Measure `firstElementOnPage`** — the phase doc's outstanding to-test item. On the
+longest chapter of a long book.
+
+*Corrected before running it.* The snippet this punch-list originally carried called
+`firstElementOnPage(currentPage())`, and that **measures the cheapest case, not the
+expensive one.** The function scans elements in document order and returns on the first
+match, so its cost tracks the *page index*, not the element count — and `currentPage()`
+reads `--ook-page`, which is `0` until you turn a page. Page 0 matches on roughly the first
+iteration. The original snippet would have logged something like `0.02 ms`, and the item
+would have closed on a number produced by a loop that never ran.
+
+Measure the **last** page, which forces the full scan, and separate cold from warm:
 
 ```js
 const n = document.body.getElementsByTagName("*").length;
-const t = performance.now();
-firstElementOnPage(currentPage());
-console.log(n, "elements", performance.now() - t, "ms");
+const last = Math.ceil(document.body.scrollWidth / window.innerWidth) - 1;
+
+const t0 = performance.now();
+firstElementOnPage(last);
+const cold = performance.now() - t0;
+
+const runs = [];
+for (let i = 0; i < 20; i++) {
+  const t = performance.now();
+  firstElementOnPage(last);
+  runs.push(performance.now() - t);
+}
+runs.sort((a, b) => a - b);
+
+console.log(n, "elements,", last + 1, "pages, cold", cold.toFixed(2),
+            "ms, median", runs[10].toFixed(2), "ms");
 ```
+
+The two numbers differ and both are worth recording: the first call after a chapter load
+pays for a layout flush, every call after it reads a cached layout. The real one runs once
+per page turn, so **warm is what the rule below is read against**; a wildly worse cold
+number is the load-time hitch, and belongs in the note either way.
+
+*Getting a console on the iframe* is the actual obstacle here. The chapter is an iframe
+inside a WKWebView, so there is nothing to open. With the app running under `dx serve`, use
+**Safari → Develop → [ook-reader]** and select the **iframe's frame** — wry marks the
+webview inspectable in debug builds. Picking the frame is the part that matters; the
+top-level context does not have `firstElementOnPage` in scope. `dx serve --platform web` is
+not a shortcut: chapters are served by `use_register_asset_handler`, a desktop
+custom-protocol handler, so the web build has no content to measure.
 
 Record both numbers here. The decision rule, fixed in advance so the measurement is not read
 after the fact to say whatever you want: **under ~2 ms, close the item and delete the
@@ -2273,6 +2311,12 @@ them — `offsetLeft` is monotonic in document order for a column layout, so a b
 over the element list is the obvious first move, and caching per chapter the second. It runs
 once per page turn on a path that already does a `postMessage` round trip, so the bar it has
 to clear is low.
+
+The expected outcome is a comfortable pass: the loop does no DOM *writes*, so there is no
+layout thrashing — one layout, then N cached property reads, over an element list on the
+order of a thousand. That is the point of fixing the snippet rather than skipping the
+measurement. A pass only means something if the case that could have been slow is the one
+that was timed.
 
 #### Why it works
 
