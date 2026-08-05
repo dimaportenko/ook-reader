@@ -4,6 +4,7 @@ Place to quickly drop things I would like to work later.
 
 - [x] Page count per chapter
 - [ ] Page count per book
+- [ ] progress
 - [ ] External links support
 - [x] Investigate how to move javascript strings to js files
 - [x] Add app icon
@@ -14,6 +15,8 @@ Place to quickly drop things I would like to work later.
 - [x] show cover image in books library
 - [ ] implement same book import guardrails
 - [x] multiple selection for book addition
+- [ ] better error status, some popup, etc 
+- [ ] better Remove button
 
 
 
