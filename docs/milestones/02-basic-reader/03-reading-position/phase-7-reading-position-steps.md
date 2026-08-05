@@ -1980,12 +1980,12 @@ obviously wrong, not less. **Step 9** collapses them into an enum, alongside mea
 
 ## Step 9 — review & refactor
 
-> **Status:** in progress — **9a done** (`aa58c21`), **9b-i/ii done** (`920b20e`), **9c-i
-> done** (`3545af5`), **9c-ii/iii done** (`1f64ff7`); 9b-iii (the measurement) and 9c-iv
-> outstanding. Baseline before any edit: **48 tests green**,
+> **Status:** in progress — **9a done** (`aa58c21`), **9b-i/ii done** (`920b20e`), **9c
+> done** (`3545af5`, `1f64ff7`, `e5e8fcd`); **9b-iii (the measurement) is all that is left
+> of Step 9.** Baseline before any edit: **48 tests green**,
 > `cargo clippy --all-targets -- -D warnings` **clean**; now **49 green** after 9b's one new
 > test. That pair is the safety net for everything below — it must read identically
-> afterwards.
+> afterwards, and did, in all three 9c commits.
 
 The mandatory phase-closer. The last eight steps got restore *working*; this one makes it
 good. Nothing here changes what the reader does, with **one deliberate exception** (9a-iii),
@@ -2302,7 +2302,9 @@ to clear is low.
 > `1f64ff7` (both at **49 tests green**, unchanged as planned; clippy `-D warnings` clean).
 > `rusqlite` now appears nowhere outside `library.rs`, which is the check that says the
 > boundary actually closed, and iii's move is byte-identical — diffed at zero context, every
-> line pairs except the two halves of ii's rename. **iv is outstanding.**
+> line pairs except the two halves of ii's rename. **iv done** — committed in `e5e8fcd`,
+> still 49 green and clippy clean, with the `dx serve` eyeball confirmed on both the happy
+> path and a forced failure, which is the gate that actually mattered there.
 >
 > One correction to the punch-list below, found while doing it: **`read_book` does not
 > convert.** It is passed to `query_map`, whose bound is
@@ -2347,6 +2349,102 @@ the `open_status` signal that already exists) versus **the log** (`touch_opened`
 `save_position` — a failed bookmark write must never take down the reader, and there is
 nothing useful to show). One small helper for the second group, so the decision is made once.
 
+#### 9c-iv, expanded
+
+Written down after i–iii landed, because the one-paragraph version above undercounts the
+sites and picks a destination that one of them cannot reach.
+
+**The census.** Six sites, five spellings — not four and three:
+
+| # | Site | Spelling today | What a failure means to the user |
+|---|---|---|---|
+| 1 | `main.rs:36` | `list().unwrap_or(vec![])` | shelf comes up **empty**, as if you own no books |
+| 2 | `ui/library.rs:56` | `let _ = touch_opened(…)` | last-opened stamp missing; sort order stale |
+| 3 | `ui/library.rs:84` | `if remove(id).is_ok()` | you click Remove and **nothing happens** |
+| 4 | `ui/library.rs:199` | `if let Ok(list) = list()` | shelf silently stale after open or remove |
+| 5 | `ui/reader.rs:49` | `eprintln!` + `None` | restore skipped, you land on page 0 |
+| 6 | `ui/reader.rs:201` | `eprintln!` | bookmark not saved |
+
+**The split, and the line it draws.** Sites 2, 5 and 6 are bookkeeping at the *edges* of
+what was asked for — you asked to open a book; the last-opened stamp and the bookmark are
+side effects. There is nothing actionable to show, and a failed bookmark write must never
+take down the reader. Degrading quietly is right; only the *spelling* is the bug.
+
+Sites 1, 3 and 4 are the ones where **the screen lies.** A failed `remove` leaves the book
+sitting there as if the click never happened; a failed `list` leaves a deleted book on the
+shelf. That is not graceful degradation — it is the UI reporting a state that is not true.
+
+**Two decisions, and the way this plan calls them.**
+
+- *Where the user-visible group reports.* `open_status` is a `use_signal` local to
+  `LibraryBooks` (`ui/library.rs:32`), so **site 1 cannot reach it** — it runs in `App`,
+  before that signal exists. Hoist it to a `use_context_provider` next to `books`, the same
+  move already made for `library` and `books`. The alternative — leave site 1 log-only —
+  keeps the diff smaller but means a blank shelf on a broken database stays unexplained,
+  which is the exact failure this item exists to fix.
+- *Free function or extension trait for the log group.* Take the trait. These calls sit at
+  the end of expressions, so postfix keeps the reading order; a free function inverts it at
+  every site. The shape wanted is not "swallow" but **log and degrade to `Option`**, because
+  site 5 needs the value back:
+
+  ```rust
+  trait OrLog<T> { fn or_log(self, action: &str) -> Option<T>; }
+  ```
+
+  It belongs in `src/ui/mod.rs`, not `library.rs` — *which failures the user sees* is a UI
+  policy, not a storage concern. `eprintln!` stays inside it for now; the point is that
+  swapping in a real logger later becomes one edit instead of six.
+
+**Expected steps.** There is no unit-test seam anywhere in this item, so each step's check
+is `cargo clippy --all-targets -- -D warnings` clean and **49 still green**, with the
+eyeball deferred to the end. Ordered so the tree compiles after every one:
+
+1. **Add `OrLog` to `src/ui/mod.rs`** — today two `pub mod` lines; this is its first real
+   content. Nothing calls it yet.
+2. **Convert the log-only group** (2, 5, 6). Site 5 needs `.flatten()`: `position` returns
+   `Result<Option<Locator>>`, so `or_log` hands back `Option<Option<Locator>>`.
+3. **Hoist the status signal into context** and **rename it**. It is `open_status` holding
+   `"Open failed: {error}"` because opening was all it reported; once remove and list write
+   to it, the name has to widen with the responsibility — `status` or `library_status`.
+4. **Give `refresh_books` the signal** (`ui/library.rs:198`, ~~two~~ **three** call sites —
+   `ImportControl` is the one this plan missed) and report a failed `list`. It is a free
+   function with no way to report anything today, so this is a signature change either way.
+5. **Report a failed `remove`** (site 3), replacing the `.is_ok()` branch.
+6. **Convert site 1** in `main.rs`. Left alone it would be a *fourth* surviving spelling in
+   the step whose whole point is that there is one.
+
+**This item is not behavior-preserving, and that is the point.** Showing a message where
+none was shown is a user-visible change — the same kind 9a-iii was, and it gets the same
+treatment: called out here rather than smuggled in under "refactor." So the gate is not the
+suite. **49 green and clippy clean only prove nothing broke**; the error paths never run on
+a happy path. To see the user-visible branch, force a failure — `chmod 000` the
+`library.sqlite3` under the app data dir between launches, or delete it while the app is
+running — then click Remove and open a book.
+
+**Three things this plan got wrong, found while implementing it** (`e5e8fcd`):
+
+- **`refresh_books` has three call sites, not two.** `ImportControl` is the third, and it
+  already owns a *local* `status` for its import summary. So the context signal goes in
+  beside it as `library_status` rather than replacing it — folding the two together would
+  move where "Imported 3 books" appears, which is layout work, not error handling.
+- **Step 6's `App` rewrite has a render-time-write hazard the plan walked straight into.**
+  The obvious spelling — `use_signal` for `books`, plus a `status.set(…)` on the error path
+  — writes one signal from inside another's initializer. One `use_hook` returning both
+  `Signal`s already built avoids it, and stays cheap: `Signal` is `Copy`, so the per-render
+  clone is free, where returning the `Vec<Book>` would deep-clone the shelf on every
+  re-render of `App`.
+- **The plan would have shipped a stale-message bug.** Only the open path reset the status,
+  so "Remove failed" survived a later *successful* remove and kept describing a state that
+  had stopped being true. `refresh_books` now clears on success. It is the one line in the
+  diff not traceable to the punch-list.
+
+**Left standing, deliberately.** The status is rendered inside `LibraryBooks`, so nothing
+displays it while the reader is open. That is sound today — every reader-side site is
+log-only by design — but it is a trap for whoever first adds a user-visible failure inside
+`Reader` and watches the signal go nowhere. Rendering it once in `App`, above the
+`if let Some(book)` branch, is the structural fix; it moves the message on screen, so it
+belongs to a layout step rather than this one.
+
 #### Why it works
 
 - **A module-level error type is a boundary, and a boundary that leaks is not one.** The UI
@@ -2355,7 +2453,8 @@ nothing useful to show). One small helper for the second group, so the decision 
   collecting the benefit.
 - **Different swallow syntax for the same intent reads as different intent.** `let _ =` says
   "cannot fail"; `.is_ok()` says "the failure changes control flow"; `if let Ok` says "no
-  data, no update." Three spellings across four sites means a reader has to check each one to
+  data, no update." Five spellings across six sites (the census in *9c-iv, expanded* found
+  more of both than this paragraph first counted) means a reader has to check every one to
   learn there was only ever one policy. Naming the policy is the change.
 
 #### Scope note
