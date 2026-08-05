@@ -6,6 +6,7 @@ use rbook::Epub;
 use crate::{
     epub,
     library::{self, Book, Library},
+    ui::OrLog,
 };
 
 static PLACEHOLDER_2: Asset = asset!("/assets/books/placeholder-2.jpg");
@@ -29,7 +30,7 @@ pub(crate) fn LibraryBooks() -> Element {
     let library = use_context::<Rc<Library>>();
     let books = use_context::<Signal<Vec<library::Book>>>();
     let mut open_book = use_context::<Signal<Option<OpenBook>>>();
-    let mut open_status = use_signal(|| None::<String>);
+    let mut status = use_context::<Signal<Option<String>>>();
 
     rsx! {
         div {
@@ -52,9 +53,11 @@ pub(crate) fn LibraryBooks() -> Element {
                                     match open_epub(std::path::Path::new(&path))
                                     {
                                         Ok((epub, docs)) => {
-                                            open_status.set(None);
-                                            let _ = library.touch_opened(id, library::now_secs());
-                                            refresh_books(&library, books);
+                                            status.set(None);
+                                            library
+                                                .touch_opened(id, library::now_secs())
+                                                .or_log("update the last-opened time");
+                                            refresh_books(&library, books, status);
                                             open_book
                                                 .set(
                                                     Some(OpenBook {
@@ -65,7 +68,7 @@ pub(crate) fn LibraryBooks() -> Element {
                                                     }),
                                                 );
                                         }
-                                        Err(error) => open_status.set(Some(format!("Open failed: {error}"))),
+                                        Err(error) => status.set(Some(format!("Open failed: {error}"))),
                                     }
                                 }
                             },
@@ -80,9 +83,10 @@ pub(crate) fn LibraryBooks() -> Element {
                                 let library = Rc::clone(&library);
                                 let id = book.id;
 
-                                move |_| {
-                                    if library.remove(id).is_ok() {
-                                        refresh_books(&library, books);
+                                move |_| match library.remove(id) {
+                                    Ok(_) => refresh_books(&library, books, status),
+                                    Err(error) => {
+                                        status.set(Some(format!("Remove failed: {error}")))
                                     }
                                 }
                             },
@@ -94,9 +98,9 @@ pub(crate) fn LibraryBooks() -> Element {
 
             }
         }
-        if let Some(status) = open_status() {
+        if let Some(message) = status() {
             p {
-                "{status}"
+                "{message}"
             }
         }
     }
@@ -143,6 +147,7 @@ fn BookCover(book: Book) -> Element {
 pub(crate) fn ImportControl() -> Element {
     let library = use_context::<Rc<Library>>();
     let books = use_context::<Signal<Vec<library::Book>>>();
+    let library_status = use_context::<Signal<Option<String>>>();
     let mut status = use_signal(|| None::<String>);
 
     rsx! {
@@ -181,7 +186,7 @@ pub(crate) fn ImportControl() -> Element {
                                 },
                             );
 
-                        refresh_books(&library, books);
+                        refresh_books(&library, books, library_status);
                     },
                 }
             }
@@ -195,9 +200,17 @@ pub(crate) fn ImportControl() -> Element {
     }
 }
 
-fn refresh_books(library: &Library, mut books: Signal<Vec<Book>>) {
-    if let Ok(list) = library.list() {
-        books.set(list);
+fn refresh_books(
+    library: &Library,
+    mut books: Signal<Vec<Book>>,
+    mut status: Signal<Option<String>>,
+) {
+    match library.list() {
+        Ok(list) => {
+            books.set(list);
+            status.set(None);
+        }
+        Err(error) => status.set(Some(format!("Could not refresh your library: {error}"))),
     }
 }
 

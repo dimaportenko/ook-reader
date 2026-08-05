@@ -33,11 +33,18 @@ fn main() {
 #[component]
 fn App() -> Element {
     let library = use_hook(|| Rc::new(Library::open_default()));
-    let books = use_signal(|| library.list().unwrap_or(vec![]));
+    let (books, status) = use_hook(|| match library.list() {
+        Ok(books) => (Signal::new(books), Signal::new(None)),
+        Err(error) => (
+            Signal::new(Vec::new()),
+            Signal::new(Some(format!("Could not load your library: {error}"))),
+        ),
+    });
     let open_book = use_signal(|| None::<OpenBook>);
 
     use_context_provider(|| library.clone());
     use_context_provider(|| books);
+    use_context_provider(|| status);
     use_context_provider(|| open_book);
 
     epub::use_register_covers_handler(library.books_dir().to_path_buf());

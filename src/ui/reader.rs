@@ -7,7 +7,7 @@ use crate::{
     epub,
     library::{self, Library},
     nav::{self, ReaderDataStoreExt, ReaderState},
-    ui::library::OpenBook,
+    ui::{OrLog, library::OpenBook},
 };
 
 const BRIDGE_JS: &str = include_str!("../web/assets/ook-events-listener.js");
@@ -46,10 +46,10 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
     let mut open_book = use_context::<Signal<Option<OpenBook>>>();
     let docs = book.docs;
     let start = use_hook(|| {
-        library.position(book.id).unwrap_or_else(|error| {
-            eprintln!("could not read reading position: {error}");
-            None
-        })
+        library
+            .position(book.id)
+            .or_log("read the reading position")
+            .flatten()
     });
     let state = nav::use_reader_state(docs.len(), start);
     let chapter = state.data.chapter();
@@ -195,11 +195,9 @@ fn use_bridge(state: ReaderState, docs: Rc<Vec<String>>, library: Rc<Library>, b
                             spine_index: *state.data.chapter().peek(),
                             selector,
                         };
-                        if let Err(error) =
-                            library.save_position(book_id, &locator, library::now_secs())
-                        {
-                            eprintln!("could not save reading position: {error}");
-                        }
+                        library
+                            .save_position(book_id, &locator, library::now_secs())
+                            .or_log("save the reading position");
                     }
                     None => {}
                 }
