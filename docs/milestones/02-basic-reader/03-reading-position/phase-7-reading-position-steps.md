@@ -886,20 +886,11 @@ scanned for a *late* page: the loop has no early exit, so finding page 0 is inst
 finding the last page touches every element. Worst case is the anchor cost growing with how
 far into the chapter the reader is.
 
-**The measurement** — under `dx serve`, in the chapter iframe's console, on the longest
-chapter available, at the *end* of it:
-
-```js
-const p = currentPage();
-const t = performance.now();
-for (let i = 0; i < 100; i++) firstElementOnPage(p);
-(performance.now() - t) / 100; // ms per call
-```
-
-Also worth capturing alongside it: `document.body.getElementsByTagName("*").length`, so the
-number has a document size attached to it. **Threshold:** under ~1 ms per call on the worst
-chapter to hand, leave it alone and delete this section. Above that, or if a page turn ever
-*feels* like it hitches, take the cheap fixes first.
+**The measurement** lives at [Step 9b-iii](#9b--one-page-formula-in-one-file-measured) — the
+snippet that was here timed `currentPage()`, which is `0` until you turn a page, and page 0
+returns on roughly the first iteration. It measured the one case that cannot be slow. 9b-iii
+carries the corrected version (last page, cold and warm separated) and the decision rule; run
+that one, and read the threshold from there so there is only one.
 
 **Fixes, cheapest first.**
 
@@ -2305,12 +2296,21 @@ not a shortcut: chapters are served by `use_register_asset_handler`, a desktop
 custom-protocol handler, so the web build has no content to measure.
 
 Record both numbers here. The decision rule, fixed in advance so the measurement is not read
-after the fact to say whatever you want: **under ~2 ms, close the item and delete the
-"unmeasured" caveat from the phase doc.** Over ~10 ms, note the candidates without building
-them — `offsetLeft` is monotonic in document order for a column layout, so a binary search
-over the element list is the obvious first move, and caching per chapter the second. It runs
-once per page turn on a path that already does a `postMessage` round trip, so the bar it has
-to clear is low.
+after the fact to say whatever you want — **warm median is the number it is read against**:
+
+| warm median | what happens |
+|---|---|
+| **≤ 2 ms** | close the item; delete the "unmeasured" caveat from the phase doc **and** the ⏱️ section under Step 4 |
+| **2–10 ms** | take fix 1 only — early `break` once `pageOf(el) > page`, one line, same shape — then re-measure and close |
+| **> 10 ms** | record the candidates without building them; the scan becomes its own step |
+
+The band in the middle exists because the two earlier writings of this rule disagreed (Step 4
+said ~1 ms, this said ~2 ms, and neither said what to do between 2 and 10). Fix 1 is one line
+and preserves the function's shape, so it is not worth deferring to a later phase to earn.
+Past it, `offsetLeft` being monotonic in document order for a column layout makes a binary
+search over the element list the obvious next move, and caching per chapter the one after.
+It runs once per page turn on a path that already does a `postMessage` round trip, so the bar
+it has to clear is low.
 
 The expected outcome is a comfortable pass: the loop does no DOM *writes*, so there is no
 layout thrashing — one layout, then N cached property reads, over an element list on the
