@@ -6,10 +6,9 @@ use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 use rbook::epub::rewrite::{EpubRewriteOptions, PathRewrite};
 use rbook::Epub;
 
-use crate::web::assets::READING_SYSTEM_DEFAULTS;
 use crate::web::{
     self,
-    assets::{wrap_css_str, INJECTED_ASSETS},
+    assets::{wrap_css_str, INJECTED_ASSETS, READING_SYSTEM_DEFAULTS},
 };
 
 pub(crate) const EPUB_ROUTE: &str = "epub";
@@ -161,7 +160,7 @@ pub(crate) fn insert_before_head_close(xhtml: &str, snippet: &str) -> String {
     xhtml.replacen("</head>", &format!("{snippet}</head>"), 1)
 }
 
-pub(crate) fn insert_after_head_open(xhtml: &str, shippet: &str) -> String {
+pub(crate) fn insert_after_head_open(xhtml: &str, snippet: &str) -> String {
     let Some(start) = xhtml.find("<head") else {
         return xhtml.to_owned();
     };
@@ -171,12 +170,12 @@ pub(crate) fn insert_after_head_open(xhtml: &str, shippet: &str) -> String {
         return xhtml.to_owned();
     }
 
-    let Some(end) = rest.find(">") else {
+    let Some(end) = rest.find('>') else {
         return xhtml.to_owned();
     };
 
     let at = start + "<head".len() + end + 1;
-    format!("{}{shippet}{}", &xhtml[..at], &xhtml[at..])
+    format!("{}{snippet}{}", &xhtml[..at], &xhtml[at..])
 }
 
 fn sanitized_file_name(input: &str) -> Option<String> {
@@ -703,8 +702,7 @@ mod test {
 
         let out = insert_after_head_open(xhtml, "<style/>");
 
-        println!("{}", out);
-        assert!(out.contains(r#"<head profile="http://example.org/p"><style/><title>T</title>"#),);
+        assert!(out.contains(r#"<head profile="http://example.org/p"><style/><title>T</title>"#));
     }
 
     #[test]
