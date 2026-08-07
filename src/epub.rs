@@ -433,6 +433,17 @@ mod test {
     }
 
     #[test]
+    fn injects_a_theme_listener_before_head_close() {
+        let xhtml = r#"<html xmlns="http://www.w3.org/1999/xhtml"><head><title>T</title></head><body><p>Hi</p></body></html>"#;
+
+        let out = insert_before_head_close(xhtml, INJECTED_ASSETS);
+
+        assert!(out.contains("ook-set-theme"));
+        assert!(out.find("ook-set-theme").unwrap() < out.find("</head>").unwrap());
+        assert!(out.contains("<p>Hi</p>"));
+    }
+
+    #[test]
     fn read_metadata_extracts_the_cover_image() {
         let epub = Epub::open(crate::TEST_BOOK).expect("open fixture book");
         let meta = read_metadata(&epub);

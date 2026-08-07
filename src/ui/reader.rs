@@ -7,13 +7,14 @@ use crate::{
     epub,
     library::{self, Library},
     nav::{self, ReaderDataStoreExt, ReaderState},
-    ui::{library::OpenBook, OrLog},
+    ui::{library::OpenBook, theme::ThemePicker, OrLog},
     web::theme::Theme,
 };
 
 const BRIDGE_JS: &str = include_str!("../web/assets/ook-events-listener.js");
 const CHAPTER_LOADER_JS: &str = include_str!("../web/assets/chapter-loader.js");
 const BLOB_CLEANUP_JS: &str = include_str!("../web/assets/blob-cleanup.js");
+const THEME_PUSH_JS: &str = include_str!("../web/assets/theme-push.js");
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum BridgeMsg {
@@ -63,6 +64,11 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
     let chapter_label = format!("Chapter {} of {}", chapter() + 1, state.chapter_count);
 
     use_effect(move || {
+        let push = document::eval(THEME_PUSH_JS);
+        _ = push.send(theme().css_vars());
+    });
+
+    use_effect(move || {
         let page_number = page();
         let script = format!(
             r#"
@@ -91,9 +97,26 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
     rsx! {
         div {
             style: "display: flex; flex-direction: column; height: 100vh; {theme().inline_styles()}",
-            p {
-                style: "text-align: center",
-                "{book.title}"
+
+            div {
+                style: "display: flex; justify-content: space-between;",
+                div {
+                    style: "padding: 0.5rem 1rem; z-index: 1;",
+
+                    button {
+                        onclick: move |_| open_book.set(None),
+                        "Close"
+                    }
+                }
+                p {
+                    style: "text-align: center; position: absolute; top: 0; left: 0; right: 0;",
+                    "{book.title}"
+                }
+                div {
+                    style: "padding: 0.5rem 1rem; z-index: 1;",
+                    ThemePicker {}
+                }
+
             }
 
             iframe {
@@ -101,15 +124,6 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                 "sandbox": "allow-same-origin allow-scripts",
                 style: "flex: 1; width: 100%; border: none;",
                 class: if pending().is_settling() { "invisible" },
-            }
-
-            div {
-                style: "position: absolute; top: 8px; left: 8px;",
-                button {
-                    onclick: move |_| open_book.set(None),
-
-                    "Close"
-                }
             }
 
             NavRow {
@@ -232,6 +246,14 @@ mod test {
         assert!(CHAPTER_LOADER_JS.contains("window.__ookBlobUrl"));
         assert!(BLOB_CLEANUP_JS.contains("window.__ookBlobUrl"));
         assert!(BLOB_CLEANUP_JS.contains("revokeObjectURL"));
+    }
+
+    #[test]
+    fn the_theme_push_and_the_chapter_listener_agree_on_the_message_kind() {
+        // Two files, one message name, no compiler between them. Rename it on one side
+        // and the theme silently stops arriving — nothing errors, the colours just stop.
+        assert!(THEME_PUSH_JS.contains("ook-set-theme"));
+        assert!(crate::web::assets::INJECTED_ASSETS.contains("ook-set-theme"));
     }
 
     #[test]

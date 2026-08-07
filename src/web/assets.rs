@@ -26,6 +26,7 @@ pub(crate) const INJECTED_ASSETS: &str = concat!(
     wrap_js!("./assets/page-count.js"),
     wrap_js!("./assets/fragment-scroll.js"),
     wrap_js!("./assets/page-position.js"),
+    wrap_js!("./assets/theme-listener.js"),
 );
 
 pub(crate) const READING_SYSTEM_DEFAULTS: &str = wrap_css!("./assets/reading-system.css");
@@ -104,6 +105,35 @@ mod test {
                 css.contains("var(--USER__textColor)"),
                 "{theme:?} declares a text colour it never applies",
             );
+        }
+    }
+
+    #[test]
+    fn the_pushed_vars_and_the_injected_layer_name_the_same_variables() {
+        for theme in [Theme::Day, Theme::Sepia, Theme::Night] {
+            let layer = theme.user_layer();
+
+            // Nothing pushed that the served layer never declares or never applies …
+            for (name, value) in theme.css_vars() {
+                assert!(
+                    layer.contains(&format!("{name}: {value};")),
+                    "{theme:?} pushes {name}, which the injected layer never declares",
+                );
+                assert!(
+                    layer.contains(&format!("var({name})")),
+                    "{theme:?} declares {name} and no rule reads it",
+                );
+            }
+
+            // … and nothing read that no message will ever set.
+            for reference in layer.split("var(").skip(1) {
+                let name = reference.split(')').next().expect("var( … ) closes");
+                assert!(
+                    theme.css_vars().iter().any(|(pushed, _)| *pushed == name),
+                    "the layer reads {name}, which the message never sets — \
+                     that variable would only ever update on a chapter turn",
+                );
+            }
         }
     }
 

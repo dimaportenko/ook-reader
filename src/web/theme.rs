@@ -3,7 +3,6 @@ pub(crate) enum Theme {
     #[default]
     Day,
     Sepia,
-    #[allow(dead_code)]
     Night,
 }
 
@@ -16,10 +15,21 @@ impl Theme {
         }
     }
 
-    fn declarations(self) -> String {
+    pub(crate) fn css_vars(self) -> [(&'static str, &'static str); 2] {
         let (background, text) = self.colors();
 
-        format!("--USER__backgroundColor: {background}; --USER__textColor: {text};")
+        [
+            ("--USER__backgroundColor", background),
+            ("--USER__textColor", text),
+        ]
+    }
+
+    fn declarations(self) -> String {
+        self.css_vars()
+            .iter()
+            .map(|(name, value)| format!("{name}: {value};"))
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     pub(crate) fn vars(self) -> String {
@@ -36,9 +46,25 @@ impl Theme {
 
     pub(crate) fn inline_styles(self) -> String {
         format!(
-            "{} background: var(--USER__backgroundColor); \
-                color: var(--USER__textColor)",
+            "{} background-color: var(--USER__backgroundColor); color: var(--USER__textColor)",
             self.declarations()
         )
+    }
+
+    pub(crate) fn slug(self) -> &'static str {
+        match self {
+            Theme::Day => "day",
+            Theme::Sepia => "sepia",
+            Theme::Night => "night",
+        }
+    }
+
+    pub(crate) fn from_slug(slug: &str) -> Theme {
+        match slug {
+            "day" => Theme::Day,
+            "sepia" => Theme::Sepia,
+            "night" => Theme::Night,
+            _ => Theme::default(),
+        }
     }
 }

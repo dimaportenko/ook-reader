@@ -16,6 +16,7 @@ use crate::{
     ui::{
         library::{ImportControl, LibraryBooks, OpenBook},
         reader::Reader,
+        theme::ThemePicker,
     },
     web::theme::Theme,
 };
@@ -70,8 +71,15 @@ fn App() -> Element {
                 book,
             }
         } else {
-            LibraryBooks {}
-            ImportControl {}
+            div {
+                style: "{theme().inline_styles()}",
+                div {
+                    style: "padding: 1rem;",
+                    ThemePicker {}
+                }
+                LibraryBooks {}
+                ImportControl {}
+            }
         }
     }
 }

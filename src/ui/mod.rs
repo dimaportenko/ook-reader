@@ -1,5 +1,6 @@
 pub mod library;
 pub mod reader;
+pub mod theme;
 
 pub(crate) trait OrLog<T> {
     fn or_log(self, action: &str) -> Option<T>;
