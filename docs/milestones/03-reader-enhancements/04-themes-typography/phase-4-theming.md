@@ -50,11 +50,13 @@ implementation → why. Smallest-first:
       during the rewrite, so `insert_before_head_close` always lands after it), so the theme
       is concatenated onto `INJECTED_ASSETS` instead. Committed in `27e1d86`, **54 tests
       green**.
-- [ ] **Step 3 — Add the RS-defaults layer before the book CSS.** Completes the three-tier
-      cascade (RS < author < USER). Watch the injection point — with `inject_css` now out of
-      the picture entirely, the *before* layer needs a sibling to `insert_before_head_close`
-      that writes after `<head>` (the spot ADR-0003 flags as the only realistic
-      `rbook`-fork trigger).
+- [x] **Step 3 — Add the RS-defaults layer before the book CSS.** Completes the three-tier
+      cascade (RS < author < USER). `insert_after_head_open` is the sibling to
+      `insert_before_head_close`, and the subtlety is that the opening tag has no single
+      spelling — `<head`, plus a check that what follows is `>` or whitespace, because
+      `<header>` would otherwise match. ADR-0003 flagged this as the only realistic
+      `rbook`-fork trigger; it stayed closed, since Step 2 had already dropped `inject_css`
+      and made head surgery ours. Committed in `1fe0398`, **58 tests green**.
 - [ ] **Step 4 — Theme switcher in the app chrome.** A `use_signal` holds the current theme;
       Day/Sepia/Night controls re-serve/reload the iframe.
 - [ ] **Step 5 — Typography settings (later).** font-size, line-height, line-length,

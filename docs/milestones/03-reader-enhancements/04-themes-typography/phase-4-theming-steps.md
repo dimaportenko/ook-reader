@@ -306,12 +306,187 @@ Decide that there, not here.
 
 ---
 
-## Steps 3–6 — sketched
+## Step 3 — the RS-defaults layer, before the book's CSS
 
-- **Step 3 — RS-defaults layer (before book CSS).** A normalize/`--RS__*` defaults sheet at
-  the *start* of `<head>`, completing RS < author < USER. Either a small head-rewrite in our
-  serve path or (if awkward) the `rbook` tweak ADR-0003 reserves — the one realistic
-  fork-trigger. Test: ordering of the three layers in the served string.
+> **Status:** done — committed in `1fe0398` (**58 tests green**, 54 → 58 as predicted;
+> `cargo clippy --all-targets -- -D warnings` clean). Suggested 2026-08-07.
+>
+> Landed as sketched, which is worth noting after Steps 1–2 both drifted. The
+> `<header>` test did its job: it is the one that fails against the obvious
+> `find("<head")` implementation, and it is why the guard on the following byte is
+> in the helper rather than discovered later by a book that happens to have a
+> headerless chapter.
+
+Steps 1–2 built the *top* of the cascade. This one builds the bottom: a sheet injected at the
+**start** of `<head>`, so the book's own `<link>`s come after it and win. That completes
+ADR-0003's three tiers — **RS < author < USER** — and it is the last structural piece; Steps
+4–5 only add variables to a stack that already sorts itself.
+
+**ADR-0003 reserved a `rbook` fork for exactly this step, and it is no longer needed.** The
+ADR flagged the RS-before injection point as "the spot most likely to reopen the fork
+question," because `rbook`'s `inject_css` writes only at end-of-head. Step 2 stopped using
+`inject_css` at all, so head surgery is already ours: `insert_before_head_close` is nine lines
+in `epub.rs`. The fork question closes not because we solved it but because Step 2 walked past
+it. Worth recording in the ADR when Step 6 re-reads it.
+
+### The crux: the closing tag is a constant, the opening tag is not
+
+`insert_before_head_close` can be a one-line `replacen("</head>", …)` because `</head>` is the
+only spelling of a closing tag. An *opening* tag is a family: `<head>`, `<head profile="…">`,
+`<head\n  xmlns="…">`. The mirror of the existing helper does not exist. You have to find
+where the tag *ends*, which means finding `<head` and then the next `>`.
+
+And `"<head"` is a prefix of `"<header>"`. A document with no `<head>` but a `<header>` in its
+body — perfectly legal, and EPUB3 content is XHTML5 where `<header>` is a normal sectioning
+element — would match, and the sheet would land inside the body. That is the bug this step's
+tests exist to catch, and it is the reason the step is worth writing rather than pattern-
+matching off the helper next to it.
+
+### Runnable check (`cargo test`)
+
+Three unit tests on the new helper, in `epub.rs`'s `mod test` beside
+`insert_before_head_close_is_a_noop_without_a_head`, plus one on the assembled document.
+
+```rust
+#[test]
+fn insert_after_head_open_writes_inside_a_head_that_has_attributes() {
+    let xhtml = r#"<html><head profile="http://example.org/p"><title>T</title></head><body/></html>"#;
+
+    let out = insert_after_head_open(xhtml, "<style/>");
+
+    assert!(out.contains(r#"<head profile="http://example.org/p"><style/><title>T</title>"#));
+}
+
+#[test]
+fn insert_after_head_open_is_a_noop_without_a_head() {
+    let out = insert_after_head_open("<html><body>x</body></html>", "<style/>");
+
+    assert_eq!(out, "<html><body>x</body></html>");
+}
+
+#[test]
+fn insert_after_head_open_does_not_mistake_a_header_for_a_head() {
+    // `<head` is a prefix of `<header>`, which is ordinary XHTML5 sectioning content.
+    let xhtml = "<html><body><header>Chapter</header><p>x</p></body></html>";
+
+    let out = insert_after_head_open(xhtml, "<style/>");
+
+    assert_eq!(out, xhtml);
+}
+
+#[test]
+fn the_three_cascade_layers_are_served_in_priority_order() {
+    let epub = Epub::open(crate::TEST_BOOK).expect("open fixture book");
+    let hrefs = spine_hrefs(&epub).expect("fixture spine");
+
+    let href = hrefs.get(2).expect("3d item in spine exists");
+    let served = serve_epub_resource(&epub, &format!("/{href}"), Theme::Night)
+        .expect("a spine document is reachable by its href");
+    let xhtml = String::from_utf8(served.body).expect("chapters are utf-8");
+
+    let rs = xhtml.find("--RS__").expect("the reading-system defaults");
+    let author = xhtml.find("pgepub.css").expect("the book's own stylesheet");
+    let user = xhtml.find("--USER__").expect("the theme layer");
+
+    assert!(rs < author, "RS defaults must lose to the book's CSS");
+    assert!(author < user, "the book's CSS must lose to the USER layer");
+}
+```
+
+The third test is the one to watch fail. Write the helper the obvious way — `find("<head")` —
+and the first two pass while it quietly injects into a `<header>`.
+
+### Minimal implementation (sketch)
+
+**A new `src/web/assets/reading-system.css`:**
+
+```css
+:root {
+  --RS__maxMediaWidth: 100%;
+}
+
+img,
+svg,
+video {
+  max-width: var(--RS__maxMediaWidth);
+  height: auto;
+}
+```
+
+**In `web/assets.rs`, beside `INJECTED_ASSETS`:**
+
+```rust
+pub(crate) const READING_SYSTEM_DEFAULTS: &str = wrap_css!("./assets/reading-system.css");
+```
+
+**In `epub.rs`, a sibling to `insert_before_head_close`:**
+
+```rust
+pub(crate) fn insert_after_head_open(xhtml: &str, snippet: &str) -> String {
+    let Some(start) = xhtml.find("<head") else {
+        return xhtml.to_owned();
+    };
+
+    let rest = &xhtml[start + "<head".len()..];
+    if !rest.starts_with('>') && !rest.starts_with(char::is_whitespace) {
+        return xhtml.to_owned();
+    }
+
+    let Some(end) = rest.find('>') else {
+        return xhtml.to_owned();
+    };
+
+    let at = start + "<head".len() + end + 1;
+
+    format!("{}{snippet}{}", &xhtml[..at], &xhtml[at..])
+}
+```
+
+**And in `serve_epub_resource`, one line before the existing injection:**
+
+```rust
+let with_defaults = insert_after_head_open(&xhtml, READING_SYSTEM_DEFAULTS);
+let with_assets = insert_before_head_close(&with_defaults, &inject_css);
+```
+
+### Why it works
+
+- **Source order is the whole mechanism, again.** Nothing in `reading-system.css` is
+  `!important` and nothing is specific — a book that sets its own `img` width simply comes
+  later and wins. That is the definition of a *defaults* layer: it is what applies when the
+  book says nothing.
+- **`--RS__maxMediaWidth` is a real variable, not decoration.** It gives the sheet a
+  variable in the prefix convention the ADR names, gives the ordering test a marker to find,
+  and makes the eventual "fit image to page" setting a value change rather than a rule change.
+- **The image rule earns its place here specifically.** `pagination.css` lays the body out in
+  columns of `calc(100vw - 48px)`; an image wider than the column silently breaks the page
+  geometry the whole reader depends on. Containing media is a reading-system concern, and
+  it is the one default that is *already* load-bearing in this codebase.
+- **`let … else` for the misses.** Three ways to find no head — no tag, a `<header>` match, an
+  unterminated tag — and each returns the input untouched. `let … else` keeps the happy path
+  unindented and at the bottom, which is the shape `serve_epub_resource` already uses with `?`.
+- **The byte arithmetic is safe, and it is worth knowing why.** `find` returns *byte* offsets
+  and slicing at a non-character boundary panics — a real hazard in a document full of
+  em-dashes and curly quotes. It is fine here because every offset lands on an ASCII byte:
+  `start` is at `<`, and `at` is one past `>`. A boundary is only ever in the middle of a
+  multi-byte character, and ASCII bytes are never in the middle of one.
+- **Why the RS layer sets no colours,** though Readium's does: Readium applies its user theme
+  only when one is selected, so its RS layer supplies the fallback. Ours is unconditional and
+  `!important` — an `--RS__backgroundColor` would be dead code the day it was written.
+
+### Scope note
+
+String surgery, not parsing — an attribute value containing a literal `>` (`<head
+profile="a>b">`) would defeat the scan. Not worth a parser: the input is already-rewritten
+XHTML from `rbook`, and the failure mode is a misplaced `<style>`, not a corrupt document.
+Also deferred: a real normalize (margins, `widows`/`orphans`, hyphenation) — this step lands
+the *seam*, and defaults can be appended to the file for free once the seam is proven. The
+switcher that makes any of this reachable is still Step 4.
+
+---
+
+## Steps 4–6 — sketched
+
 - **Step 4 — theme switcher.** `let mut theme = use_signal(|| Theme::Day);` in the chrome;
   Day/Sepia/Night controls `.set` it; the iframe `src` reload picks up the new injection.
   Eyeball: click Night → page goes dark.
