@@ -33,12 +33,14 @@ that kept Phase 3 small.
 2. **Inject the USER layer** — variable block + minimal override sheet, *after* the book CSS.
    *(`rbook` `inject_css`, cascade source-order)*
 3. **Add the RS-defaults layer before the book CSS** — completes RS < author < USER.
-4. **Theme switcher in the app chrome** — `use_signal` → reload the frame.
+4. **Theme switcher in the app chrome** — `use_signal` → push the new variable values into
+   the frame that is already on screen. *(no reload)*
 5. **Typography settings (later)** — font-size, line-height, line-length, margins, fonts.
 6. **Review & refactor.**
 
 > **Dependency.** Every step here serves through the Phase 3 Step 8 handler. Steps 2–3 inject
-> into the served document; Step 4 re-serves it on a settings change.
+> into the served document; Step 4 keeps that injection for the *first paint* of a chapter and
+> adds a second route — a message — for changes to a document already on screen.
 
 ## Reconciliation, before Step 1 (2026-08-06)
 
@@ -485,11 +487,354 @@ switcher that makes any of this reachable is still Step 4.
 
 ---
 
-## Steps 4–6 — sketched
+## Step 4 — the switcher, and pushing the theme into the live frame
 
-- **Step 4 — theme switcher.** `let mut theme = use_signal(|| Theme::Day);` in the chrome;
-  Day/Sepia/Night controls `.set` it; the iframe `src` reload picks up the new injection.
-  Eyeball: click Night → page goes dark.
+> **Status:** done — committed in `ed1df0d` (**61 tests green**, 58 → 61 as predicted;
+> `cargo clippy --all-targets -- -D warnings` clean). Suggested 2026-08-07, **revised twice
+> the same day**, and landed as Revision 2 sketched it — the message route, the reverted
+> one-argument `chapter_url`, no `Pending::Page`. The no-blink switch, the held page
+> position, and the already-themed next chapter were confirmed by `dx serve`; no unit test
+> reaches any of them.
+>
+> **Two departures from the sketch, both deliberate.** `use_signal(|| Theme::Sepia)` stays
+> rather than becoming `use_signal(Theme::default)` — the opening theme is a persistence
+> question, and it gets settled when the chosen theme is saved to the database, not by
+> changing which hard-coded value the reader starts on. And the reader chrome was
+> restructured while the picker went in: Close moved out of its absolutely-positioned corner
+> into a flex header row opposite the picker, with the title absolute between them. Known
+> nit, left standing: that title anchors to the viewport rather than to its flex parent,
+> since the root `div` is not `position: relative`. Identical result at `height: 100vh`,
+> fragile if that ever changes.
+>
+> **The three tests were written after the implementation**, so — as in Step 2 — they pin
+> behaviour rather than drive it. The pairing test was checked against a deliberate break
+> before the commit: adding `var(--USER__fontSize)` to `user_layer()` without adding it to
+> `css_vars` fails with *"the layer reads --USER__fontSize, which the message never sets."*
+> That is the one whose value is entirely in Step 5, so it was worth watching go red once.
+>
+> **Revision 1** folded in restoring the page across the reload: a theme change did not
+> *reset* the page, it put Rust and the frame **out of sync** — label reading "Page 4 of N"
+> over page 1, and Next jumping to 5.
+>
+> **Revision 2 — the current one — takes the reload back out, and the restore with it.**
+> Running the built step showed the cost: every theme click tears down the document, refetches
+> it, re-measures it, and hides the frame behind the `invisible` class while it settles. A
+> visible blink, for a change of two colour values. The restore was never the feature; it was
+> damage control for a reload that should not happen. A colour change is a **repaint**, not a
+> reflow — the document on screen is already correct in every respect except two custom
+> property values, and those can simply be written into it. So Revision 2 keeps the switcher
+> (built, good), keeps the serve-time injection (it is what makes the *first* paint right),
+> and replaces the refetch-and-restore machinery with one message.
+
+### What is already done, and why that changes the step
+
+The reconciliation section at the top of this doc called this step "the actual work of this
+phase," on the reading that `serve_epub_resource` takes no theme and its caller is a
+closure registered once at mount. Both halves of that have since been overtaken:
+
+- **The theme is already a `Signal<Theme>`.** `App` holds `use_signal(|| Theme::Sepia)` and
+  provides it; `Reader` takes `use_context::<Signal<Theme>>()`. Landed quietly inside
+  `27e1d86`.
+- **The handler is already reactive, for a reason worth knowing.** `use_asset_handler` does
+  not store your closure — it passes it to `use_callback`, and `use_callback` *replaces its
+  inner closure on every render* (`dioxus-hooks-0.7.9/src/use_callback.rs:22`). So the
+  closure `use_register_asset_handler` builds each render, capturing that render's
+  `theme()`, is the one the next request runs. "Registered once at mount" describes the
+  *handler slot*, not the code in it. Reading `theme()` in `Reader`'s body subscribes
+  `Reader` to the signal, which is what makes the re-render happen at all.
+- **The switcher is built, and better than the original sketch.** A `<select>` in its own
+  `src/ui/theme.rs` — which is why `Theme::from_slug` exists, since the change event hands
+  back a string and the enum needs a way home from its own slug. It sits on *both* screens,
+  the reader chrome and the library, the latter wrapped in a themed `div`. A `<select>` also
+  *states* the current theme, which a row of buttons cannot without extra styling. Keep all
+  of it; `slug` and `from_slug` both stay even though the URL no longer uses them.
+
+So the plumbing and the control are done. What is left is the delivery.
+
+### The crux: a colour change is not a new document
+
+The old entry framed this as "the frame never asks again," and set out to make it ask. That
+framing is what produced the blink. Look at what actually differs between the document on
+screen and the document a refetch would return:
+
+```
+:root { --USER__backgroundColor: #faf4e8; --USER__textColor: #5b4636; }   ← two values
+body  { background: var(--USER__backgroundColor) !important; … }          ← identical
+…every other byte…                                                       ← identical
+```
+
+Two values. Every rule that consumes them is already in the document, unchanged, because
+`user_layer()` emits the same rule for every theme. Nothing about the layout depends on a
+colour, so every page boundary is exactly where it was and the page count cannot change.
+Refetching to deliver two strings throws away a parsed document, a layout, and a scroll
+position, then rebuilds all three — and the restore machinery exists purely to undo that.
+
+The document already runs our JavaScript (`allow-scripts` on the iframe, six injected assets)
+and already listens for `--ook-page` over `postMessage`. The theme is the same trick with two
+more variables: **`page-listener.js` is the precedent, not `chapter-loader.js`.**
+
+### The second crux: which declaration wins, and why nothing needs re-injecting
+
+The message sets the variables as an **inline style on `documentElement`**:
+
+```js
+document.documentElement.style.setProperty("--USER__backgroundColor", "#121212");
+```
+
+Three facts make that enough on its own:
+
+1. `:root` **is** `documentElement`, so the injected `:root { … }` block and the inline style
+   are two declarations for the same property on the same element.
+2. An inline declaration outranks any selector-based one. No `!important`, no specificity
+   arithmetic, no re-injection — the served block simply loses, which is exactly what you
+   want for the one it is meant to be a default for.
+3. Custom properties **inherit**. `body { background: var(--USER__backgroundColor) }` reads
+   whatever the root currently holds, so re-pointing the root re-paints the body with no rule
+   anywhere being rewritten.
+
+That is why the served-time injection stays: it is the value a document is *born* with, and
+the message is the value it is *changed* to. Same two variables, two routes, chosen by whether
+the document exists yet.
+
+### Runnable check
+
+**`cargo test`**, three new tests.
+
+The first is the one that will still be earning its keep in Step 5 — it pins the two routes
+to each other, in both directions:
+
+```rust
+// src/web/assets.rs
+#[test]
+fn the_pushed_vars_and_the_injected_layer_name_the_same_variables() {
+    for theme in [Theme::Day, Theme::Sepia, Theme::Night] {
+        let layer = theme.user_layer();
+
+        // Nothing pushed that the served layer never declares or never applies …
+        for (name, value) in theme.css_vars() {
+            assert!(
+                layer.contains(&format!("{name}: {value};")),
+                "{theme:?} pushes {name}, which the injected layer never declares",
+            );
+            assert!(
+                layer.contains(&format!("var({name})")),
+                "{theme:?} declares {name} and no rule reads it",
+            );
+        }
+
+        // … and nothing read that no message will ever set.
+        for reference in layer.split("var(").skip(1) {
+            let name = reference.split(')').next().expect("var( … ) closes");
+            assert!(
+                theme.css_vars().iter().any(|(pushed, _)| *pushed == name),
+                "the layer reads {name}, which the message never sets — \
+                 that variable would only ever update on a chapter turn",
+            );
+        }
+    }
+}
+```
+
+The second direction is the interesting one. Add `--USER__fontSize` to the stylesheet in
+Step 5 and forget to push it, and the theme half-updates live — colours move, size doesn't,
+until you turn the page. No runtime error, nothing in a log. This catches it at `cargo test`.
+
+The second test is the injection, mirroring `injects_page_listener_before_head_close`:
+
+```rust
+// src/epub.rs
+#[test]
+fn injects_a_theme_listener_before_head_close() {
+    let xhtml = r#"<html xmlns="http://www.w3.org/1999/xhtml"><head><title>T</title></head><body><p>Hi</p></body></html>"#;
+
+    let out = insert_before_head_close(xhtml, INJECTED_ASSETS);
+
+    assert!(out.contains("ook-set-theme"));
+    assert!(out.find("ook-set-theme").unwrap() < out.find("</head>").unwrap());
+    assert!(out.contains("<p>Hi</p>"));
+}
+```
+
+The third pins the two halves of the channel together, the way
+`the_loader_and_the_cleanup_agree_on_where_the_blob_url_lives` already does for the blob URL:
+
+```rust
+// src/ui/reader.rs
+#[test]
+fn the_theme_push_and_the_chapter_listener_agree_on_the_message_kind() {
+    // Two files, one message name, no compiler between them. Rename it on one side
+    // and the theme silently stops arriving — nothing errors, the colours just stop.
+    assert!(THEME_PUSH_JS.contains("ook-set-theme"));
+    assert!(crate::web::assets::INJECTED_ASSETS.contains("ook-set-theme"));
+}
+```
+
+And two tests come back **without being touched**: reverting `chapter_url` to one argument
+makes `the_chapter_url_is_the_route_plus_the_zip_path` and
+`the_chapter_url_encodes_spaces_but_keeps_path_separators` pass again as originally written.
+That they were failing was the first sign the query string was fighting the design.
+
+One test goes away with the code it covered: nothing sets `Pending::Page` any more.
+
+**`dx serve`** for the rest, because no unit test reaches it:
+
+- Click Night → the page inside the frame goes dark **without blinking**. No white flash, no
+  blank frame, no reflow. This is the whole step; if you see a flash, the URL is still busted.
+- Click back to Day, then Night again. (The second click catches a URL that changes only once
+  — less relevant now, but it also catches a listener that only fires the first time.)
+- The book's structural styling survives — drop caps, headings, the `<hr>` rules.
+- **Turn to page 3, switch themes: you are still on page 3**, and you should be able to see
+  that nothing moved, because nothing re-laid-out.
+- Turn to the next chapter *after* switching → it arrives already in the new theme, from the
+  served bytes. No first-frame flash of the old colours.
+- Reopen a book saved mid-chapter: it still lands on the saved position. Removing the
+  `Pending::Page` effect must not have disturbed the `Pending::Fragment` path.
+
+### Minimal implementation (sketch)
+
+**One source of truth for the variable list** (`web/theme.rs`) — the pairs, with the CSS
+string derived from them rather than written twice:
+
+```rust
+pub(crate) fn css_vars(self) -> [(&'static str, &'static str); 2] {
+    let (background, text) = self.colors();
+
+    [
+        ("--USER__backgroundColor", background),
+        ("--USER__textColor", text),
+    ]
+}
+
+fn declarations(self) -> String {
+    self.css_vars()
+        .iter()
+        .map(|(name, value)| format!("{name}: {value};"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+```
+
+**`theme-listener.js`** — new, joins `INJECTED_ASSETS` beside `page-listener.js`:
+
+```js
+window.addEventListener("message", function (e) {
+  if (!e.data || e.data.kind !== "ook-set-theme") {
+    return;
+  }
+  for (const [name, value] of e.data.vars) {
+    document.documentElement.style.setProperty(name, value);
+  }
+});
+```
+
+**`theme-push.js`** — new, the parent side, `include_str!`d in `reader.rs` next to
+`CHAPTER_LOADER_JS`:
+
+```js
+const vars = await dioxus.recv();
+const frame = document.getElementById("reader-frame");
+
+frame?.contentWindow?.postMessage({ kind: "ook-set-theme", vars }, "*");
+```
+
+**The effect in `Reader`** — this *replaces* the `Pending::Page` effect at `ui/reader.rs:65`:
+
+```rust
+use_effect(move || {
+    let push = document::eval(THEME_PUSH_JS);
+    _ = push.send(theme().css_vars());
+});
+```
+
+**Revert `chapter_url`** to the one-argument form it had before, and the loader effect with
+it:
+
+```rust
+let url = epub::chapter_url(&docs_for_iframe[chapter()]);
+```
+
+**Delete**, because nothing constructs them once the reload is gone — and `Pending::Page`
+would fail `-D warnings` as a never-constructed variant if you left it:
+
+- `Pending::Page(usize)` (`nav.rs:24`)
+- `restored_page` (`nav.rs:148`)
+- `on_pages` goes back to `if matches!(pending(), Pending::LastPage)`
+
+**Keep**, though the URL no longer needs them: `slug` (the `<select>`'s option values and
+labels) and `from_slug` (the change event's round trip).
+
+Two cleanups this step still earns: `App`'s `use_signal(|| Theme::Sepia)` becomes
+`use_signal(Theme::default)`, and the `#[allow(dead_code)]` on `Night` comes off — the
+switcher constructs it, which is what the attribute was waiting for.
+
+### Why it works
+
+- **Repaint, not reflow — and that is why the restore machinery leaves.** A custom property
+  that only feeds `background` and `color` invalidates paint, not layout. Column boxes,
+  `scrollWidth`, page boundaries: all unchanged. `Pending::Page` was never about themes; it
+  was about a *reload*, and once the reload goes it has nothing to restore. Deleting working,
+  tested code is the right move when the thing it repaired no longer happens.
+- **The frame stops blanking for free.** `class: if pending().is_settling() { "invisible" }`
+  keys off `Pending != Nothing`. With no `Pending::Page` being set, a theme change never
+  enters a settling state, so the class never applies. The blink had two sources — the
+  document teardown and the deliberate hide — and one change removes both.
+- **The URL goes back to naming a chapter.** The old entry argued the query was "the identity,
+  not a cache-buster," and that reading is defensible: two themes really are two renderings.
+  But `dataset.chapterUrl` is the only cache that reads it, and that guard exists precisely to
+  say "you already have this document." A theme change *should* hit that early return. Making
+  the URL differ bought correctness for one consumer at the price of a full teardown — the
+  right fix is to stop needing new bytes at all.
+- **Serve-time injection still earns its place, and now it is the only thing that does.** The
+  handler is `use_callback`-refreshed, so a chapter fetched after a switch already carries the
+  new colours in its bytes. Without it every chapter turn would paint the old theme for one
+  frame and then correct — the same flash, just smaller. Bytes for a document that does not
+  exist yet; a message for one that does.
+- **Send data, not source.** The page effect at `ui/reader.rs:81` `format!`s its number into a
+  script body; `chapter-loader.js` takes its arguments over `dioxus.recv()`. Follow the
+  loader. With two hex colours the difference is invisible, but Step 5 pushes a font-family
+  string, and building JavaScript source by concatenating values is a quoting bug on a timer.
+- **An array of pairs is why there is no `serde_json`.** `[(&'static str, &'static str); 2]`
+  serialises straight to a JSON array of two-element arrays, which JS destructures with
+  `for (const [name, value] of vars)`. No new dependency, no hand-rolled JSON escaping, and
+  the length is the only thing Step 5 has to change.
+- **`css_vars` first, `declarations` derived — the ordering matters.** Write the pairs as the
+  primary form and the CSS string as a fold over them, and the two routes cannot disagree
+  about *values*. The pairing test then covers the other half: that they do not disagree about
+  *which variables exist*.
+- **Reading a signal inside `use_effect` is still the subscription.** `theme()` in the effect
+  body registers it as a subscriber, so `.set` re-runs it and it pushes. Same lesson the old
+  entry drew for the URL effect — now with one effect instead of two, and no `peek()`
+  bookkeeping, because this effect writes nothing.
+- **`Copy` on `Theme` is what makes `theme()` cheap here.** The effect reads the signal by
+  value on every run; Step 1's derive is what lets that be a copy rather than a borrow held
+  across the `send`.
+- **The listener knows nothing about colours.** It loops a name/value list. Step 5 adds
+  `--USER__fontSize` and friends by extending `css_vars` and the stylesheet — the JavaScript
+  does not change at all.
+
+### Scope note
+
+Deferred, unchanged: persisting the chosen theme across launches (the reader opens on the
+default every time), and any control over the app shell's colours beyond following the book.
+
+**One race, named and accepted.** Switch themes while a chapter fetch is still in flight and
+the push lands in the outgoing document, while the incoming bytes may have been served under
+the old theme — that chapter stays stale until the next change. The window is a single fetch
+from an in-memory zip, and it needs a theme click landing inside a chapter turn. If it ever
+bites, the fix is the shape this codebase already uses twice: re-push when `pages:N` arrives,
+letting the fresh document's own announcement that it exists be the trigger, exactly as
+`Pending::LastPage` does. Not worth building on speculation.
+
+**Step 5 gets cheaper, but not free.** Font-size and line-length *do* reflow, so they do need
+a re-anchor — and the earlier note still stands: do it by the `ook-sel:` selector
+`restored_data` already uses, not by a page number, because a page index means nothing across
+a reflow. What Step 5 no longer needs is a transport: this channel carries those variables
+with no new mechanism, and the pairing test above will fail the moment a new variable is added
+to only one end.
+
+---
+
+## Steps 5–6 — sketched
 - **Step 5 — typography (later, one at a time).** `--USER__fontSize` (75–250%),
   `--USER__lineHeight` (1–2), `--USER__lineLength`, page margins, then `--USER__fontFamily`
   from a *curated* list. Each: a variable + a control + a `cargo test` on the rendered string.

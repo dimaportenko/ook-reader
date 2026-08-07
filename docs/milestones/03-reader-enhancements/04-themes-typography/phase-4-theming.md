@@ -28,8 +28,9 @@ Driving it needs an **injection seam**. We already have one:
 [Phase 3, Step 8](../../02-basic-reader/01-epub-rendering/phase-3-epub-rendering-steps.md)
 renders each content document as a **served XHTML resource**
 (`Content-Type: application/xhtml+xml`, iframe `src="/epub/…"`) instead of `srcdoc` — the
-handler that serves it is where we inject. A settings change is then "re-serve / reload the
-frame," so the sandbox stays script-free.
+handler that serves it is where we inject, so a chapter is born with the current settings
+already in its bytes. Changing a setting *afterwards* does not go back through the handler —
+see the decision on live updates below.
 
 > **Prerequisite:** Phase 3 Step 8 (served-XHTML renderer) must land first. It also fixes the
 > anchor-wrap rendering bug — that fix is rendering correctness and lives in Phase 3, not here.
@@ -57,8 +58,13 @@ implementation → why. Smallest-first:
       `<header>` would otherwise match. ADR-0003 flagged this as the only realistic
       `rbook`-fork trigger; it stayed closed, since Step 2 had already dropped `inject_css`
       and made head surgery ours. Committed in `1fe0398`, **58 tests green**.
-- [ ] **Step 4 — Theme switcher in the app chrome.** A `use_signal` holds the current theme;
-      Day/Sepia/Night controls re-serve/reload the iframe.
+- [x] **Step 4 — Theme switcher in the app chrome.** A `use_signal` holds the current theme;
+      a Day/Sepia/Night `<select>` sits on both screens. The change reaches the document by
+      **two routes**: the served bytes carry it for a chapter that has not loaded yet, and an
+      `ook-set-theme` `postMessage` writes the `--USER__*` values as an inline style on the
+      live frame's `documentElement` for one already on screen. **No reload** — a colour
+      change is a repaint, so the layout, the page count and the page you are on all survive
+      untouched. Committed in `ed1df0d`, **61 tests green**.
 - [ ] **Step 5 — Typography settings (later).** font-size, line-height, line-length,
       margins, then font-family from a *curated* list — each a `--USER__*` variable + a
       control, sequenced one at a time.
@@ -75,8 +81,17 @@ implementation → why. Smallest-first:
   themes fall out of this for free.
 - **Curated fonts, not a free picker.** font-family offers a small named list
   (old-style / modern / sans / humanist), matching reader conventions.
-- **Settings-change = reload** (script-free sandbox). Acceptable for one small book; revisit
-  if it bites.
+- ~~**Settings-change = reload** (script-free sandbox). Acceptable for one small book;
+  revisit if it bites.~~ **It bit, in Step 4.** Both halves of the premise had expired: the
+  sandbox is not script-free (`allow-scripts`, plus seven injected assets), and the reload is
+  not acceptable — it tears down the document, re-measures it and blanks the frame to change
+  two colour values, which reads as a blink on every click. **Settings-change = message.**
+  The reader posts the `--USER__*` name/value pairs to the frame and the document writes them
+  onto `documentElement` as an inline style, which outranks the served `:root` block without
+  anything being re-injected. Serve-time injection stays, for the first paint of a chapter
+  that has not loaded yet. Colour changes need nothing further; Step 5's reflowing settings
+  (font-size, line-length) still need to re-anchor the reading position afterwards, by
+  selector rather than page number.
 - **Language-sensitive settings.** hyphenation / text-align don't apply to CJK; out of scope
   for the first English-only slice, noted so it isn't designed out.
 
