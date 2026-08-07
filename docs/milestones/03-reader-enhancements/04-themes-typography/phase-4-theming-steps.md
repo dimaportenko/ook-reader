@@ -70,9 +70,22 @@ entries have not been rewritten, so where they disagree with this section, this 
 
 ## Step 1 — model a theme in Rust
 
-> **Status:** 🚧 in progress — suggested 2026-08-06, the first step of Phase 4. Baseline to
-> beat: **49 tests green**, `cargo clippy --all-targets -- -D warnings` clean. This step
-> adds one test (49 → 50) and touches no existing file except one `mod` line.
+> **Status:** done — committed in `27e1d86`, together with Step 2 (**54 tests green**,
+> `cargo clippy --all-targets -- -D warnings` clean). Suggested 2026-08-06, the first step of
+> Phase 4; baseline to beat was **49 green**.
+>
+> **It did not land alone.** The plan had this step end with nothing calling `Theme` and a
+> `dead_code` warning standing as the honest signal of a half-built seam. In the event Step 2
+> was written on top of it before either was committed, so the two share a commit and the
+> warning never became a real state of the tree — only `Night` stayed unconstructed, and it
+> carries an `#[allow(dead_code)]` until Step 4's switcher. Predicted 49 → 50; actual 49 → 54,
+> the extra three being Step 2's (see below).
+>
+> Two things shifted from the sketch below, both under review. `vars()` was split so a
+> private `declarations()` owns the variable names and values, leaving `vars()` to wrap them
+> in `:root { … }` — Step 5 adds four more variables and this is the one place they go.
+> And the tests live in `web/assets.rs`'s `mod test` rather than a new one in `theme.rs`,
+> next to the injection they are really about.
 
 A theme is a set of `--USER__*` values, so model it as data and render it to a CSS string —
 pure Rust, fully testable, before any of it touches the webview. Nothing calls it at the end
@@ -187,7 +200,10 @@ this step is one half of a seam.
 
 ## Step 2 — inject the USER layer
 
-> **Status:** ⬜ planned.
+> **Status:** done — committed in `27e1d86` alongside Step 1 (**54 tests green**, 49 → 54;
+> `cargo clippy --all-targets -- -D warnings` clean). The sketch below was written before
+> Phases 5–7 and is kept for the record; what was actually built differs on the one point
+> that matters, and the ✅ notes say where.
 
 Step 1 produced the variables; now they must reach the served document *and* a tiny override
 sheet must actually *use* them (a variable alone styles nothing). Inject both **after** the
@@ -199,6 +215,18 @@ book's CSS so they win at equal specificity.
   `<link rel="stylesheet">` (assert the `<style>` index is greater than the `<link>` index).
 - `dx serve`: with Night injected, the page background goes dark and text light **inside** the
   iframe; the book's structural styling (drop cap, headings) still renders.
+
+> ✅ **As built.** `serving_a_chapter_injects_the_theme_after_every_other_layer` in
+> `epub.rs` serves a real chapter from the fixture under `Theme::Night` and asserts the
+> `--USER__backgroundColor` offset is greater than *both* `pgepub.css` (the book's own sheet)
+> and `--ook-page: 0` (pagination.css), and still inside `<head>`. Two more in `assets.rs`
+> cover the pieces underneath: `the_injected_layer_applies_the_variables_it_declares` checks
+> that every variable declared is also read by a rule — a declaration nothing consumes styles
+> nothing — and `wrapped_css_is_a_cdata_style_element` pins the CDATA wrapper.
+>
+> Worth recording: all three passed on their first run. They pin behaviour rather than drive
+> it, because the implementation was already written when they were added. A test that never
+> went red has proved less than one that did.
 
 ### Minimal implementation (sketch)
 
@@ -216,6 +244,28 @@ let rewrite = EpubRewriteOptions::default().inject_css(&layer); // confirm build
 // serve manifest_entry.read_str_with(&rewrite) as application/xhtml+xml
 ```
 
+> ✅ **As built — and this is where the sketch is wrong.** `inject_css` *was* used first, and
+> it puts the layer in the wrong place. It writes at end-of-head **during the rewrite**, so
+> its output is already in the string by the time `insert_before_head_close` runs; the static
+> assets then land *after* it. Head order came out `book CSS → theme → pagination.css`, and
+> since every `body` rule in pagination.css is `!important`, the theme lost every tie. Colour
+> survived only because pagination.css sets no colours — Step 5's margins would not have.
+> There is no ordering knob that fixes this: the two injections happen at different stages
+> and the later stage always wins. So `inject_css` is gone, and the theme is concatenated
+> onto `INJECTED_ASSETS` before the single `insert_before_head_close` call:
+>
+> ```rust
+> let inject_css = format!("{INJECTED_ASSETS}{}", wrap_css_str(&theme.user_layer()));
+> let with_assets = insert_before_head_close(&xhtml, &inject_css);
+> ```
+>
+> Owning the injection means owning the `<style>` wrapper that `inject_css` was providing.
+> Chapters are served as `application/xhtml+xml`, so that element's body is parsed as **XML**:
+> `wrap_css_str` (`web/assets.rs`) wraps it in `/*<![CDATA[*/ … /*]]>*/`, the same thing the
+> `wrap_css!` macro does for pagination.css. The macro takes an `include_str!` path and cannot
+> wrap a runtime `String`, hence the function beside it. Nothing in today's CSS needs the
+> escape; a `body > p` selector in Step 5 would abort the entire document without it.
+
 ### Why it works
 
 - **Source order breaks the tie.** Same specificity, later wins — injecting after the book's
@@ -225,12 +275,34 @@ let rewrite = EpubRewriteOptions::default().inject_css(&layer); // confirm build
 - **`var(--USER__…)` indirection** is why Step 4's switch is cheap: re-serve with different
   variable values and every rule that reads them updates.
 
+> ✅ **One addition.** "After the book's CSS" was the plan's tie-breaker; the real tie is with
+> **pagination.css**, which is ours and `!important` throughout. The USER layer must come
+> after that too, which makes the injected head a three-layer stack already — author, then
+> reading-system, then user — before Step 3 adds the RS-defaults layer *underneath* the book.
+
 ### Scope note
 
 This switches the Step 8 handler from serving raw doc bytes to serving an injected string for
 content documents. `inject_css` writes at end-of-head only — fine for the USER (after) layer;
 the **RS (before)** layer in Step 3 needs the *start* of `<head>`, which `inject_css` can't do.
 Decide that there, not here.
+
+> ✅ **As built, plus what leaked in.** `inject_css` is no longer used at all, so Step 3's
+> question is now simply "where does `insert_before_head_close`'s sibling go" — a second
+> helper that writes after `<head>` rather than before `</head>`.
+>
+> Two things landed here that this step's scope did not call for, both deliberate, both
+> unfinished:
+>
+> - **The app shell is themed too.** `Theme::inline_styles()` on the reader's root `div`
+>   (`ui/reader.rs`), so the chrome around the iframe matches the page inside it rather than
+>   framing a sepia book in white. Without `!important`, unlike the book document — the shell
+>   has no publisher CSS to beat, and `assets/main.css` should stay able to override it.
+> - **The theme reaches the handler through context**, not a signal. `App` provides a plain
+>   `Theme` and `use_register_asset_handler` copies it into a closure registered once at
+>   mount, so nothing can observe a change yet — and it is pinned to `Sepia`, overriding the
+>   `#[default] Day` the enum derives. That is Step 4's whole job, and it will have to
+>   re-thread both the context and the handler, not just flip a `Signal`.
 
 ---
 

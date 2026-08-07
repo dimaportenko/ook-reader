@@ -39,15 +39,22 @@ frame," so the sandbox stays script-free.
 See the [build log](phase-4-theming-steps.md) for each step's runnable check → minimal
 implementation → why. Smallest-first:
 
-- [ ] **Step 1 — Model a theme in Rust.** A `Theme` enum → a `:root { --USER__… }` CSS
-      string. Pure Rust, `cargo test` on the variable values for day/sepia/night.
-- [ ] **Step 2 — Inject the USER layer.** Wire Step 1's variable block + a minimal
-      override sheet into the served document, *after* the book's CSS (via `rbook`'s
-      `inject_css`, which writes before `</head>`). Night actually darkens the page.
+- [x] **Step 1 — Model a theme in Rust.** A `Theme` enum → a `:root { --USER__… }` CSS
+      string. Pure Rust, `cargo test` on the variable values for day/sepia/night. Committed
+      in `27e1d86` with Step 2 — it was never landed on its own, so the `dead_code` warning
+      it was planned around never happened.
+- [x] **Step 2 — Inject the USER layer.** Wire Step 1's variable block + a minimal
+      override sheet into the served document, *after* the book's CSS **and after
+      `pagination.css`**, which is the tie that actually mattered — it is ours and
+      `!important` throughout. `rbook`'s `inject_css` cannot reach that slot (it writes
+      during the rewrite, so `insert_before_head_close` always lands after it), so the theme
+      is concatenated onto `INJECTED_ASSETS` instead. Committed in `27e1d86`, **54 tests
+      green**.
 - [ ] **Step 3 — Add the RS-defaults layer before the book CSS.** Completes the three-tier
-      cascade (RS < author < USER). Watch the injection point — `inject_css` only writes at
-      end-of-head, so the *before* layer needs our own head-rewrite (the spot ADR-0003 flags
-      as the only realistic `rbook`-fork trigger).
+      cascade (RS < author < USER). Watch the injection point — with `inject_css` now out of
+      the picture entirely, the *before* layer needs a sibling to `insert_before_head_close`
+      that writes after `<head>` (the spot ADR-0003 flags as the only realistic
+      `rbook`-fork trigger).
 - [ ] **Step 4 — Theme switcher in the app chrome.** A `use_signal` holds the current theme;
       Day/Sepia/Night controls re-serve/reload the iframe.
 - [ ] **Step 5 — Typography settings (later).** font-size, line-height, line-length,
