@@ -1,6 +1,6 @@
 # Phase 4 — Themes & Typography
 
-[← Feature: Themes & Typography](README.md) · **Status:** ⬜ planned ·
+[← Feature: Themes & Typography](README.md) · **Status:** 🚧 in progress ·
 build log: [`phase-4-theming-steps.md`](phase-4-theming-steps.md) ·
 decision: [ADR-0003](../../../adr/0003-reader-controlled-theming-injected-layer.md)
 

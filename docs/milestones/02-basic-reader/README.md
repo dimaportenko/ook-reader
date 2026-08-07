@@ -5,7 +5,9 @@
 **Goal:** open an `.epub` from disk and read it on the desktop — paginated, with the
 reading position remembered between launches. The minimum viable reader to build on.
 
-**Status:** 🚧 in progress (Features 1–2 done; Feature 3 in progress)
+**Status:** ✅ done — all three features shipped and all three exit criteria met. One item
+of the July review backlog (**R6**, hygiene) is still open and rides into the next phase;
+it is a small behavior fix, not a milestone blocker.
 
 ## Features
 
@@ -13,7 +15,7 @@ reading position remembered between launches. The minimum viable reader to build
 |---|---|---|---|
 | 1 | [EPUB Rendering](01-epub-rendering/README.md) | Parse with `rbook`, render a spine item in a webview iframe | ✅ |
 | 2 | [Library & Import](02-library/README.md) | Add `.epub` files; list books with covers | ✅ |
-| 3 | [Reading Position](03-reading-position/README.md) | Persist & restore where you stopped | 🚧 |
+| 3 | [Reading Position](03-reading-position/README.md) | Persist & restore where you stopped | ✅ |
 
 ## Cross-cutting
 

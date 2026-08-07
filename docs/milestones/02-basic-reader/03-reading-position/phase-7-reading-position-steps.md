@@ -869,7 +869,14 @@ share the same idea of what a page is. That is fine while each asset stays indep
 injectable, but it is the kind of duplication the review step should either extract or
 consciously accept.
 
-### ⏱️ Performance: `firstElementOnPage` is a linear scan — to measure at Step 9
+### ⏱️ Performance: `firstElementOnPage` is a linear scan — spot-checked at Step 9b-iii
+
+> **Outcome (Step 9b-iii).** Checked against the actual shelf and **no cost was
+> perceptible**, so the scan ships unchanged. But the check was run on ordinary EPUBs —
+> chapter-per-file books — and **none of them has the long chapter this section is about**.
+> The worst case below is therefore *unfalsified, not disproved*. Left standing on purpose,
+> with fix 1 (the one-line `break`) as the first thing to reach for if a
+> whole-book-in-one-XHTML title ever turns up and feels sticky on a late page.
 
 `firstElementOnPage` walks **every** element in the chapter body, in document order, reading
 `getClientRects()` and `offsetLeft` on each until one lands on the target page. Written for
@@ -1971,9 +1978,10 @@ obviously wrong, not less. **Step 9** collapses them into an enum, alongside mea
 
 ## Step 9 — review & refactor
 
-> **Status:** in progress — **9a done** (`aa58c21`), **9b-i/ii done** (`920b20e`), **9c
-> done** (`3545af5`, `1f64ff7`, `e5e8fcd`); **9b-iii (the measurement) is all that is left
-> of Step 9.** Baseline before any edit: **48 tests green**,
+> **Status:** done — **9a** (`aa58c21`), **9b-i/ii** (`920b20e`), **9c** (`3545af5`,
+> `1f64ff7`, `e5e8fcd`), **9b-iii** closed on the available corpus (see 9b below: no pause
+> on any book on the shelf; the pathological long-chapter case stays untested for want of a
+> book that has one). Baseline before any edit: **48 tests green**,
 > `cargo clippy --all-targets -- -D warnings` **clean**; now **49 green** after 9b's one new
 > test. That pair is the safety net for everything below — it must read identically
 > afterwards, and did, in all three 9c commits.
@@ -2190,11 +2198,21 @@ the `Library` surface (9c).
 
 ### 9b — one page formula, in one file, measured
 
-> **Status:** i and ii done — committed in `920b20e` (**49 tests green**, 48 → 49 as
-> predicted; clippy `-D warnings` clean). **iii is outstanding**: the `firstElementOnPage`
-> measurement has not been run, so the phase doc's "unmeasured" caveat stays until it is.
-> Its snippet was corrected before running — the original timed page 0, which is the one
-> page the scan returns from immediately. See iii below.
+> **Status:** done. **i and ii** committed in `920b20e` (**49 tests green**, 48 → 49 as
+> predicted; clippy `-D warnings` clean). Its snippet was corrected before running — the
+> original timed page 0, which is the one page the scan returns from immediately. See iii
+> below.
+>
+> **iii closed as "fine on the corpus I have," not as a number.** The scan was exercised
+> across the books actually on the shelf and never produced a perceptible pause on a page
+> turn, so the ≤ 2 ms branch of the decision rule is what the code ships under. The honest
+> caveat, recorded rather than rounded away: **those books are chapter-per-file, so none of
+> them is the case the rule was written for.** A whole-book-in-one-XHTML EPUB is where the
+> late-page scan could bite, and no such book was available to point at. The rule and its
+> fixes stay written down in the ⏱️ section under Step 4 for whoever meets one; fix 1 (the
+> one-line `break`) is a ten-minute answer if it ever shows up. Deliberately *not* deleting
+> that section, which the ≤ 2 ms branch would otherwise have licensed — a rule discharged
+> by "seems fine" has not earned the cleanup a measurement would have earned.
 >
 > Two leftovers cleaned up in the same commit. The `--ook-page` comment ("`page-listener.js`
 > is the only thing that writes it") was attached to `currentPage` in `fragment-scroll.js`

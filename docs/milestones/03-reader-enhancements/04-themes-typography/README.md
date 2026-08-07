@@ -4,7 +4,7 @@
 
 **Outcome:** the reader (the human) controls how the book looks — day / sepia / night, then
 font size, line height, line length, and margins — without the publisher's CSS getting in
-the way, and without throwing that CSS away. **Status:** ⬜ planned (full plan written).
+the way, and without throwing that CSS away. **Status:** 🚧 in progress.
 
 ## Why this, why now
 
@@ -17,15 +17,20 @@ here; this feature *builds on* the corrected renderer. The decision to **layer**
 over the book's CSS (rather than replace it), to render content as served XHTML, and to **not
 fork `rbook`**, is [ADR-0003](../../../adr/0003-reader-controlled-theming-injected-layer.md).
 
-> **Sequencing.** This feature stays in Milestone 3 (it *is* a reader enhancement), but its
-> plan is written now and it is worked **next**, ahead of Milestone 2's Library and
-> Reading-Position features. That is a deliberate choice, not drift (ADR-0002).
+> **Sequencing, as it actually went.** This feature stays in Milestone 3 (it *is* a reader
+> enhancement). Its plan was written early with the intent of working it **ahead** of
+> Milestone 2's Library and Reading-Position features (ADR-0002). That is not what happened:
+> Library (Phase 6) and Reading Position (Phase 7) shipped first, closing Milestone 2, and
+> this phase is picked up after them. The plan below needed no revision for the delay — but
+> Phase 4 now inherits a served-XHTML renderer that has since grown injected assets,
+> pagination, and a position bridge, so its injection seam has more neighbours than the plan
+> assumes.
 
 ## Phases
 
 | # | Phase | Outcome | Status |
 |---|-------|---------|--------|
-| 4 | [Themes & Typography](phase-4-theming.md) | Readium-style injected override layer: day/sepia/night first, typography next | ⬜ |
+| 4 | [Themes & Typography](phase-4-theming.md) | Readium-style injected override layer: day/sepia/night first, typography next | 🚧 |
 
 ## Reference
 

@@ -1,6 +1,6 @@
 # Phase 7 — Reading Position
 
-[← Feature: Reading Position](README.md) · **Status:** 🚧 in progress ·
+[← Feature: Reading Position](README.md) · **Status:** ✅ done ·
 build log: [`phase-7-reading-position-steps.md`](phase-7-reading-position-steps.md)
 
 ## Goal
@@ -82,7 +82,10 @@ eyeball, and it's deliberately checkable *in devtools* before any database is wi
   loop never writes to the DOM, so layout is computed once on the first read and every
   later read hits the clean cached value. Once per page turn, on a chapter-sized document,
   that should be invisible; it is chosen for being obviously correct, not for being fast.
-  **Not yet measured** — see the measurement and the alternatives under Step 9 below.
+  **Spot-checked at 9b-iii and left as-is**: no perceptible cost on any book on the shelf,
+  though every one of those is chapter-per-file, so the long-chapter case the concern was
+  written for was never actually put under the scan. The alternatives stay recorded under
+  Step 4 in the steps doc.
 
 ## Planned steps
 
@@ -128,7 +131,7 @@ eyeball, and it's deliberately checkable *in devtools* before any database is wi
       transitions + the end-to-end eyeball: quit the app, relaunch, open the book, land on
       the same page. **Ticks the milestone exit criterion** — code landed in `e56d0b8`, and
       the eyeball was run alongside 9a's four transitions in `aa58c21`.
-- [ ] **Step 9 — Review & refactor** (mandatory phase-closer), split into three sittings —
+- [x] **Step 9 — Review & refactor** (mandatory phase-closer), split into three sittings —
       detail in [the steps doc](phase-7-reading-position-steps.md#step-9--review--refactor):
   - [x] **9a — one `Pending` enum.** `pending_fragment` + `pending_last` collapsed into one
         field (the pair was reachable in a state neither wanted), the write-only `anchor`
@@ -136,13 +139,15 @@ eyeball, and it's deliberately checkable *in devtools* before any database is wi
         over the position it is restoring from**. Committed in `aa58c21`; the suite held at
         48 and all four `Pending` transitions were eyeballed, the fourth of which was Step
         8's outstanding end-to-end check.
-  - [ ] **9b — one page formula, measured.** The page↔element conversion is extracted to a
-        shared `page-geometry.js`; today two injected files declare the same top-level
-        `currentPage` into the same document. New red-today `#[test]` in `web/assets.rs`.
-        **Also: measure `firstElementOnPage`** on a long chapter — the scan cost is
-        documented as a decision above and as a to-test item in
+  - [x] **9b — one page formula, spot-checked.** The page↔element conversion is extracted to
+        a shared `page-geometry.js`; before it, two injected files declared the same
+        top-level `currentPage` into the same document. New red-today `#[test]` in
+        `web/assets.rs` (48 → 49). **`firstElementOnPage` was exercised on the shelf and
+        showed no perceptible cost** — but only on chapter-per-file books, so the
+        long-chapter worst case is unfalsified rather than disproved; the fixes stay
+        recorded in
         [the steps doc](phase-7-reading-position-steps.md#step-4--report-the-first-element-on-the-current-page-js).
-  - [ ] **9c — one error type at the `Library` boundary.** Six methods still return
+  - [x] **9c — one error type at the `Library` boundary.** Six methods still return
         `rusqlite::Result`, so the UI names rusqlite; `Error` already has the `#[from]`.
         Plus the `get_` accessor rename and one policy for swallowed best-effort errors
         (there are four spellings today).

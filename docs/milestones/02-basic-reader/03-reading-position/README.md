@@ -5,13 +5,13 @@
 **Goal:** remember where the reader stopped in each book and restore it on reopen, and
 surface recently-read books first in the library.
 
-**Status:** 🚧 in progress
+**Status:** ✅ done
 
 ## Phases
 
 | Phase | Outcome | Status |
 |---|---|---|
-| [Phase 7 — Reading Position](phase-7-reading-position.md) | Recency ordering + capture / persist / restore the reading locator | 🚧 |
+| [Phase 7 — Reading Position](phase-7-reading-position.md) | Recency ordering + capture / persist / restore the reading locator | ✅ |
 
 Planned as one phase (build log:
 [`phase-7-reading-position-steps.md`](phase-7-reading-position-steps.md)), built data-first

@@ -40,44 +40,118 @@ that kept Phase 3 small.
 > **Dependency.** Every step here serves through the Phase 3 Step 8 handler. Steps 2–3 inject
 > into the served document; Step 4 re-serves it on a settings change.
 
+## Reconciliation, before Step 1 (2026-08-06)
+
+This plan was written before Phases 5–7. The seam it describes is still the right one, but
+it is no longer spelled the way the sketches below spell it. Read this first; the step
+entries have not been rewritten, so where they disagree with this section, this section wins.
+
+- **There is no `rbook` `inject_css` call to add to.** The renderer has its own injection
+  helper: `serve_epub_resource` (`src/epub.rs:46`) runs
+  `insert_before_head_close(&xhtml, INJECTED_ASSETS)`, where `INJECTED_ASSETS`
+  (`src/web/assets.rs:21`) is a `concat!` of seven wrapped files — `pagination.css` plus the
+  six JS assets that pagination, links, the page count, fragment scroll, and the position
+  bridge grew out of. `EpubRewriteOptions` is still used, but only for `rewrite_paths`.
+- **The USER layer cannot join `INJECTED_ASSETS`.** That const is built at compile time and
+  is the same bytes for every request; a theme changes at *runtime*. So the theme block is a
+  second, dynamic string appended after the static one — which is also exactly the right
+  cascade position, since "after everything else in `<head>`" is what makes the USER layer
+  win at equal specificity.
+- **The real obstacle moved to Step 4, and it is worth knowing about now.**
+  `serve_epub_resource` takes no theme, and its caller is a `use_asset_handler` closure
+  registered once at mount. Getting "the theme the user just picked" into a long-lived
+  handler — and getting the already-rendered iframe to pick up the change — is the actual
+  work of this phase. Step 1 does not touch it, which is the point of doing Step 1 first.
+- **`--ook-page` is a precedent worth copying.** `pagination.css` already drives layout from
+  a custom property that something outside the stylesheet sets. The theme layer is the same
+  trick with a different writer.
+
 ---
 
 ## Step 1 — model a theme in Rust
 
-> **Status:** ⬜ planned.
+> **Status:** 🚧 in progress — suggested 2026-08-06, the first step of Phase 4. Baseline to
+> beat: **49 tests green**, `cargo clippy --all-targets -- -D warnings` clean. This step
+> adds one test (49 → 50) and touches no existing file except one `mod` line.
 
 A theme is a set of `--USER__*` values, so model it as data and render it to a CSS string —
-pure Rust, fully testable, before any of it touches the webview.
+pure Rust, fully testable, before any of it touches the webview. Nothing calls it at the end
+of this step; that is deliberate, and it is the same data-first shape Phase 7 opened with
+(the `positions` table existed for three steps before anything wrote to it).
+
+**Where it goes: a new `src/web/theme.rs`**, declared with `pub mod theme;` in
+`src/web/mod.rs` (today a single line). It belongs under `web/` rather than at the crate root
+because its output is *injected CSS* — the same job `web/assets.rs` already has, and the
+module it will sit next to when Step 2 wires them together. A top-level `src/theme.rs` would
+read as "the app's theme," which is a different thing: this is the theme of the **book
+document**, not the chrome around it.
 
 ### Runnable check (`cargo test`)
 
+A `#[cfg(test)] mod test` at the bottom of the new file, matching how `web/assets.rs` and
+`library.rs` write theirs. Watch it fail as a **compile error** first — `Theme` doesn't
+exist yet — which is the honest kind of red for a step that introduces a type.
+
 ```rust
-#[test]
-fn night_theme_sets_dark_background() {
-    let css = theme_vars(Theme::Night);
-    // The USER layer drives colour through these two variables (Readium convention).
-    assert!(css.contains("--USER__backgroundColor"));
-    assert!(css.contains("--USER__textColor"));
-    // Night is light-on-dark; day is the inverse — they must differ.
-    assert_ne!(theme_vars(Theme::Night), theme_vars(Theme::Day));
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn every_theme_sets_both_user_colour_variables() {
+        for theme in [Theme::Day, Theme::Sepia, Theme::Night] {
+            let css = theme.vars();
+
+            // The USER layer drives colour through these two, by Readium convention.
+            assert!(css.contains("--USER__backgroundColor"), "{theme:?} has no background");
+            assert!(css.contains("--USER__textColor"), "{theme:?} has no text colour");
+            // Step 2 injects this into a document that already has a `<style>`; it has to be
+            // a self-contained rule, not a bare declaration list.
+            assert!(css.starts_with(":root {"), "{theme:?} is not a :root rule");
+        }
+    }
+
+    #[test]
+    fn the_three_themes_are_actually_different() {
+        assert_ne!(Theme::Day.vars(), Theme::Night.vars());
+        assert_ne!(Theme::Day.vars(), Theme::Sepia.vars());
+        assert_ne!(Theme::Sepia.vars(), Theme::Night.vars());
+    }
 }
 ```
+
+The second test looks like it is asserting the obvious, and it is the one that will actually
+catch something: three near-identical `match` arms full of hex literals is exactly the shape
+where a copy-paste leaves two arms identical, and nothing else in the phase would notice —
+Step 4 would just render a theme switcher where one button appears to do nothing.
 
 ### Minimal implementation (sketch)
 
 ```rust
-enum Theme { Day, Sepia, Night }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum Theme {
+    #[default]
+    Day,
+    Sepia,
+    Night,
+}
 
-/// Render a theme to a `:root { … }` block of USER custom properties.
-fn theme_vars(theme: Theme) -> String {
-    let (bg, fg) = match theme {
-        Theme::Day   => ("#ffffff", "#121212"),
-        Theme::Sepia => ("#faf4e8", "#5b4636"),
-        Theme::Night => ("#121212", "#cfcfcf"),
-    };
-    format!(":root {{ --USER__backgroundColor: {bg}; --USER__textColor: {fg}; }}")
+impl Theme {
+    pub(crate) fn vars(self) -> String {
+        let (background, text) = match self {
+            Theme::Day => ("#ffffff", "#121212"),
+            Theme::Sepia => ("#faf4e8", "#5b4636"),
+            Theme::Night => ("#121212", "#cfcfcf"),
+        };
+
+        format!(":root {{ --USER__backgroundColor: {background}; --USER__textColor: {text}; }}")
+    }
 }
 ```
+
+Plus the one line in `src/web/mod.rs`. Expect a `dead_code` warning until Step 2 — the same
+knowing exception Phase 7 Step 3 recorded, for the same reason: the point of the step is
+that nothing consumes it yet.
 
 ### Why it works
 
@@ -85,6 +159,29 @@ fn theme_vars(theme: Theme) -> String {
   (the compiler flags a missing arm) and makes custom themes a later "another set of values."
 - **`--USER__` is the prefix that wins the cascade** (Step 2 wires it after the book CSS).
 - **No webview here** — this is the testable half, deliberately first.
+- **`Copy` and `Default` are not decoration.** `Copy` because `Theme` is two bits of data and
+  Step 4 will read it out of a `Signal` on every render — a `Signal<Theme>` of a `Copy` type
+  hands back the value with no clone and no borrow to hold. `Default` because the reader has
+  to open *somewhere* before anyone has chosen, and `#[default]` on the `Day` arm says which
+  arm that is in the type itself rather than in whichever call site happens to construct one
+  first.
+- **`fn vars(self)`, not `fn vars(&self)`.** For a `Copy` enum, taking `self` by value is
+  the idiom: there is nothing cheaper about a reference to two bits than the two bits, and by
+  value the method reads as a transformation of the value rather than an inspection of a
+  borrow. It also means `theme.vars()` works on a `Theme` read straight out of a signal
+  without a `&` at the call site.
+- **A method rather than a free `theme_vars(theme)` function** (as an earlier draft of this
+  step had it): `Theme::vars` keeps the data and the one thing you do with it in the same
+  namespace, and when Step 5 adds typography the sibling — `Theme::typography` or a second
+  settings type — has an obvious place to land.
+
+### Scope note
+
+Colour only, and only the two colour variables — no image filters (`darkenImages` /
+`invertImages`), no typography, no persistence of the chosen theme, and nothing on screen.
+Injection is Step 2, the RS-defaults layer under the book's CSS is Step 3, and the switcher
+that makes any of it reachable is Step 4. The `dead_code` warning is the honest signal that
+this step is one half of a seam.
 
 ---
 
