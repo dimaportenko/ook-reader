@@ -6,6 +6,7 @@ use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 use rbook::epub::rewrite::{EpubRewriteOptions, PathRewrite};
 use rbook::Epub;
 
+use crate::web::assets::READING_SYSTEM_DEFAULTS;
 use crate::web::{
     self,
     assets::{wrap_css_str, INJECTED_ASSETS},
@@ -64,7 +65,8 @@ pub(crate) fn serve_epub_resource(
 
         let inject_css = format!("{INJECTED_ASSETS}{}", wrap_css_str(&theme.user_layer()));
 
-        let with_assets = insert_before_head_close(&xhtml, &inject_css);
+        let with_defaults = insert_after_head_open(&xhtml, READING_SYSTEM_DEFAULTS);
+        let with_assets = insert_before_head_close(&with_defaults, &inject_css);
         return Some(Served {
             content_type: XHTML_UTF8.to_owned(),
             body: with_assets.into_bytes(),
@@ -157,6 +159,24 @@ pub(crate) fn resolve_internal_link(
 
 pub(crate) fn insert_before_head_close(xhtml: &str, snippet: &str) -> String {
     xhtml.replacen("</head>", &format!("{snippet}</head>"), 1)
+}
+
+pub(crate) fn insert_after_head_open(xhtml: &str, shippet: &str) -> String {
+    let Some(start) = xhtml.find("<head") else {
+        return xhtml.to_owned();
+    };
+
+    let rest = &xhtml[start + "<head".len()..];
+    if !rest.starts_with('>') && !rest.starts_with(char::is_whitespace) {
+        return xhtml.to_owned();
+    }
+
+    let Some(end) = rest.find(">") else {
+        return xhtml.to_owned();
+    };
+
+    let at = start + "<head".len() + end + 1;
+    format!("{}{shippet}{}", &xhtml[..at], &xhtml[at..])
 }
 
 fn sanitized_file_name(input: &str) -> Option<String> {
@@ -674,5 +694,51 @@ mod test {
             response.headers()["Content-Type"],
             "text/plain; charset=utf-8"
         );
+    }
+
+    #[test]
+    fn insert_after_head_open_writes_inside_a_head_that_has_attributes() {
+        let xhtml =
+            r#"<html><head profile="http://example.org/p"><title>T</title></head><body/></html>"#;
+
+        let out = insert_after_head_open(xhtml, "<style/>");
+
+        println!("{}", out);
+        assert!(out.contains(r#"<head profile="http://example.org/p"><style/><title>T</title>"#),);
+    }
+
+    #[test]
+    fn insert_after_head_open_is_a_noop_without_a_head() {
+        let out = insert_after_head_open("<html><body>x</body></html>", "<style/>");
+
+        assert_eq!(out, "<html><body>x</body></html>");
+    }
+
+    #[test]
+    fn insert_after_head_open_does_not_mistake_a_header_for_a_head() {
+        // `<head` is a prefix of `<header>`, which is ordinary XHTML5 sectioning content.
+        let xhtml = "<html><body><header>Chapter</header><p>x</p></body></html>";
+
+        let out = insert_after_head_open(xhtml, "<style/>");
+
+        assert_eq!(out, xhtml);
+    }
+
+    #[test]
+    fn the_three_cascade_layers_are_served_in_priority_order() {
+        let epub = Epub::open(crate::TEST_BOOK).expect("open fixture book");
+        let hrefs = spine_hrefs(&epub).expect("fixture spine");
+
+        let href = hrefs.get(2).expect("3d item in spine exists");
+        let served = serve_epub_resource(&epub, &format!("/{href}"), Theme::Night)
+            .expect("a spine document is reachable by its href");
+        let xhtml = String::from_utf8(served.body).expect("chapters are utf-8");
+
+        let rs = xhtml.find("--RS__").expect("the reading-system defaults");
+        let author = xhtml.find("pgepub.css").expect("the book's own stylesheet");
+        let user = xhtml.find("--USER__").expect("the theme layer");
+
+        assert!(rs < author, "RS defaults must lose to the book's CSS");
+        assert!(author < user, "the book's CSS must lose to the USER layer");
     }
 }

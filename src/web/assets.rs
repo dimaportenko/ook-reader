@@ -28,6 +28,8 @@ pub(crate) const INJECTED_ASSETS: &str = concat!(
     wrap_js!("./assets/page-position.js"),
 );
 
+pub(crate) const READING_SYSTEM_DEFAULTS: &str = wrap_css!("./assets/reading-system.css");
+
 pub(crate) fn wrap_css_str(css: &str) -> String {
     format!("<style type=\"text/css\">\n/*<![CDATA[*/\n{css}\n/*]]>*/\n</style>\n")
 }

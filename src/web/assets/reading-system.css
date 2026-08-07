@@ -1,0 +1,10 @@
+:root {
+  --RS__maxMediaWidth: 100%;
+}
+
+img,
+svg,
+video {
+  max-width: var(--RS__maxMediaWidth);
+  height: auto;
+}
