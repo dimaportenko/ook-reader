@@ -28,8 +28,14 @@ pub(crate) const INJECTED_ASSETS: &str = concat!(
     wrap_js!("./assets/page-position.js"),
 );
 
+pub(crate) fn wrap_css_str(css: &str) -> String {
+    format!("<style type=\"text/css\">\n/*<![CDATA[*/\n{css}\n/*]]>*/\n</style>\n")
+}
+
 #[cfg(test)]
 mod test {
+    use crate::web::theme::Theme;
+
     use super::*;
 
     #[test]
@@ -41,5 +47,68 @@ mod test {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn wrapped_css_is_a_cdata_style_element() {
+        let out = wrap_css_str("body > p { color: red }");
+
+        assert!(out.starts_with("<style type=\"text/css\">"));
+        assert!(out.trim_end().ends_with("</style>"));
+        assert!(
+            out.contains("/*<![CDATA[*/") && out.contains("/*]]>*/"),
+            "an unescaped > in a selector aborts the whole XHTML document without CDATA",
+        );
+        assert!(out.contains("body > p { color: red }"));
+    }
+
+    #[test]
+    fn every_theme_sets_both_user_colour_variables() {
+        for theme in [Theme::Day, Theme::Sepia, Theme::Night] {
+            let css = theme.vars();
+
+            // The USER layer drives colour through these two, by Readium convention.
+            assert!(
+                css.contains("--USER__backgroundColor"),
+                "{theme:?} has no background"
+            );
+            assert!(
+                css.contains("--USER__textColor"),
+                "{theme:?} has no text colour"
+            );
+            // Step 2 injects this into a document that already has a `<style>`; it has to be
+            // a self-contained rule, not a bare declaration list.
+            assert!(css.starts_with(":root {"), "{theme:?} is not a :root rule");
+        }
+    }
+
+    #[test]
+    fn the_injected_layer_applies_the_variables_it_declares() {
+        for theme in [Theme::Day, Theme::Sepia, Theme::Night] {
+            let css = theme.user_layer();
+            let (background, text) = theme.colors();
+
+            assert!(
+                css.starts_with(":root {"),
+                "{theme:?} does not open with the variable block",
+            );
+            assert!(css.contains(&format!("--USER__backgroundColor: {background}")));
+            assert!(css.contains(&format!("--USER__textColor: {text}")));
+            assert!(
+                css.contains("var(--USER__backgroundColor)"),
+                "{theme:?} declares a background it never applies",
+            );
+            assert!(
+                css.contains("var(--USER__textColor)"),
+                "{theme:?} declares a text colour it never applies",
+            );
+        }
+    }
+
+    #[test]
+    fn the_three_themes_are_actually_different() {
+        assert_ne!(Theme::Day.vars(), Theme::Night.vars());
+        assert_ne!(Theme::Day.vars(), Theme::Sepia.vars());
+        assert_ne!(Theme::Sepia.vars(), Theme::Night.vars());
     }
 }

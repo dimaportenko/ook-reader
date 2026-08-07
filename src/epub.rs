@@ -6,7 +6,10 @@ use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 use rbook::epub::rewrite::{EpubRewriteOptions, PathRewrite};
 use rbook::Epub;
 
-use crate::web::assets::INJECTED_ASSETS;
+use crate::web::{
+    self,
+    assets::{wrap_css_str, INJECTED_ASSETS},
+};
 
 pub(crate) const EPUB_ROUTE: &str = "epub";
 pub(crate) const EPUB_URL_PREFIX: &str = "dioxus://index.html/epub/"; // must embed EPUB_ROUTE
@@ -43,7 +46,11 @@ pub(crate) struct Served {
     pub(crate) body: Vec<u8>,
 }
 
-pub(crate) fn serve_epub_resource(epub: &Epub, path: &str) -> Option<Served> {
+pub(crate) fn serve_epub_resource(
+    epub: &Epub,
+    path: &str,
+    theme: web::theme::Theme,
+) -> Option<Served> {
     let content_type = epub
         .manifest()
         .by_href(path.trim_start_matches('/'))
@@ -54,7 +61,10 @@ pub(crate) fn serve_epub_resource(epub: &Epub, path: &str) -> Option<Served> {
         let rewrite =
             EpubRewriteOptions::default().rewrite_paths(PathRewrite::prefix(EPUB_URL_PREFIX));
         let xhtml = epub.read_resource_str_with(path, &rewrite).ok()?;
-        let with_assets = insert_before_head_close(&xhtml, INJECTED_ASSETS);
+
+        let inject_css = format!("{INJECTED_ASSETS}{}", wrap_css_str(&theme.user_layer()));
+
+        let with_assets = insert_before_head_close(&xhtml, &inject_css);
         return Some(Served {
             content_type: XHTML_UTF8.to_owned(),
             body: with_assets.into_bytes(),
@@ -195,11 +205,11 @@ fn zip_path_for(uri_path: &str) -> String {
         .into_owned()
 }
 
-pub(crate) fn use_register_asset_handler(epub: Rc<Epub>) {
+pub(crate) fn use_register_asset_handler(epub: Rc<Epub>, theme: web::theme::Theme) {
     use_asset_handler(EPUB_ROUTE, move |request, responder| {
         let path = zip_path_for(request.uri().path());
 
-        responder.respond(epub_response(serve_epub_resource(&epub, &path)));
+        responder.respond(epub_response(serve_epub_resource(&epub, &path, theme)));
     })
 }
 
@@ -257,6 +267,8 @@ pub(crate) fn spine_hrefs(epub: &Epub) -> Result<Vec<String>, Error> {
 
 #[cfg(test)]
 mod test {
+    use crate::web::theme::Theme;
+
     use super::*;
 
     #[test]
@@ -469,8 +481,12 @@ mod test {
     fn serves_an_image_resource_as_raw_bytes() {
         let epub = Epub::open(crate::TEST_BOOK).expect("open fixture book");
 
-        let served = serve_epub_resource(&epub, "/OEBPS/374963762688302552_cover.jpg")
-            .expect("the fixture's cover is reachable by path");
+        let served = serve_epub_resource(
+            &epub,
+            "/OEBPS/374963762688302552_cover.jpg",
+            Theme::default(),
+        )
+        .expect("the fixture's cover is reachable by path");
 
         assert!(served.content_type.starts_with("image/"));
         assert!(
@@ -482,7 +498,7 @@ mod test {
     #[test]
     fn serving_an_unknown_path_is_a_miss() {
         let epub = Epub::open(crate::TEST_BOOK).expect("open fixture book");
-        assert!(serve_epub_resource(&epub, "/OEBPS/nope.xhtml").is_none());
+        assert!(serve_epub_resource(&epub, "/OEBPS/nope.xhtml", Theme::default()).is_none());
     }
 
     #[test]
@@ -491,7 +507,7 @@ mod test {
         let hrefs = spine_hrefs(&epub).expect("fixture spine");
 
         let href = hrefs.get(2).expect("3d item in spine exists");
-        let served = serve_epub_resource(&epub, &format!("/{href}"))
+        let served = serve_epub_resource(&epub, &format!("/{href}"), Theme::default())
             .expect("a spine document is reachable by its href");
 
         let xhtml = String::from_utf8(served.body).expect("chapters are utf-8");
@@ -507,6 +523,41 @@ mod test {
     }
 
     #[test]
+    fn serving_a_chapter_injects_the_theme_after_every_other_layer() {
+        let epub = Epub::open(crate::TEST_BOOK).expect("open fixture book");
+        let hrefs = spine_hrefs(&epub).expect("fixture spine");
+
+        let href = hrefs.get(2).expect("3d item in spine exists");
+        let served = serve_epub_resource(&epub, &format!("/{href}"), Theme::Night)
+            .expect("a spine document is reachable by its href");
+
+        let xhtml = String::from_utf8(served.body).expect("chapters are utf-8");
+        let (background, text) = Theme::Night.colors();
+
+        assert!(
+            xhtml.contains(&format!("--USER__backgroundColor: {background}")),
+            "the chosen theme never reached the served document",
+        );
+        assert!(xhtml.contains(&format!("--USER__textColor: {text}")));
+
+        let author = xhtml.find("pgepub.css").expect("the book's own stylesheet");
+        let rs = xhtml.find("--ook-page: 0").expect("pagination.css");
+        let user = xhtml
+            .find("--USER__backgroundColor")
+            .expect("the theme layer");
+
+        assert!(
+            user > author,
+            "the USER layer must come after the book's CSS to win at equal specificity",
+        );
+        assert!(
+            user > rs,
+            "the USER layer must come after pagination.css to win at equal !important",
+        );
+        assert!(user < xhtml.find("</head>").expect("a head to close"));
+    }
+
+    #[test]
     fn serving_a_chapter_rewrites_resource_paths_to_the_epub_route() {
         let epub = Epub::open(crate::TEST_BOOK).expect("open fixture book");
         let hrefs = spine_hrefs(&epub).expect("fixture spine");
@@ -517,7 +568,7 @@ mod test {
             "expected the first story at spine index 2, got {href}",
         );
 
-        let served = serve_epub_resource(&epub, &format!("/{href}"))
+        let served = serve_epub_resource(&epub, &format!("/{href}"), Theme::default())
             .expect("a spine document is reachable by its href");
         let xhtml = String::from_utf8(served.body).expect("chapters are utf-8");
 
@@ -539,7 +590,7 @@ mod test {
         let path = cover
             .strip_prefix(EPUB_URL_PREFIX)
             .expect("prefixed by construction");
-        let image = serve_epub_resource(&epub, &format!("/{path}"))
+        let image = serve_epub_resource(&epub, &format!("/{path}"), Theme::default())
             .expect("a rewritten path must round-trip back through the handler");
 
         assert_eq!(image.content_type, "image/jpeg");
@@ -593,7 +644,11 @@ mod test {
         let epub = Epub::open(crate::TEST_BOOK).expect("open fixture book");
         let hrefs = spine_hrefs(&epub).expect("fixture spine");
 
-        let response = epub_response(serve_epub_resource(&epub, &format!("/{}", hrefs[2])));
+        let response = epub_response(serve_epub_resource(
+            &epub,
+            &format!("/{}", hrefs[2]),
+            Theme::default(),
+        ));
 
         assert_eq!(response.status(), 200);
         // the charset is load-bearing: an XHTML document with no declared encoding
@@ -608,7 +663,11 @@ mod test {
     fn a_missing_resource_is_a_typed_404() {
         let epub = Epub::open(crate::TEST_BOOK).expect("open fixture book");
 
-        let response = epub_response(serve_epub_resource(&epub, "/OEBPS/nope.xhtml"));
+        let response = epub_response(serve_epub_resource(
+            &epub,
+            "/OEBPS/nope.xhtml",
+            Theme::default(),
+        ));
 
         assert_eq!(response.status(), 404);
         assert_eq!(

@@ -7,7 +7,8 @@ use crate::{
     epub,
     library::{self, Library},
     nav::{self, ReaderDataStoreExt, ReaderState},
-    ui::{OrLog, library::OpenBook},
+    ui::{library::OpenBook, OrLog},
+    web::theme::Theme,
 };
 
 const BRIDGE_JS: &str = include_str!("../web/assets/ook-events-listener.js");
@@ -40,7 +41,8 @@ impl BridgeMsg {
 
 #[component]
 pub(crate) fn Reader(book: OpenBook) -> Element {
-    epub::use_register_asset_handler(book.epub.clone());
+    let theme = use_context::<Signal<Theme>>();
+    epub::use_register_asset_handler(book.epub.clone(), theme());
 
     let library = use_context::<Rc<Library>>();
     let mut open_book = use_context::<Signal<Option<OpenBook>>>();
@@ -88,7 +90,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
 
     rsx! {
         div {
-            style: "display: flex; flex-direction: column; height: 100vh;",
+            style: "display: flex; flex-direction: column; height: 100vh; {theme().inline_styles()}",
             p {
                 style: "text-align: center",
                 "{book.title}"
