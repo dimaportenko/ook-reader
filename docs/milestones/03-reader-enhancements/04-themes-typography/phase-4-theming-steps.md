@@ -1441,6 +1441,258 @@ and not a courtesy.
 
 ---
 
+## Step 5c — Re-measure and re-anchor after a reflow
+
+> **Status:** done — committed in `2a9e181` (67 tests green, 65 → 67 as predicted; clippy
+> clean; the four `dx serve` checks confirmed by hand).
+
+5b ended by having you watch two things break. Press `A+` mid-chapter and the page label
+still reads the old count, and the words in front of you are not the words that were there
+a moment ago. Both have the same cause and neither has the same fix, which is what makes
+this step worth its own sitting.
+
+### The crux: a reflow invalidates two derived values, and neither knows it
+
+`page_count` and `page` are not state — they are *measurements* of a layout. Everything the
+reader knows about where you are is derived from a column count that only exists once the
+browser has laid the document out:
+
+```
+page_count = ceil(body.scrollWidth / innerWidth)      ← how many columns fit
+page       = round(el.offsetLeft / innerWidth)        ← which column an element is in
+```
+
+Change the font size and both denominators stay put while the numerators move. The document
+re-columns, and the two numbers that describe it are now describing a layout that no longer
+exists. `page-count.js` re-reports on `load` and `resize`, because those were the only two
+ways the layout could change when it was written. A CSS variable write is neither, so
+nothing re-reports and nothing re-anchors.
+
+The insight that makes the fix small: **the anchor already exists.** `page-position.js`
+computes `selectorFor(firstElementOnPage(page))` on every page turn, to persist where you
+are. That is precisely "the words I am looking at, named in a way that survives a relayout"
+— the same `ook-sel:` selector `restored_data` feeds back in on launch. A reflow is a
+tiny, in-memory version of quitting and reopening the book: note the selector, let the
+layout change, find the selector again, go to whatever page it landed on.
+
+### Runnable check
+
+**Two Rust tripwire tests plus a `dx serve` eyeball.** The behaviour lives in JavaScript, so
+the tests can only guard the seams between the files — that is the same bargain
+`the_loader_and_the_cleanup_agree_on_where_the_blob_url_lives` and
+`the_fragment_prefix_matches_the_one_the_asset_looks_for` already struck, and the reason the
+eyeball check is a real gate here rather than a courtesy. **65 tests before, 67 after.**
+
+In `src/ui/reader.rs`:
+
+```rust
+#[test]
+fn the_reflow_message_survives_all_three_hops() {
+    // theme-listener.js posts it, ook-events-listener.js forwards it, `parse` reads
+    // it back. Three files, one name, and no compiler between any two of them —
+    // rename it in one and the count goes stale again, silently.
+    assert!(crate::web::assets::INJECTED_ASSETS.contains("ook-reflow"));
+    assert!(BRIDGE_JS.contains("ook-reflow"));
+
+    assert_eq!(BridgeMsg::parse("reflow:7"), Some(BridgeMsg::Reflow(7)));
+    assert_eq!(BridgeMsg::parse("reflow:notanumber"), None);
+}
+```
+
+In `src/web/assets.rs`:
+
+```rust
+#[test]
+fn the_reflow_handler_reuses_the_position_helpers() {
+    // The anchor has to be the same notion of "where I am" that page-position.js
+    // persists, which means the same code and not a second copy of it. A copy would
+    // drift the first time one of the two is fixed.
+    assert_eq!(INJECTED_ASSETS.matches("function selectorFor").count(), 1);
+    assert_eq!(
+        INJECTED_ASSETS
+            .matches("function firstElementOnPage")
+            .count(),
+        1
+    );
+    assert_eq!(INJECTED_ASSETS.matches("const report =").count(), 1);
+}
+```
+
+**`cargo clippy --all-targets`**, as always.
+
+**`dx serve`** — the check that actually proves the step:
+
+1. Open a chapter and page forward until you are somewhere in the middle. Note the first
+   few words on screen and the `Page X of N` label.
+2. Press `A+`. **`N` changes** (more columns at a bigger size) and **the words stay put**.
+   `X` will usually change, and should — you are on a different column of a different
+   layout, looking at the same sentence.
+3. Press `A-` twice, then `A+` twice. You should land back on the same words each time,
+   not drift a little further each press.
+4. Switch theme. **Nothing jumps and `N` does not change** — a colour change does not
+   re-column, so this path has to be a no-op for it.
+
+### Minimal implementation (sketch)
+
+**`src/web/assets/theme-listener.js`** — the whole step, really. Capture, apply, re-measure,
+re-anchor:
+
+```js
+window.addEventListener("message", function (e) {
+  if (!e.data || e.data.kind !== "ook-set-theme") {
+    return;
+  }
+
+  const before = currentPage();
+  const anchorEl = firstElementOnPage(before);
+  const anchor = anchorEl && selectorFor(anchorEl);
+
+  for (const [name, value] of e.data.vars) {
+    document.documentElement.style.setProperty(name, value);
+  }
+
+  report();
+
+  const moved = anchor && document.querySelector(anchor);
+  if (!moved) {
+    return;
+  }
+
+  const page = pageOf(moved);
+  if (page !== before) {
+    window.parent.postMessage({ kind: "ook-reflow", page: page }, "*");
+  }
+});
+```
+
+**`src/web/assets/ook-events-listener.js`** gains one more forward, beside the other four:
+
+```js
+  if (e.data.kind === "ook-reflow") {
+    dioxus.send("reflow:" + e.data.page);
+  }
+```
+
+**`src/ui/reader.rs`** — a variant, a parse arm, a dispatch arm:
+
+```rust
+pub(crate) enum BridgeMsg {
+    Link(String),
+    Scroll(usize),
+    Pages(usize),
+    Position(String),
+    Reflow(usize),
+}
+```
+
+```rust
+        } else if let Some(page) = msg.strip_prefix("reflow:") {
+            page.parse().ok().map(BridgeMsg::Reflow)
+```
+
+```rust
+                    Some(BridgeMsg::Reflow(page)) => state.on_reflow(page),
+```
+
+**`src/nav.rs`** — the smallest method in the file, and the point of the whole exercise:
+
+```rust
+    pub(crate) fn on_reflow(self, p: usize) {
+        self.data.page().set(p);
+    }
+```
+
+### Why it works
+
+- **Reading a layout property flushes the layout.** `setProperty` does not recompute
+  anything; it invalidates and returns. But `report()` reads `document.body.scrollWidth`,
+  and `pageOf` reads `el.offsetLeft`, and both are *layout-forcing reads* — the browser must
+  bring style and layout up to date before it can answer. So the code above needs no
+  `requestAnimationFrame` and no `setTimeout(0)`: the read on the line after the write is
+  already looking at the new layout. This is the same "forced synchronous layout" that
+  profilers flag as an anti-pattern in a loop; here it is exactly the tool for the job,
+  because we write once and read once.
+- **`transform` does not move `offsetLeft`.** `pagination.css` pages by
+  `translateX(calc(var(--ook-page) * -100vw))`, and transforms are a paint-time effect that
+  leaves layout geometry untouched. That is why `pageOf` can be asked "which column is this
+  element in" at any time without first scrolling anywhere, and why the anchor works
+  identically on page 0 and page 40.
+- **Capture before, resolve after — and the guard order matters.** `selectorFor(null)`
+  does *not* return `null`; its `while (el && …)` loop simply never runs and it hands back
+  the string `"body"`. Feed that to `querySelector` and you get the body element, whose
+  `pageOf` is 0, and every settings change on a not-yet-populated document would yank you to
+  page 0. `page-position.js` guards this by checking the element before building the
+  selector (`if (!el) return;`), and `anchorEl && selectorFor(anchorEl)` is the same guard
+  in expression form.
+- **`report` is reachable from another file, but not through `window`.** `const report =
+  …` at the top level of a classic script creates a binding in the *global lexical
+  environment*, which every later classic script in that document can see — and
+  `theme-listener.js` is last in `INJECTED_ASSETS`, after `page-count.js` and
+  `page-position.js`. It is not a property of `window`, though, so `window.report()` is
+  `undefined`. Same for `pageOf` and `currentPage`, which are `function` declarations and
+  *are* on `window`; the inconsistency is real and worth knowing rather than working around.
+- **`ook-reflow` rather than reusing `ook-scroll`.** The tempting shortcut is to post
+  `ook-scroll`, which already means "the document decided which page you are on" and already
+  sets `page`. The cost is hidden in `on_scroll`: it also clears `Pending::Fragment`. That
+  clearing is load-bearing for `fragment-scroll.js` — it is what un-hides the frame once a
+  restored position has settled — so borrowing the message means a settings change that
+  lands mid-settle would drop the restore and strand you at the top of the chapter. Two
+  events that produce the same *state change* are still two events when one of them carries
+  an extra meaning. `on_reflow` sets the page and says nothing about pending, which is the
+  whole difference.
+- **The count goes out before the page, and that order is free.** `postMessage` delivers in
+  order and the bridge's `recv` loop consumes in order, so `report()` before the
+  `ook-reflow` post means `page_count` is updated before `page` reads against it. Reverse
+  them and the label flickers `Page 12 of 8` for a frame.
+- **The saved position updates itself.** `on_reflow` writes `page`, which re-runs the
+  `ook-set-page` effect, which makes `page-position.js` report a fresh `ook-position`, which
+  the bridge persists. Nothing new to write — the existing loop closes over the new layout.
+  And there is no cycle, because `ook-position` is a different message that never sets the
+  page.
+- **Posting only when the page actually moved** is what keeps a colour change silent. Day →
+  Night does not re-column, so the anchor resolves to the same column, `page === before`, and
+  no message is sent. Without the guard every theme click would push a redundant page write
+  through the whole loop.
+
+### Scope note
+
+- **`resize` still re-reports without re-anchoring.** Now that a reflow handler exists,
+  pointing the `resize` listener at it is nearly free — but resizing the window is a
+  different user action with its own feel, and it is a pre-existing behaviour rather than
+  something this step breaks. Left for **Step 6** to fold in deliberately.
+- **Only the live frame.** A chapter that has not loaded yet still gets its settings baked
+  into the served bytes, which is the other half of the two-route design from Step 4 and
+  unchanged here.
+- **`theme-listener.js` is now badly named**, for the second step running — it listens for
+  settings, measures a layout and re-anchors a reading position. Step 6 renames it and the
+  `ook-set-theme` message with it.
+- **5d and 5e ride this for free.** Line-height, margins and font-family all reflow, and all
+  three arrive through the same `ook-set-theme` push. Once this handler is right, those steps
+  are a field, a rule and a control again — with no positioning work of their own.
+
+### Departures and notes from the sitting
+
+- **The step landed as sketched.** Both tripwires went green on the first run, 65 → 67 as
+  predicted, and all four `dx serve` checks passed — including the one that matters most,
+  that a theme switch leaves `N` alone and nothing jumps.
+- **`INJECTED_ASSETS` now has a load-bearing *order*, and no test guards it.**
+  `theme-listener.js` reaches for `report`, `selectorFor`, `firstElementOnPage`, `pageOf`
+  and `currentPage` across four other files, and it only sees them because it is **last** in
+  the `concat!`. `const report = …` is a binding in the global lexical environment, visible
+  only to scripts that run *after* it — move `theme-listener.js` up the list and the handler
+  dies with a TDZ `ReferenceError` the first time a setting changes. The new
+  `the_reflow_handler_reuses_the_position_helpers` counts occurrences, not positions, so it
+  would stay green through that. **Step 6** should either assert the order or say so in a
+  comment on the `concat!`; today it is true by accident of how the list grew.
+- **A narrow `Pending::LastPage` interleave, recorded and left alone.** `report()` fires
+  before the `ook-reflow` post, so `on_pages` runs first — and if `Pending::LastPage` is set
+  it snaps `page` to the last page and clears pending, after which `on_reflow` overwrites it
+  with the anchor's page. Only reachable if a settings change lands mid chapter-prev-settle,
+  and the fix would be to give `on_reflow` an opinion about `pending`, which is exactly the
+  entanglement this step avoided by not reusing `ook-scroll`. Known, not fixed.
+
+---
+
 ## Step 6 — sketched
 
 - **Step 6 — review & refactor.** The repo's phase-ending step (commit `b09d6c9`): fold
