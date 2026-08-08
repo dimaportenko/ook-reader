@@ -65,9 +65,24 @@ implementation → why. Smallest-first:
       live frame's `documentElement` for one already on screen. **No reload** — a colour
       change is a repaint, so the layout, the page count and the page you are on all survive
       untouched. Committed in `ed1df0d`, **61 tests green**.
-- [ ] **Step 5 — Typography settings (later).** font-size, line-height, line-length,
-      margins, then font-family from a *curated* list — each a `--USER__*` variable + a
-      control, sequenced one at a time.
+- [x] **Step 5a — A `Settings` struct owns the variable list.** Plumbing: `Theme` goes back
+      to being a palette, `Settings` becomes the thing that has a theme and produces the
+      `--USER__*` pairs. The pushed collection changes from
+      `[(&'static str, &'static str); 2]` to `Vec<(&'static str, String)>` — the count stops
+      being fixed and the values stop being literals, both of which 5b needs. The one visible
+      change: the library screen gives up its theme picker, the reader keeps its own.
+      Committed in `df7e4f0`, **62 tests green**.
+- [ ] **Step 5b — `--USER__fontSize` + its control.** The first non-colour variable, end to
+      end. Text resizes live; the page count goes stale, deliberately, so 5c has something
+      you have watched break.
+- [ ] **Step 5c — Re-measure and re-anchor after a reflow.** A size change re-columns the
+      document, and `page-count.js` only re-reports on `resize`. Re-report the count and land
+      back on the same *words*, via the `ook-sel:` selector `restored_data` already uses.
+- [ ] **Step 5d — `--USER__lineHeight`, then margins / line-length.** Cheap once 5c exists.
+      Line-length last of the three — it is the one that touches `pagination.css`'s
+      `column-width`.
+- [ ] **Step 5e — `--USER__fontFamily` from a curated list.** Respect embedded fonts and
+      author `!important`, the way Readium gates its aggressive overrides.
 - [ ] **Step 6 — Review & refactor** (per the repo's phase-ending convention).
 
 ## Known constraints (from research)

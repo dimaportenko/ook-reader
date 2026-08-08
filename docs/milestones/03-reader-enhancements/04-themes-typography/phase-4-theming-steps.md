@@ -35,7 +35,11 @@ that kept Phase 3 small.
 3. **Add the RS-defaults layer before the book CSS** — completes RS < author < USER.
 4. **Theme switcher in the app chrome** — `use_signal` → push the new variable values into
    the frame that is already on screen. *(no reload)*
-5. **Typography settings (later)** — font-size, line-height, line-length, margins, fonts.
+5. **Typography settings** — split into sittings, because the first one is structural and the
+   rest ride on it: **5a** a `Settings` struct that owns the variable list, **5b**
+   `--USER__fontSize` + its control, **5c** re-measure and re-anchor after a reflow, **5d**
+   `--USER__lineHeight` and the margin/line-length pair, **5e** `--USER__fontFamily` from a
+   curated list.
 6. **Review & refactor.**
 
 > **Dependency.** Every step here serves through the Phase 3 Step 8 handler. Steps 2–3 inject
@@ -834,11 +838,282 @@ to only one end.
 
 ---
 
-## Steps 5–6 — sketched
-- **Step 5 — typography (later, one at a time).** `--USER__fontSize` (75–250%),
-  `--USER__lineHeight` (1–2), `--USER__lineLength`, page margins, then `--USER__fontFamily`
-  from a *curated* list. Each: a variable + a control + a `cargo test` on the rendered string.
-  Respect embedded-font / author-`!important` intent.
+## Step 5 — typography: the sub-plan
+
+Step 5 was written as one line ("font-size, line-height, line-length, margins, fonts"). It is
+five sittings, and the first one is not a typography feature at all.
+
+### The crux: a theme is a palette, not a settings set
+
+Everything Steps 1–4 built hangs off `Theme`. `Theme` produces the variable pairs, the
+`:root` block, the USER layer, the app-chrome inline styles; `Signal<Theme>` is the context;
+`serve_epub_resource` takes a `Theme`. That was right while every user setting *was* a colour.
+
+Font size is not a colour, and it is not a property of night mode — you want 125% in all three
+themes. So the first sitting has nothing to show on screen: it moves the ownership of "the set
+of `--USER__*` variables" off `Theme` and onto a **`Settings`** struct that *has* a theme.
+`Theme` goes back to being what its name says — a palette, plus the slugs the picker round-
+trips through.
+
+Two type changes carry the idea, and they are the reason this can't be deferred:
+
+```rust
+[( &'static str, &'static str ); 2]   →   Vec<(&'static str, String)>
+```
+
+- **The length stops being a compile-time constant.** Today the pushed array is exactly two
+  long because a theme has exactly two colours. A settings set grows one variable per sitting,
+  and every one of them has to reach both routes.
+- **The values stop being literals.** `"#faf4e8"` is a `&'static str` baked into the binary;
+  `"125%"` is *computed* from a number the user changed. The moment one value has to be built
+  at runtime, every value in the collection has to be an owned `String`.
+
+Both routes — the serve-time `:root` block and the `postMessage` push — already read from one
+list (`css_vars`), and the pairing test from Step 4 already fails if the two ends disagree
+about which variables exist. That is the machinery 5a is generalising, and once it is
+generalised, 5b–5e each add a field, a rule, and a control.
+
+### The sub-plan
+
+- **5a — `Settings` owns the variable list.** Plumbing only, nothing visible changes.
+- **5b — `--USER__fontSize` + its control.** Text resizes live. The page *count* goes stale —
+  named and deferred, deliberately, so 5c is motivated by something you have watched break.
+- **5c — re-measure and re-anchor after a reflow.** A colour change repaints; a size change
+  **re-columns the document**, so the page you are on is a different piece of text than it was.
+  `page-count.js` only re-reports on `resize`, which a font-size change is not. This sitting
+  re-reports the count and lands you back on the same *words*, via the `ook-sel:` selector
+  `restored_data` already uses.
+- **5d — `--USER__lineHeight`, then the margin / line-length pair.** Nearly free once 5c
+  exists: a field, a rule, a control. Line-length is the one that touches `pagination.css`'s
+  `column-width`, so it comes last of the three.
+- **5e — `--USER__fontFamily` from a curated list.** The one with an ethics clause: a book
+  that ships embedded fonts chose them, and Readium gates the aggressive overrides behind a
+  flag rather than always winning. Curated names, not a free picker.
+
+---
+
+## Step 5a — a `Settings` struct that owns the variable list
+
+> **Status:** done — committed in `df7e4f0` (62 tests green).
+
+This is a refactor step in the middle of a phase, which the repo usually saves for the
+phase-ending review. It is here instead because 5b cannot be written honestly without it:
+adding `font_size` to `Theme` would say that 125% is a property of sepia.
+
+### Runnable check
+
+**`cargo test`.** The suite is the safety net: **61 tests green before, 62 after**, and no
+existing assertion changes what it claims — only the type it calls it on. Behaviour must be
+byte-identical; if a served document differs by one character, the step went wrong.
+
+Write the new test **first**, in a file that does not exist yet. It won't compile — that's
+the Rust version of watching a test fail, and the error message (`unresolved import
+crate::web::settings`) is the to-do list:
+
+```rust
+// src/web/settings.rs
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn the_settings_variable_list_carries_the_whole_palette() {
+        for theme in [Theme::Day, Theme::Sepia, Theme::Night] {
+            let settings = Settings { theme };
+            let vars = settings.css_vars();
+
+            for (name, value) in theme.css_vars() {
+                assert!(
+                    vars.contains(&(name, value.to_string())),
+                    "{theme:?} declares {name}, and the settings list drops it",
+                );
+            }
+
+            // 5b adds a variable that belongs to no theme. This is the assertion
+            // that will have to change then — and it should, visibly, in that step.
+            assert_eq!(vars.len(), theme.css_vars().len());
+        }
+    }
+}
+```
+
+Then move Step 1–4's theme tests out of `web/assets.rs` and into this module, retargeted at
+`Settings`. They were never about assets; they were about the layer, and the layer now lives
+here. Four move (`every_theme_sets_both_user_colour_variables`,
+`the_injected_layer_applies_the_variables_it_declares`,
+`the_pushed_vars_and_the_injected_layer_name_the_same_variables`,
+`the_three_themes_are_actually_different`); the two that really are about asset wrapping
+(`the_page_formula_is_defined_once_across_the_injected_assets`,
+`wrapped_css_is_a_cdata_style_element`) stay.
+
+**`cargo clippy --all-targets`** — clean today, and the one new lint to expect is
+`clippy::useless_conversion` or a needless `.clone()` around the `&'static str` → `String`
+hop.
+
+**`dx serve`**, thirty seconds, because the point is that nothing moved: the picker still
+switches all three themes on both screens, live, with no blink; a chapter turn still arrives
+in the current theme.
+
+### Minimal implementation (sketch)
+
+**New — `src/web/settings.rs`.** Everything that describes *the whole USER layer* moves here
+from `Theme`: `declarations`, `vars`, `user_layer`, `inline_styles`.
+
+```rust
+use crate::web::theme::Theme;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct Settings {
+    pub(crate) theme: Theme,
+}
+
+impl Settings {
+    pub(crate) fn css_vars(self) -> Vec<(&'static str, String)> {
+        self.theme
+            .css_vars()
+            .into_iter()
+            .map(|(name, value)| (name, value.to_string()))
+            .collect()
+    }
+
+    fn declarations(self) -> String {
+        self.css_vars()
+            .iter()
+            .map(|(name, value)| format!("{name}: {value};"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    pub(crate) fn vars(self) -> String {
+        format!(":root {{ {} }}", self.declarations())
+    }
+
+    pub(crate) fn user_layer(self) -> String {
+        format!(
+            "{}\nbody {{ background: var(--USER__backgroundColor) !important; \
+                color: var(--USER__textColor) !important; }}",
+            self.vars()
+        )
+    }
+
+    pub(crate) fn inline_styles(self) -> String {
+        format!(
+            "{} background-color: var(--USER__backgroundColor); color: var(--USER__textColor)",
+            self.declarations()
+        )
+    }
+}
+```
+
+**`src/web/theme.rs`** keeps `colors`, `css_vars`, `slug`, `from_slug` — and loses the four
+methods above. **`src/web/mod.rs`** gains `pub mod settings;`.
+
+**`src/epub.rs`** — the parameter changes type and name in two signatures and one body:
+
+```rust
+pub(crate) fn serve_epub_resource(epub: &Epub, path: &str, settings: Settings) -> Option<Served>
+pub(crate) fn use_register_asset_handler(epub: Rc<Epub>, settings: Settings)
+```
+
+with `wrap_css_str(&settings.user_layer())` at `epub.rs:65`. The ten test call sites become
+`Settings::default()` and `Settings { theme: Theme::Night }`.
+
+**`src/main.rs:39`** — `use_signal(Settings::default)`, provided as `Signal<Settings>`, and
+`settings().inline_styles()` at line 75.
+
+**`src/ui/reader.rs:45`** — `use_context::<Signal<Settings>>()`, `settings()` to the handler
+at line 46, `settings().css_vars()` in the push effect at line 68.
+
+**`src/ui/theme.rs`** — the picker reads and writes *through* settings:
+
+```rust
+let mut settings = use_context::<Signal<Settings>>();
+…
+onchange: move |event| {
+    let theme = Theme::from_slug(&event.data.value());
+    settings.write().theme = theme;
+},
+…
+selected: settings().theme == opt,
+```
+
+### Why it works
+
+- **`Vec` instead of `[_; 2]`, and why the array had to go.** A fixed-size array is a
+  *promise about the count*, and `[(&str, &str); 2]` promises the reader has exactly two
+  settings. Every sitting after this one breaks that promise, and each break would be an edit
+  to a type signature, its two call sites, and the tests — for nothing. `Vec` gives up
+  stack allocation and compile-time length in exchange for a collection that grows by
+  changing one function body.
+- **`&'static str` → `String` is the *runtime-value* boundary, not a style choice.** The
+  colours can be `&'static str` because they are string literals living in the binary for the
+  whole program. `format!("{}%", self.font_size)` in 5b produces a `String` that is allocated
+  when the user clicks — it has no `'static` lifetime to hand out. A collection is one type,
+  so one runtime-computed value forces every element to be owned. Doing that hop now, on
+  values that are still literals, means 5b touches one line instead of a signature.
+- **`.to_string()` on a `&'static str` really does copy — and that is fine.** It heap-
+  allocates and memcpys seven bytes, once per settings change. The alternative that avoids it
+  is `Cow<'static, str>`, which is the right tool when the copy is measurable; here you'd be
+  paying an enum's worth of extra reading to save a handful of bytes on a click. Reach for
+  `Cow` when a profiler asks.
+- **`css_vars` stays the single source of truth, one level up.** `declarations` folds over it,
+  so the served `:root` block and the pushed pairs still cannot disagree about values. The
+  pairing test covers the other half — that they cannot disagree about which variables *exist*
+  — and it is about to become the most valuable test in the phase, because 5b–5e each add a
+  variable that has to reach both ends.
+- **`Settings { theme }` is composition, and the borrow checker rewards it.** `Settings` has-a
+  `Theme` rather than replacing it, so `Theme` keeps a job (a palette + its slugs) and the
+  picker keeps its round-trip. `Copy` survives because every field is `Copy` — which is what
+  lets `settings()` in the effect be a cheap read rather than a borrow held across the `send`.
+- **`settings.write().theme = theme` — order of evaluation is load-bearing.** `write()` hands
+  back a guard that marks the signal dirty when it drops; while it is alive, any read of the
+  same signal panics at runtime. Computing `Theme::from_slug(...)` into a local *before* the
+  assignment is what keeps a read out of that window. The old code could `set` because the
+  whole value was the theme; now it is a field, so it is a read-modify-write.
+- **`selected: settings().theme == opt` still derives from state.** Nothing here changes the
+  Dioxus lesson from Step 4: the `<select>` renders from the signal, so it cannot drift out of
+  sync with what the frame is showing.
+
+### Scope note
+
+No new variable, no new control, nothing visible on screen — that is the definition of done
+here, and the suite staying at the same assertions is how you prove it. `--USER__fontSize`
+lands in 5b. Persisting settings across launches is still deferred (5a is where that will
+eventually hook in, since a `Settings` struct is the thing you'd serialise, but nothing about
+this sitting anticipates it).
+
+**Not covered by any test:** that the served bytes are *identical* before and after. The
+existing `serving_a_chapter_injects_the_theme_after_every_other_layer` checks the layer's
+content and its position, which is strong enough — a golden-file test of a whole served
+document would fail on every future sitting for the right reason and the wrong cost.
+
+### What actually landed
+
+Two departures from the sketch above, both deliberate:
+
+- **The library screen lost its theme picker** and the themed wrapper `div` around it, so
+  the app chrome outside the reader is now unstyled. The sketch said "nothing visible
+  changes"; this is the one thing that did. The reader keeps its own picker, which is the
+  one that matters while the settings set is growing — the library screen gets its own
+  entry point back when there is more than a palette to put in it.
+- **The default theme is `Day`, not `Sepia`.** `use_signal(Settings::default)` inherits
+  `Theme`'s `#[default]`, where the old `use_signal(|| Theme::Sepia)` named its choice. Not
+  worth a field default of its own until settings are persisted.
+
+Also worth noting for **Step 6**, and not a 5a regression — it predates this sitting:
+`use_register_asset_handler` is handed a `settings()` *snapshot* at mount, and
+`use_asset_handler` registers once. A theme change repaints the live frame through the
+`postMessage` push, but the handler keeps serving the theme the reader mounted with, so a
+chapter turn after a change is served the stale palette and then corrected by the push. It
+is invisible today; it stops being invisible when a setting changes *layout* rather than
+colour, which is exactly 5b.
+
+---
+
+## Step 6 — sketched
+
 - **Step 6 — review & refactor.** The repo's phase-ending step (commit `b09d6c9`): fold
   duplication in the serve/inject path, confirm the cascade order, re-read against ADR-0003.
+  By then `Settings` will have five fields and the `user_layer` string will be a `format!` with
+  five holes — that is the shape to look hardest at.
 </content>
