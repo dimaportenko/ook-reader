@@ -4,6 +4,7 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 
+mod components;
 mod epub;
 mod library;
 mod nav;
@@ -22,6 +23,7 @@ use crate::{
 
 const FAVICON: Asset = asset!("/assets/favicon.ico");
 const MAIN_CSS: Asset = asset!("/assets/main.css");
+const DIOXUS_PRIMITIVES_CSS: Asset = asset!("/assets/dx-components-theme.css");
 
 #[cfg(test)]
 pub(crate) const TEST_BOOK: &str = concat!(
@@ -62,6 +64,10 @@ fn App() -> Element {
         document::Link {
             rel: "stylesheet",
             href: MAIN_CSS,
+        }
+        document::Link {
+            rel: "stylesheet",
+            href: DIOXUS_PRIMITIVES_CSS,
         }
 
         if let Some(book) = open_book() {

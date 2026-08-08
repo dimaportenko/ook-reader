@@ -1,8 +1,14 @@
 use dioxus::prelude::*;
+use dioxus_primitives::ContentAlign;
 
-use crate::web::settings::{
-    Settings, FONT_SIZE_MAX, FONT_SIZE_MIN, LINE_HEIGHT_MAX, LINE_HEIGHT_MIN,
+use crate::{
+    components::popover::{PopoverContent, PopoverRoot, PopoverTrigger},
+    ui::theme::ThemePicker,
+    web::settings::{Settings, FONT_SIZE_MAX, FONT_SIZE_MIN, LINE_HEIGHT_MAX, LINE_HEIGHT_MIN},
 };
+
+#[css_module("/src/ui/settings.css")]
+struct Styles;
 
 #[component]
 pub(crate) fn FontSizeControl() -> Element {
@@ -48,6 +54,53 @@ pub(crate) fn LineHeightControl() -> Element {
                 disabled: settings().line_height >= LINE_HEIGHT_MAX,
                 onclick: move |_| settings.write().looser(),
                 "\u{2195}+"
+            }
+        }
+    }
+}
+
+pub(crate) fn SettingsPopover() -> Element {
+    let mut open = use_signal(|| false);
+
+    rsx! {
+        PopoverRoot {
+            open: open(),
+            on_open_change: move |v| open.set(v),
+            PopoverTrigger {
+                svg {
+                    xmlns: "http://www.w3.org/2000/svg",
+                    width: "24",
+                    height: "24",
+                    view_box: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    stroke_width: "2",
+                    stroke_linecap: "round",
+                    stroke_linejoin: "round",
+                    class: "icon icon-tabler icons-tabler-outline icon-tabler-settings",
+                    path {
+                        stroke: "none",
+                        d: "M0 0h24v24H0z",
+                        fill: "none",
+                    }
+                    path {
+                        d: "M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065",
+                    }
+                    path {
+                        d: "M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0",
+                    }
+                }
+            }
+            PopoverContent {
+                class: Styles::settings_popover__content.to_string(),
+                gap: "0.25rem",
+                align: ContentAlign::End,
+                div {
+                    style: "padding: 0.5rem; display: flex; gap: 0.5rem; flex-direction: column;",
+                    LineHeightControl {}
+                    FontSizeControl {}
+                    ThemePicker {}
+                }
             }
         }
     }
