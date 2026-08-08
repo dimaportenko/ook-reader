@@ -883,10 +883,12 @@ generalised, 5b–5e each add a field, a rule, and a control.
   `page-count.js` only re-reports on `resize`, which a font-size change is not. This sitting
   re-reports the count and lands you back on the same *words*, via the `ook-sel:` selector
   `restored_data` already uses.
-- **5d — `--USER__lineHeight`, then the margin / line-length pair.** Nearly free once 5c
-  exists: a field, a rule, a control. Line-length is the one that touches `pagination.css`'s
-  `column-width`, so it comes last of the three.
-- **5e — `--USER__fontFamily` from a curated list.** The one with an ethics clause: a book
+- **5d — `--USER__lineHeight`.** Nearly free once 5c exists: a field, a rule, a control. (Was
+  written as "line-height, then the margin / line-length pair"; split when 5d was laid out,
+  because line-length changes the page *geometry* and the other two do not.)
+- **5e — the margin / line-length pair.** The one that touches `pagination.css`'s
+  `column-width`.
+- **5f — `--USER__fontFamily` from a curated list.** The one with an ethics clause: a book
   that ships embedded fonts chose them, and Readium gates the aggressive overrides behind a
   flag rather than always winning. Curated names, not a free picker.
 
@@ -1690,6 +1692,316 @@ pub(crate) enum BridgeMsg {
   with the anchor's page. Only reachable if a settings change lands mid chapter-prev-settle,
   and the fix would be to give `on_reflow` an opinion about `pending`, which is exactly the
   entanglement this step avoided by not reusing `ook-scroll`. Known, not fixed.
+
+---
+
+## Step 5d — `--USER__lineHeight`
+
+> **Status:** done — committed in `eb92bb6` (72 tests green, 67 → 72; clippy clean).
+
+The sub-plan wrote 5d as "line-height, **then** the margin / line-length pair" — three
+settings in one line. Line-height is one idea and the pair is another (line-length is the one
+that reaches into `pagination.css`'s `column-width`), so this sitting is **line-height alone**
+and the pair becomes **5e**; font-family slides to **5f**. Same work, one idea each.
+
+This is the first step that gets to cash 5c's cheque. There is no positioning work in it, no
+new message, no new JS: a field, a rule, a control. What it *does* have is two small traps
+worth the sitting — the unit and the selector.
+
+### Runnable check first
+
+Two of these are already written and will go **red before you touch anything else**, which is
+the nicest kind of failing test — the ones from earlier steps that told you they would.
+
+**`cargo test`**, in `src/web/settings.rs`'s `mod test`:
+
+The existing count assertion breaks the moment `css_vars` grows, and it says so:
+
+```rust
+            assert_eq!(
+                vars.len(),
+                theme.css_vars().len() + 1,
+                "the palette plus --USER__fontSize — bump this when a setting is added",
+            );
+```
+
+Bump it to `+ 2` and fix the message. `the_pushed_vars_and_the_injected_layer_name_the_same_variables`
+also goes red on its own, and needs **no** edit — it walks whatever `css_vars` returns and
+demands the layer both *declare* and *read* each name. That is 5a's design paying out: add a
+variable and the pairing test starts guarding it for free.
+
+Then the new ones:
+
+```rust
+    #[test]
+    fn the_line_height_reaches_the_layer_unitless() {
+        let settings = Settings {
+            line_height: 140,
+            ..Settings::default()
+        };
+
+        assert!(settings
+            .css_vars()
+            .contains(&("--USER__lineHeight", "1.40".to_string())));
+
+        let layer = settings.user_layer();
+
+        assert!(
+            layer.contains("--USER__lineHeight: 1.40;"),
+            "the chosen leading never reached the :root block",
+        );
+        assert!(
+            layer.contains("line-height: var(--USER__lineHeight)"),
+            "the layer declares a leading it never applies — the number would move \
+             and the lines would not",
+        );
+    }
+
+    #[test]
+    fn a_line_height_below_a_tenth_keeps_its_leading_zero() {
+        // 105 hundredths is 1.05, not 1.5. `{}.{}` prints the latter, and the gap
+        // between "a hair looser" and "half again as loose" is invisible in the
+        // source and obvious on screen.
+        let settings = Settings {
+            line_height: 105,
+            ..Settings::default()
+        };
+
+        assert!(settings
+            .css_vars()
+            .contains(&("--USER__lineHeight", "1.05".to_string())));
+    }
+
+    #[test]
+    fn the_line_height_rule_reaches_the_elements_the_book_styles() {
+        // A rule on `body` alone only supplies an *inherited* value, and inheritance
+        // fills in what nothing else declares. A book that says `p { line-height: 1.2 }`
+        // has declared it, so the paragraphs — the only text you actually read — would
+        // ignore the setting entirely.
+        assert!(Settings::default().user_layer().contains("body *"));
+    }
+
+    #[test]
+    fn the_line_height_steps_and_clamps() {
+        let mut settings = Settings {
+            line_height: 150,
+            ..Settings::default()
+        };
+
+        settings.tighter();
+        assert_eq!(settings.line_height, 150 - LINE_HEIGHT_STEP);
+        settings.looser();
+        assert_eq!(settings.line_height, 150);
+
+        for _ in 0..20 {
+            settings.tighter();
+        }
+        assert_eq!(settings.line_height, LINE_HEIGHT_MIN);
+
+        for _ in 0..20 {
+            settings.looser();
+        }
+        assert_eq!(settings.line_height, LINE_HEIGHT_MAX);
+    }
+```
+
+67 → 71. (72 as committed — review added a fifth test; see the departure note below.)
+
+**`cargo clippy --all-targets`**, as always.
+
+**`dx serve`** — the part the tests cannot see:
+
+1. Open a chapter, page into the middle, note the first words and `Page X of N`.
+2. Press the leading `+`. The lines open up, **`N` changes**, and **the words stay put** —
+   5c's handler is doing this with nothing new written for it.
+3. Find a chapter with a heading in it. The heading's leading should scale *with* its own
+   size, not inherit the body's — a unitless value is what buys that (see below).
+4. Switch theme afterwards. Still no jump, still no change to `N`.
+
+### Minimal implementation (sketch)
+
+**`src/web/settings.rs`** — the constants, beside the font-size ones:
+
+```rust
+pub(crate) const LINE_HEIGHT_MIN: u16 = 100;
+pub(crate) const LINE_HEIGHT_MAX: u16 = 200;
+pub(crate) const LINE_HEIGHT_STEP: u16 = 10;
+```
+
+the field, and a default that is a real typographic choice rather than a round number:
+
+```rust
+pub(crate) struct Settings {
+    pub(crate) theme: Theme,
+    pub(crate) font_size: u16,
+    pub(crate) line_height: u16,
+}
+```
+
+```rust
+            font_size: 100,
+            line_height: 140,
+```
+
+the two steppers, the same shape as `zoom_in` / `zoom_out`:
+
+```rust
+    pub(crate) fn looser(&mut self) {
+        self.line_height = self
+            .line_height
+            .saturating_add(LINE_HEIGHT_STEP)
+            .min(LINE_HEIGHT_MAX);
+    }
+
+    pub(crate) fn tighter(&mut self) {
+        self.line_height = self
+            .line_height
+            .saturating_sub(LINE_HEIGHT_STEP)
+            .max(LINE_HEIGHT_MIN);
+    }
+```
+
+one formatter, called from both the variable list and the control's label so the two can
+never disagree:
+
+```rust
+    pub(crate) fn line_height_css(self) -> String {
+        format!("{}.{:02}", self.line_height / 100, self.line_height % 100)
+    }
+```
+
+```rust
+        vars.push(("--USER__lineHeight", self.line_height_css()));
+```
+
+and the rule, appended to `user_layer`:
+
+```rust
+                \nbody, body * {{ line-height: var(--USER__lineHeight) !important; }}",
+```
+
+**`src/ui/settings.rs`** — a second control, deliberately a near-copy of the first:
+
+```rust
+#[component]
+pub(crate) fn LineHeightControl() -> Element {
+    let mut settings = use_context::<Signal<Settings>>();
+    let leading = settings().line_height_css();
+
+    rsx! {
+        div {
+            button {
+                disabled: settings().line_height <= LINE_HEIGHT_MIN,
+                onclick: move |_| settings.write().tighter(),
+                "\u{2195}-"
+            }
+            span {
+                style: "padding: 0 0.5rem",
+                "{leading}"
+            }
+            button {
+                disabled: settings().line_height >= LINE_HEIGHT_MAX,
+                onclick: move |_| settings.write().looser(),
+                "\u{2195}+"
+            }
+        }
+    }
+}
+```
+
+**`src/ui/reader.rs`** — one import and one line in the chrome, next to `FontSizeControl {}`.
+
+That is the whole step. Nothing in `epub.rs`, nothing in the JS, nothing in `nav.rs`.
+
+### Why it works
+
+- **Unitless, not a percentage.** `line-height: 1.4` and `line-height: 140%` compute to the
+  same pixels on the element that declares them and then behave *differently on every
+  descendant*. A percentage is resolved to a length **where it is declared** and that length
+  is what inherits; a unitless number inherits as a *number* and each element multiplies it by
+  its **own** font-size. Put `140%` on `body` at 16px and every child inherits `22.4px` of
+  leading — including an `<h1>` at 32px, whose lines then overlap. That is why the CSS spec
+  recommends unitless line-height on anything that inherits, and why `--USER__fontSize` gets
+  to be a `%` while `--USER__lineHeight` must not be. It is also why the integer field is in
+  *hundredths* and gets formatted rather than pushed as a number.
+- **`{:02}` is the whole reason a formatter exists.** `140 / 100` and `140 % 100` give `1` and
+  `40`, and `"{}.{}"` prints `1.40` — correct by luck. `105` gives `1` and `5`, and the same
+  format string prints `1.5`, which is a *different setting* that CSS will accept without
+  complaint. `{:02}` pads the remainder to two digits, and the test for `105` is there because
+  `140` can never catch it. (`format!("{:.2}", f64::from(self.line_height) / 100.0)` is the
+  same output through floats; the integer-division form keeps the type honest — the field is
+  a count of hundredths, not a measurement.)
+- **`body *` beats inheritance, and beats the author too.** Inheritance is the weakest way a
+  property gets a value: it only applies when *no* declaration matched the element. Books
+  declare `line-height` on `p` constantly, so a rule on `body` alone is silently ignored
+  exactly where it matters. `body *` matches the paragraph itself, which puts us in the
+  cascade instead of underneath it. Against `p { line-height: 1.2 !important }` the two
+  declarations tie on origin (both author), tie on `!important`, and tie on specificity
+  (`body *` and `p` are both one element selector — `*` contributes nothing) — so it comes
+  down to **document order**, and the USER layer is injected last, before `</head>`, after the
+  book's stylesheets *and* after `pagination.css`. That ordering was Step 2's real finding and
+  this is the first step to lean on it for something other than colour.
+- **The live route needed no work.** `css_vars` is the one list both routes read, so the
+  serve-time `:root` block and the `ook-set-theme` push both pick the new variable up from the
+  single `vars.push`. 5c's handler then re-measures and re-anchors because it reacts to *any*
+  variable change, not to font-size specifically. A field, a rule, a control — that was the
+  claim in the sub-plan, and this is it holding.
+- **`let leading = …` before the `rsx!`, not inside it.** Reading `settings()` in the
+  component body subscribes this component to the signal, so the label re-renders when the
+  value changes either way. Binding it first also sidesteps calling a method inside an `rsx!`
+  format hole, which is a different (and fussier) piece of macro machinery than a plain
+  identifier.
+
+### Scope note
+
+- **Margins and line-length are 5e**, font-family 5f. Line-length is the one that has to
+  reach `column-width` in `pagination.css` — it changes the *page geometry*, not just the
+  text inside it — so it earns its own sitting rather than riding along here.
+- **Headings get the setting too.** `body *` is a hammer; Readium excludes a handful of
+  elements from its line-height override to protect deliberate display type. Unitless keeps
+  that from being *broken*, but it is still an override the author did not ask for. If it
+  looks wrong on a real book, that is 5f's "respect author intent" conversation arriving
+  early, and worth noting rather than fixing here.
+- **Two controls that are the same control.** `FontSizeControl` and `LineHeightControl` differ
+  in four identifiers. Leave the duplication standing for this sitting — a shared `Stepper`
+  wants to see both concrete cases first, and **Step 6** is where it gets written.
+- **Settings still live in a `use_signal` in `main.rs`** and reset on every launch. Persisting
+  them is real work (a second table beside `positions`) and belongs to its own step, not to
+  the sitting that adds the third one.
+
+### Departures and notes from the sitting
+
+- **The colour rule got widened before it got split back.** The first implementation folded
+  the leading into the existing colour rule and changed its selector to `body, body *`
+  — one rule instead of two, which reads as the tidier edit. It is not: `background` is a
+  *shorthand* and it was already `!important`, so every element in the book started painting
+  an opaque theme ground and dropping its own `background-image` on the way past. A `<mark>`
+  highlight, a striped table, a tinted `<blockquote>` or code block all flatten into the page
+  with no declaration the author can write to win them back. The leading is the only one of
+  the three properties that needs to reach descendants, because it is the only one whose
+  inherited value loses to a rule books actually write. Split into three rules, which is what
+  the sketch above had.
+- **That is the second time in this phase the same mistake wore the same disguise.** 5b moved
+  the colour rule up to `html` alongside the size and lost its `!important` to inheritance;
+  5d pushed it down to every descendant and beat declarations it should not have. Both edits
+  looked like removing a duplicated selector. The rule to take forward: in this layer the
+  selector *is* the design, and two rules that share declarations are not evidence they should
+  share a selector.
+- **The suite was green for both arrangements, again.** The layer tests assert each variable
+  is declared and read *somewhere*; they have never asserted which elements a rule reaches.
+  That is the same honest limit 5b recorded, and this time it got a test rather than a note:
+  `the_background_rule_stops_at_the_body` walks the layer rule by rule and fails any
+  descendant selector that also declares a background. It was confirmed **red** against the
+  merged form before being kept — a tripwire nobody has seen fail is a guess about what the
+  code does.
+- **`!important` on the leading was in the sketch and missing from the first pass.** Without
+  it the rule still wins the common case, since `body *` and `p` tie on specificity and the
+  layer is injected last — which is exactly what makes the omission hard to see. It loses
+  only to an author `!important`, on the books most likely to have opinions about leading.
+- **The `dx serve` walk was the real gate and passed by hand**: the lines opened, `N` changed,
+  the words held, headings scaled their own leading, and a theme switch afterwards still moved
+  nothing. 5c's handler did all of that without a line written for this step, which was the
+  claim the sub-plan made about 5d and the reason it was worth checking rather than assuming.
 
 ---
 

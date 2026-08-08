@@ -77,13 +77,23 @@ implementation → why. Smallest-first:
       you have watched break. The size goes on `html` and the colours stay on `body` —
       moving them together looked like tidying and would have cost the colour layer its
       `!important`. Committed in `1529fc4`, **65 tests green**.
-- [ ] **Step 5c — Re-measure and re-anchor after a reflow.** A size change re-columns the
-      document, and `page-count.js` only re-reports on `resize`. Re-report the count and land
-      back on the same *words*, via the `ook-sel:` selector `restored_data` already uses.
-- [ ] **Step 5d — `--USER__lineHeight`, then margins / line-length.** Cheap once 5c exists.
-      Line-length last of the three — it is the one that touches `pagination.css`'s
-      `column-width`.
-- [ ] **Step 5e — `--USER__fontFamily` from a curated list.** Respect embedded fonts and
+- [x] **Step 5c — Re-measure and re-anchor after a reflow.** A size change re-columns the
+      document, and `page-count.js` only re-reported on `resize`. The `ook-set-theme` handler
+      now captures an anchor selector *before* applying the variables, re-reports the count,
+      and posts a new `ook-reflow` message when the anchor's column moved — so the count is
+      right and you land back on the same *words*. Not `ook-scroll`, which also clears
+      `Pending::Fragment` and would strand a mid-settle restore. Committed in `2a9e181`,
+      **67 tests green**.
+- [x] **Step 5d — `--USER__lineHeight`.** A field, a rule, a control — 5c's handler re-anchored
+      it for free, with no new message and no new JS. The two traps were the unit (unitless,
+      not `%`, or headings inherit a length and overlap) and the selector (`body *`, because
+      inheritance loses to any author rule on the paragraph). A third one showed up in review:
+      folding the leading into the colour rule widens an `!important` `background` shorthand
+      onto every element, so the layer is three rules and has a tripwire saying why. Committed
+      in `eb92bb6`, **72 tests green**.
+- [ ] **Step 5e — margins / line-length.** The pair that changes page *geometry* — it is the
+      one that touches `pagination.css`'s `column-width`.
+- [ ] **Step 5f — `--USER__fontFamily` from a curated list.** Respect embedded fonts and
       author `!important`, the way Readium gates its aggressive overrides.
 - [ ] **Step 6 — Review & refactor** (per the repo's phase-ending convention).
 
