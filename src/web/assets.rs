@@ -51,6 +51,21 @@ mod test {
     }
 
     #[test]
+    fn the_reflow_handler_reuses_the_position_helpers() {
+        // The anchor has to be the same notion of "where I am" that page-position.js
+        // persists, which means the same code and not a second copy of it. A copy would
+        // drift the first time one of the two is fixed.
+        assert_eq!(INJECTED_ASSETS.matches("function selectorFor").count(), 1);
+        assert_eq!(
+            INJECTED_ASSETS
+                .matches("function firstElementOnPage")
+                .count(),
+            1
+        );
+        assert_eq!(INJECTED_ASSETS.matches("const report =").count(), 1);
+    }
+
+    #[test]
     fn wrapped_css_is_a_cdata_style_element() {
         let out = wrap_css_str("body > p { color: red }");
 

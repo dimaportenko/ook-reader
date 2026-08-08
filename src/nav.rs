@@ -142,6 +142,10 @@ impl ReaderState {
             pending.set(Pending::Nothing);
         }
     }
+
+    pub(crate) fn on_reflow(self, page: usize) {
+        self.data.page().set(page);
+    }
 }
 
 fn on_next(page: usize, page_count: usize, chapter: usize, chapter_count: usize) -> Nav {

@@ -22,6 +22,7 @@ pub(crate) enum BridgeMsg {
     Scroll(usize),
     Pages(usize),
     Position(String),
+    Reflow(usize),
 }
 
 impl BridgeMsg {
@@ -34,6 +35,8 @@ impl BridgeMsg {
             page_count.parse().ok().map(BridgeMsg::Pages)
         } else if let Some(selector) = msg.strip_prefix("position:") {
             (!selector.is_empty()).then(|| BridgeMsg::Position(selector.to_string()))
+        } else if let Some(page) = msg.strip_prefix("reflow:") {
+            page.parse().ok().map(BridgeMsg::Reflow)
         } else {
             None
         }
@@ -216,6 +219,7 @@ fn use_bridge(state: ReaderState, docs: Rc<Vec<String>>, library: Rc<Library>, b
                             .save_position(book_id, &locator, library::now_secs())
                             .or_log("save the reading position");
                     }
+                    Some(BridgeMsg::Reflow(page)) => state.on_reflow(page),
                     None => {}
                 }
             }
@@ -273,5 +277,17 @@ mod test {
         // An empty payload is not a position. Reject it here rather than storing a
         // selector that can never resolve — Step 6 writes this straight to SQLite.
         assert_eq!(BridgeMsg::parse("position:"), None);
+    }
+
+    #[test]
+    fn the_reflow_message_survives_all_three_hops() {
+        // theme-listener.js posts it, ook-events-listener.js forwards it, `parse` reads
+        // it back. Three files, one name, and no compiler between any two of them —
+        // rename it in one and the count goes stale again, silently.
+        assert!(crate::web::assets::INJECTED_ASSETS.contains("ook-reflow"));
+        assert!(BRIDGE_JS.contains("ook-reflow"));
+
+        assert_eq!(BridgeMsg::parse("reflow:7"), Some(BridgeMsg::Reflow(7)));
+        assert_eq!(BridgeMsg::parse("reflow:notanumber"), None);
     }
 }

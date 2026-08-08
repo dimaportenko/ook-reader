@@ -12,4 +12,7 @@ window.addEventListener("message", (e) => {
   if (e.data.kind === "ook-position") {
     dioxus.send("position:" + e.data.selector);
   }
+  if (e.data.kind === "ook-reflow") {
+    dioxus.send("reflow:" + e.data.page);
+  }
 });
