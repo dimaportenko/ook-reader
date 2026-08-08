@@ -72,9 +72,11 @@ implementation → why. Smallest-first:
       being fixed and the values stop being literals, both of which 5b needs. The one visible
       change: the library screen gives up its theme picker, the reader keeps its own.
       Committed in `df7e4f0`, **62 tests green**.
-- [ ] **Step 5b — `--USER__fontSize` + its control.** The first non-colour variable, end to
+- [x] **Step 5b — `--USER__fontSize` + its control.** The first non-colour variable, end to
       end. Text resizes live; the page count goes stale, deliberately, so 5c has something
-      you have watched break.
+      you have watched break. The size goes on `html` and the colours stay on `body` —
+      moving them together looked like tidying and would have cost the colour layer its
+      `!important`. Committed in `1529fc4`, **65 tests green**.
 - [ ] **Step 5c — Re-measure and re-anchor after a reflow.** A size change re-columns the
       document, and `page-count.js` only re-reports on `resize`. Re-report the count and land
       back on the same *words*, via the `ook-sel:` selector `restored_data` already uses.

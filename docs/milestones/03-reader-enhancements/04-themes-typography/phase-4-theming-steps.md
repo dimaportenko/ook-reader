@@ -1097,8 +1097,8 @@ Two departures from the sketch above, both deliberate:
   one that matters while the settings set is growing — the library screen gets its own
   entry point back when there is more than a palette to put in it.
 - **The default theme is `Day`, not `Sepia`.** `use_signal(Settings::default)` inherits
-  `Theme`'s `#[default]`, where the old `use_signal(|| Theme::Sepia)` named its choice. Not
-  worth a field default of its own until settings are persisted.
+  `Theme`'s `#[default]`, where the old `use_signal(|| Theme::Sepia)` named its choice.
+  Not worth a field default of its own until settings are persisted.
 
 Also worth noting for **Step 6**, and not a 5a regression — it predates this sitting:
 `use_register_asset_handler` is handed a `settings()` *snapshot* at mount, and
@@ -1110,10 +1110,341 @@ colour, which is exactly 5b.
 
 ---
 
+## Step 5b — `--USER__fontSize` and its control
+
+> **Status:** done — committed in `1529fc4` (65 tests green, 62 → 65; clippy clean).
+
+The first setting that is not a colour, end to end: a field, a rule, a control. 5a built the
+machinery for exactly this, so the interesting part of this sitting is not the plumbing —
+it is that **two tests you already have go red before you write a line of implementation**,
+each for a different right reason. That is the whole payoff of the last sitting, and it is
+worth watching happen before you fix it.
+
+### The crux: a percentage is a scale factor, and `Default` is a trap
+
+Two things make this bigger than "add a field".
+
+**`Settings` can no longer derive `Default`.** `u16`'s default is `0`, so a derived
+`Settings::default()` would serve `font-size: 0%` — and `Settings::default()` is the value
+behind eight `epub.rs` test call sites and the app's initial signal. The derive would
+compile, the type would be correct, and the reader would render nothing. Deriving `Default`
+is only right when *every field's* zero value is the sensible default; the moment one field
+has a meaningful starting point, the derive silently lies. So it goes, replaced by a
+hand-written `impl Default for Settings`.
+
+**The value is a percentage, not a pixel size** — and that choice is doing real work.
+`font-size: 125%` on the root means *"1.25× whatever the user agent's default is"*, so every
+`em` and `rem` in the book's own stylesheet keeps its relationship to everything else: a
+chapter heading the author set at `2em` stays twice the body text at every setting. A pixel
+value would flatten that — you would be picking the body size *and* silently overriding the
+author's typographic hierarchy. This is also why the variable belongs on `html` (the `:root`
+that `theme-listener.js` already writes to) rather than on `body`: the root is where the
+whole `em` cascade is anchored.
+
+### Runnable check
+
+**`cargo test`.** **62 tests before, 65 after** — but the order matters here. Add the field
+*first*, before touching `user_layer`, and watch two existing tests fail:
+
+1. `the_settings_variable_list_carries_the_whole_palette` — the tripwire planted in 5a. Its
+   `assert_eq!(vars.len(), theme.css_vars().len())` was written to fail exactly now. Change
+   it to `theme.css_vars().len() + 1` and say why in the message.
+2. `the_pushed_vars_and_the_injected_layer_name_the_same_variables` — this one you did *not*
+   write for this step, and it still catches you:
+
+   ```
+   Day declares --USER__fontSize and no rule reads it
+   ```
+
+   The variable reaches the `:root` block for free (`declarations` folds over `css_vars`),
+   but nothing *applies* it, so the number would change and the text would not. This is the
+   test earning its keep — it is the only thing standing between you and a control that
+   looks like it works.
+
+Then the three new ones, in `src/web/settings.rs`:
+
+```rust
+#[test]
+fn the_default_font_size_is_100_percent() {
+    // Not a style preference: a derived `Default` gives `0`, which serves
+    // `font-size: 0%` to every caller of `Settings::default()`.
+    assert_eq!(Settings::default().font_size, 100);
+}
+
+#[test]
+fn the_font_size_steps_and_clamps() {
+    let mut settings = Settings {
+        font_size: 150,
+        ..Settings::default()
+    };
+
+    settings.zoom_out();
+    assert_eq!(settings.font_size, 150 - FONT_SIZE_STEP);
+    settings.zoom_in();
+    assert_eq!(settings.font_size, 150);
+
+    for _ in 0..20 {
+        settings.zoom_out();
+    }
+    assert_eq!(
+        settings.font_size, FONT_SIZE_MIN,
+        "zooming out past the floor must clamp, not underflow",
+    );
+
+    for _ in 0..20 {
+        settings.zoom_in();
+    }
+    assert_eq!(
+        settings.font_size, FONT_SIZE_MAX,
+        "zooming in past the ceiling must clamp, not overflow",
+    );
+}
+
+#[test]
+fn the_font_size_reaches_the_layer_as_a_percentage() {
+    let settings = Settings {
+        font_size: 125,
+        ..Settings::default()
+    };
+
+    assert!(settings
+        .css_vars()
+        .contains(&("--USER__fontSize", "125%".to_string())));
+
+    let layer = settings.user_layer();
+
+    assert!(
+        layer.contains("--USER__fontSize: 125%;"),
+        "the chosen size never reached the :root block",
+    );
+    assert!(
+        layer.contains("font-size: var(--USER__fontSize)"),
+        "the layer declares a size it never applies — the number would move \
+         and the text would not",
+    );
+}
+```
+
+**`cargo clippy --all-targets`** — the lint to expect is on the arithmetic: reach for
+`saturating_add`/`saturating_sub` rather than `+`/`-` and the question doesn't come up.
+
+**`dx serve`** — the eyeball check, and the one that motivates 5c. Open a chapter and press
+`A+` twice. The text should resize *live*, with no reload and no blink, in all three themes.
+Then look at the page label: **it still says the old count**, and the page you are on now
+shows different words than it did. That is the bug 5c fixes, and it is much easier to fix
+something you have watched happen.
+
+### Minimal implementation (sketch)
+
+**`src/web/settings.rs`** — the field, the bounds, the steppers, and one new rule:
+
+```rust
+pub(crate) const FONT_SIZE_MIN: u16 = 75;
+pub(crate) const FONT_SIZE_MAX: u16 = 250;
+pub(crate) const FONT_SIZE_STEP: u16 = 25;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Settings {
+    pub(crate) theme: Theme,
+    pub(crate) font_size: u16,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            theme: Theme::default(),
+            font_size: 100,
+        }
+    }
+}
+
+impl Settings {
+    pub(crate) fn zoom_in(&mut self) {
+        self.font_size = self.font_size.saturating_add(FONT_SIZE_STEP).min(FONT_SIZE_MAX);
+    }
+
+    pub(crate) fn zoom_out(&mut self) {
+        self.font_size = self.font_size.saturating_sub(FONT_SIZE_STEP).max(FONT_SIZE_MIN);
+    }
+
+    pub(crate) fn css_vars(self) -> Vec<(&'static str, String)> {
+        let mut vars: Vec<(&'static str, String)> = self
+            .theme
+            .css_vars()
+            .into_iter()
+            .map(|(name, value)| (name, value.to_string()))
+            .collect();
+
+        vars.push(("--USER__fontSize", format!("{}%", self.font_size)));
+
+        vars
+    }
+```
+
+with `user_layer` gaining the rule that reads it:
+
+```rust
+    pub(crate) fn user_layer(self) -> String {
+        format!(
+            "{}\nhtml {{ font-size: var(--USER__fontSize) !important; }}\
+             \nbody {{ background: var(--USER__backgroundColor) !important; \
+                color: var(--USER__textColor) !important; }}",
+            self.vars()
+        )
+    }
+```
+
+**New — `src/ui/settings.rs`**, mirroring `web/settings.rs`:
+
+```rust
+use dioxus::prelude::*;
+
+use crate::web::settings::{Settings, FONT_SIZE_MAX, FONT_SIZE_MIN};
+
+#[component]
+pub(crate) fn FontSizeControl() -> Element {
+    let mut settings = use_context::<Signal<Settings>>();
+
+    rsx! {
+        div {
+            button {
+                disabled: settings().font_size <= FONT_SIZE_MIN,
+                onclick: move |_| settings.write().zoom_out(),
+                "A-"
+            }
+            span {
+                style: "padding: 0 0.5rem;",
+                "{settings().font_size}%"
+            }
+            button {
+                disabled: settings().font_size >= FONT_SIZE_MAX,
+                onclick: move |_| settings.write().zoom_in(),
+                "A+"
+            }
+        }
+    }
+}
+```
+
+**`src/ui/mod.rs`** gains `pub mod settings;`. **`src/ui/reader.rs:117`** mounts it beside
+the picker, in the same right-hand chrome `div`:
+
+```rust
+div {
+    style: "display: flex; gap: 1rem; padding: 0.5rem 1rem; z-index: 1;",
+    FontSizeControl {}
+    ThemePicker {}
+}
+```
+
+Nothing else changes. In particular **no JavaScript changes at all** — which is the point.
+
+### Why it works
+
+- **The push route is already done, and that is 5a's dividend.** `use_effect` sends
+  `settings().css_vars()`, `theme-listener.js` loops over whatever pairs arrive and calls
+  `setProperty` for each. Neither end knows or cares that the list grew from two to three. If
+  `css_vars` had still returned `[(&str, &str); 2]`, this step would have had to change the
+  return type, both call sites, and the tests before it could add anything.
+- **`format!("{}%", self.font_size)` is why the values had to become owned.** This `String`
+  is built when the user clicks; there is no `'static` lifetime to hand out for it. That hop
+  cost one line here because it was paid in 5a — it would have cost a signature change today.
+- **`saturating_add(STEP).min(MAX)` and the mirror for down.** The saturate handles the type's
+  bounds (`u16` can't wrap to a tiny number), the `min`/`max` handles *your* bounds. Two
+  different failures, two different guards, and the plain `+`/`-` form gives you neither —
+  in release builds an overflow wraps silently rather than panicking.
+- **`Settings { font_size: 125, ..Settings::default() }` — struct update syntax.** It fills
+  the fields you didn't name from another value of the same type. Worth adopting in tests
+  now: every later sitting adds a field, and the tests written this way don't need touching.
+- **`settings.write().zoom_out()` is a read-modify-write through the guard.** `write()` hands
+  back a `WriteSignal` guard that marks the signal dirty when it drops at the end of the
+  statement; `zoom_out` takes `&mut self` *through* that guard. The rule from 5a still holds
+  — no read of the same signal while the guard is alive — and here it is satisfied because
+  the whole computation happens inside `zoom_out`, on `&mut self`, never touching the signal.
+- **`disabled:` and the readout both derive from the signal.** Reading `settings()` during
+  render subscribes the component, so the buttons grey out at the bounds and the `%` label
+  moves without any separate bookkeeping. And `Signal` is `Copy`, which is what lets the same
+  `settings` handle be captured by two `move` closures without a `.clone()` in sight.
+- **Why `!important` on the root rule.** Not a specificity contest with the book's
+  `body { font-size: … }` — that targets a different element and simply *inherits* the root
+  size, which is the whole mechanism. The `!important` is there for the narrower case of a
+  book that sets `html`/`:root` font-size itself, with `!important` of its own; being served
+  last only wins ties between declarations of equal weight. Readium's font-size module marks
+  its override the same way, for the same reason.
+
+### Scope note
+
+Four things this step deliberately does not do:
+
+- **The page count goes stale, and the page you are on drifts.** A font-size change re-columns
+  the document, but `page-count.js` only re-reports on `load` and `resize`, and a variable
+  change is neither. **5c** fixes both halves — re-report the count, and re-anchor on the same
+  *words* via the `ook-sel:` selector.
+- **The app chrome does not scale.** `inline_styles` will carry `--USER__fontSize` into the
+  wrapper's `style` attribute, where nothing reads it. The setting is about the book's text,
+  not the reader's buttons; leave it that way unless it looks wrong.
+- **Books that set text sizes in absolute `px` will not respond.** Their author CSS is not
+  relative to the root, so scaling the root does nothing for them. Readium solves this with a
+  much more aggressive override that also rewrites author declarations; that trade-off belongs
+  with **5e**'s embedded-font question, not here.
+- **Nothing is persisted.** A relaunch is back to 100% and Day, same as the theme.
+
+**One naming smell to carry into Step 6:** the bridge message is still called
+`ook-set-theme`, and it now carries typography. The mechanism is right and the name has
+stopped describing it.
+
+### What actually happened
+
+**The tripwire fired, and so did the pairing test — both as written.** Adding the field
+before touching `user_layer` broke the suite in two places for two different reasons: the
+`assert_eq!(vars.len(), …)` planted in 5a, which only needed its `+ 1`, and
+`the_pushed_vars_and_the_injected_layer_name_the_same_variables` with
+`Day declares --USER__fontSize and no rule reads it`. The second is the one worth keeping
+score of, because nobody wrote it for this step. A variable that reaches `:root` and no
+rule reads is a control that moves a number and nothing else, and that test is the only
+thing that would have caught it.
+
+**One test call site outside `web::settings` had to move too.** `epub.rs`'s
+`serving_a_chapter_injects_the_theme_after_every_other_layer` built a `Settings { theme }`
+literal, which stopped compiling the moment the struct grew. It took `..Settings::default()`
+rather than a second literal field — struct update syntax is the shape that survives 5c–5e,
+each of which adds a field. The five literals inside `web::settings` still name `font_size`
+by hand; they are worth converting the next time that file is opened.
+
+**The departure that mattered: `html` versus `body`.** The first pass put `font-size` on
+the existing `body` rule, which works — `body` inherits from the root, so 125% is still
+1.25× — but leaves `rem` resolving against an unscaled `html`, so any author rule using
+`rem` would not move. The correction over-shot in the other direction and moved the *whole*
+block, colours included, to `html`. That is the version to remember, because it looks
+strictly tidier and is a regression:
+
+> `!important` does not survive being moved up a level, because **inheritance is not
+> specificity**. `html { color: … !important }` wins the cascade *for `html`*; `body` then
+> merely inherits it, and an inherited value loses to any declaration matching `body`
+> directly. A book with a plain `body { color: #000 }` — common — takes the night palette
+> back to black text on a dark ground, with no `!important` of its own required. Background
+> fails the same way: `html`'s propagates to the canvas, and the book's `body` background
+> paints a box over it.
+
+So the layer ends up as two rules rather than one, and the split is load-bearing: the size
+belongs on the root *because* `body` inherits it, and the colours belong on `body` *because*
+inheritance is exactly what would defeat them.
+
+Worth noting that the suite was green for every one of those three arrangements.
+`the_injected_layer_applies_the_variables_it_declares` asserts the layer declares each
+variable and reads it somewhere; it never asserts *which element* the rule targets. The
+tests pinned the plumbing and had nothing to say about the cascade — which is the honest
+limit of a string-matching test on CSS, and the reason the `dx serve` check is a gate here
+and not a courtesy.
+
+**The three new tests were written after the implementation**, as in steps 2 and 4.
+
+---
+
 ## Step 6 — sketched
 
 - **Step 6 — review & refactor.** The repo's phase-ending step (commit `b09d6c9`): fold
   duplication in the serve/inject path, confirm the cascade order, re-read against ADR-0003.
-  By then `Settings` will have five fields and the `user_layer` string will be a `format!` with
-  five holes — that is the shape to look hardest at.
+  By then `Settings` will have five fields and the `user_layer` string will be a `format!`
+  with five holes — that is the shape to look hardest at.
 </content>
