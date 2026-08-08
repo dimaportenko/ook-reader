@@ -6,10 +6,8 @@ use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 use rbook::epub::rewrite::{EpubRewriteOptions, PathRewrite};
 use rbook::Epub;
 
-use crate::web::{
-    self,
-    assets::{wrap_css_str, INJECTED_ASSETS, READING_SYSTEM_DEFAULTS},
-};
+use crate::web::assets::{wrap_css_str, INJECTED_ASSETS, READING_SYSTEM_DEFAULTS};
+use crate::web::settings::Settings;
 
 pub(crate) const EPUB_ROUTE: &str = "epub";
 pub(crate) const EPUB_URL_PREFIX: &str = "dioxus://index.html/epub/"; // must embed EPUB_ROUTE
@@ -46,11 +44,7 @@ pub(crate) struct Served {
     pub(crate) body: Vec<u8>,
 }
 
-pub(crate) fn serve_epub_resource(
-    epub: &Epub,
-    path: &str,
-    theme: web::theme::Theme,
-) -> Option<Served> {
+pub(crate) fn serve_epub_resource(epub: &Epub, path: &str, settings: Settings) -> Option<Served> {
     let content_type = epub
         .manifest()
         .by_href(path.trim_start_matches('/'))
@@ -62,7 +56,7 @@ pub(crate) fn serve_epub_resource(
             EpubRewriteOptions::default().rewrite_paths(PathRewrite::prefix(EPUB_URL_PREFIX));
         let xhtml = epub.read_resource_str_with(path, &rewrite).ok()?;
 
-        let inject_css = format!("{INJECTED_ASSETS}{}", wrap_css_str(&theme.user_layer()));
+        let inject_css = format!("{INJECTED_ASSETS}{}", wrap_css_str(&settings.user_layer()));
 
         let with_defaults = insert_after_head_open(&xhtml, READING_SYSTEM_DEFAULTS);
         let with_assets = insert_before_head_close(&with_defaults, &inject_css);
@@ -224,11 +218,11 @@ fn zip_path_for(uri_path: &str) -> String {
         .into_owned()
 }
 
-pub(crate) fn use_register_asset_handler(epub: Rc<Epub>, theme: web::theme::Theme) {
+pub(crate) fn use_register_asset_handler(epub: Rc<Epub>, settings: Settings) {
     use_asset_handler(EPUB_ROUTE, move |request, responder| {
         let path = zip_path_for(request.uri().path());
 
-        responder.respond(epub_response(serve_epub_resource(&epub, &path, theme)));
+        responder.respond(epub_response(serve_epub_resource(&epub, &path, settings)));
     })
 }
 
@@ -514,7 +508,7 @@ mod test {
         let served = serve_epub_resource(
             &epub,
             "/OEBPS/374963762688302552_cover.jpg",
-            Theme::default(),
+            Settings::default(),
         )
         .expect("the fixture's cover is reachable by path");
 
@@ -528,7 +522,7 @@ mod test {
     #[test]
     fn serving_an_unknown_path_is_a_miss() {
         let epub = Epub::open(crate::TEST_BOOK).expect("open fixture book");
-        assert!(serve_epub_resource(&epub, "/OEBPS/nope.xhtml", Theme::default()).is_none());
+        assert!(serve_epub_resource(&epub, "/OEBPS/nope.xhtml", Settings::default()).is_none());
     }
 
     #[test]
@@ -537,7 +531,7 @@ mod test {
         let hrefs = spine_hrefs(&epub).expect("fixture spine");
 
         let href = hrefs.get(2).expect("3d item in spine exists");
-        let served = serve_epub_resource(&epub, &format!("/{href}"), Theme::default())
+        let served = serve_epub_resource(&epub, &format!("/{href}"), Settings::default())
             .expect("a spine document is reachable by its href");
 
         let xhtml = String::from_utf8(served.body).expect("chapters are utf-8");
@@ -558,8 +552,14 @@ mod test {
         let hrefs = spine_hrefs(&epub).expect("fixture spine");
 
         let href = hrefs.get(2).expect("3d item in spine exists");
-        let served = serve_epub_resource(&epub, &format!("/{href}"), Theme::Night)
-            .expect("a spine document is reachable by its href");
+        let served = serve_epub_resource(
+            &epub,
+            &format!("/{href}"),
+            Settings {
+                theme: Theme::Night,
+            },
+        )
+        .expect("a spine document is reachable by its href");
 
         let xhtml = String::from_utf8(served.body).expect("chapters are utf-8");
         let (background, text) = Theme::Night.colors();
@@ -598,7 +598,7 @@ mod test {
             "expected the first story at spine index 2, got {href}",
         );
 
-        let served = serve_epub_resource(&epub, &format!("/{href}"), Theme::default())
+        let served = serve_epub_resource(&epub, &format!("/{href}"), Settings::default())
             .expect("a spine document is reachable by its href");
         let xhtml = String::from_utf8(served.body).expect("chapters are utf-8");
 
@@ -620,7 +620,7 @@ mod test {
         let path = cover
             .strip_prefix(EPUB_URL_PREFIX)
             .expect("prefixed by construction");
-        let image = serve_epub_resource(&epub, &format!("/{path}"), Theme::default())
+        let image = serve_epub_resource(&epub, &format!("/{path}"), Settings::default())
             .expect("a rewritten path must round-trip back through the handler");
 
         assert_eq!(image.content_type, "image/jpeg");
@@ -677,7 +677,7 @@ mod test {
         let response = epub_response(serve_epub_resource(
             &epub,
             &format!("/{}", hrefs[2]),
-            Theme::default(),
+            Settings::default(),
         ));
 
         assert_eq!(response.status(), 200);
@@ -696,7 +696,7 @@ mod test {
         let response = epub_response(serve_epub_resource(
             &epub,
             "/OEBPS/nope.xhtml",
-            Theme::default(),
+            Settings::default(),
         ));
 
         assert_eq!(response.status(), 404);
@@ -739,7 +739,7 @@ mod test {
         let hrefs = spine_hrefs(&epub).expect("fixture spine");
 
         let href = hrefs.get(2).expect("3d item in spine exists");
-        let served = serve_epub_resource(&epub, &format!("/{href}"), Theme::Night)
+        let served = serve_epub_resource(&epub, &format!("/{href}"), Settings::default())
             .expect("a spine document is reachable by its href");
         let xhtml = String::from_utf8(served.body).expect("chapters are utf-8");
 

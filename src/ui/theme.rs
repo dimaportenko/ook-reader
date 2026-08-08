@@ -1,23 +1,23 @@
 use dioxus::prelude::*;
 
-use crate::web::theme::Theme;
+use crate::web::{settings::Settings, theme::Theme};
 
 #[component]
 pub(crate) fn ThemePicker() -> Element {
-    let mut theme = use_context::<Signal<Theme>>();
+    let mut settings = use_context::<Signal<Settings>>();
 
     rsx! {
         div {
             select {
                 onchange: move |event| {
                     let slug = event.data.value();
-                    theme.set(Theme::from_slug(&slug));
+                    settings.write().theme = Theme::from_slug(&slug);
                 },
                 for opt in [Theme::Day, Theme::Sepia, Theme::Night] {
                     option {
                         key: "{opt.slug()}",
                         value: opt.slug(),
-                        selected: theme() == opt,
+                        selected: settings().theme == opt,
                         {opt.slug()}
                     }
                 }

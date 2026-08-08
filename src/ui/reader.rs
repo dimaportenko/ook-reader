@@ -8,7 +8,7 @@ use crate::{
     library::{self, Library},
     nav::{self, ReaderDataStoreExt, ReaderState},
     ui::{library::OpenBook, theme::ThemePicker, OrLog},
-    web::theme::Theme,
+    web::settings::Settings,
 };
 
 const BRIDGE_JS: &str = include_str!("../web/assets/ook-events-listener.js");
@@ -42,8 +42,8 @@ impl BridgeMsg {
 
 #[component]
 pub(crate) fn Reader(book: OpenBook) -> Element {
-    let theme = use_context::<Signal<Theme>>();
-    epub::use_register_asset_handler(book.epub.clone(), theme());
+    let settings = use_context::<Signal<Settings>>();
+    epub::use_register_asset_handler(book.epub.clone(), settings());
 
     let library = use_context::<Rc<Library>>();
     let mut open_book = use_context::<Signal<Option<OpenBook>>>();
@@ -65,7 +65,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
 
     use_effect(move || {
         let push = document::eval(THEME_PUSH_JS);
-        _ = push.send(theme().css_vars());
+        _ = push.send(settings().css_vars());
     });
 
     use_effect(move || {
@@ -96,7 +96,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
 
     rsx! {
         div {
-            style: "display: flex; flex-direction: column; height: 100vh; {theme().inline_styles()}",
+            style: "display: flex; flex-direction: column; height: 100vh; {settings().inline_styles()}",
 
             div {
                 style: "display: flex; justify-content: space-between;",

@@ -24,33 +24,6 @@ impl Theme {
         ]
     }
 
-    fn declarations(self) -> String {
-        self.css_vars()
-            .iter()
-            .map(|(name, value)| format!("{name}: {value};"))
-            .collect::<Vec<_>>()
-            .join(" ")
-    }
-
-    pub(crate) fn vars(self) -> String {
-        format!(":root {{ {} }}", self.declarations())
-    }
-
-    pub(crate) fn user_layer(self) -> String {
-        format!(
-            "{}\nbody {{ background: var(--USER__backgroundColor) !important; \
-                color: var(--USER__textColor) !important; }}",
-            self.vars()
-        )
-    }
-
-    pub(crate) fn inline_styles(self) -> String {
-        format!(
-            "{} background-color: var(--USER__backgroundColor); color: var(--USER__textColor)",
-            self.declarations()
-        )
-    }
-
     pub(crate) fn slug(self) -> &'static str {
         match self {
             Theme::Day => "day",
