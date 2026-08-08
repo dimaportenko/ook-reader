@@ -249,10 +249,11 @@ Most sessions settle into this rhythm. Recognize where the user is and pick up t
    big, a better approach surfaced, or a new requirement to fold in — hand off to [[refine]]
    (`lbb:refine`) to revise the current step in place rather than proposing a fresh one.
 3. **Validate, commit & record** when they ask — hand off to [[commit]] (`lbb:commit`),
-   which reads the changed files, runs the suite, confirms the new test passes and nothing
-   regressed, commits + pushes following repo conventions, and writes the done-status
-   marker (commit hash + test count) back into the steps doc. If a test fails it diagnoses
-   the root cause and does **not** commit or silently fix the learner's code.
+   which reads the changed files, writes any test this step planned that the tree is still
+   missing, runs the suite, confirms the new test passes and nothing regressed, commits +
+   pushes following repo conventions, and writes the done-status marker (commit hash + test
+   count) back into the steps doc. If a test fails it diagnoses the root cause and does
+   **not** commit or silently fix the learner's code.
 4. **Record** is handled by `lbb:commit`; then the user asks for the next step and you're
    back to 1.
 
