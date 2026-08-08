@@ -4,10 +4,15 @@ pub(crate) const FONT_SIZE_MIN: u16 = 75;
 pub(crate) const FONT_SIZE_MAX: u16 = 250;
 pub(crate) const FONT_SIZE_STEP: u16 = 25;
 
+pub(crate) const LINE_HEIGHT_MIN: u16 = 100;
+pub(crate) const LINE_HEIGHT_MAX: u16 = 200;
+pub(crate) const LINE_HEIGHT_STEP: u16 = 10;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Settings {
     pub(crate) theme: Theme,
     pub(crate) font_size: u16,
+    pub(crate) line_height: u16,
 }
 
 impl Default for Settings {
@@ -15,6 +20,7 @@ impl Default for Settings {
         Settings {
             theme: Theme::default(),
             font_size: 100,
+            line_height: 140,
         }
     }
 }
@@ -34,6 +40,20 @@ impl Settings {
             .max(FONT_SIZE_MIN);
     }
 
+    pub(crate) fn looser(&mut self) {
+        self.line_height = self
+            .line_height
+            .saturating_add(LINE_HEIGHT_STEP)
+            .min(LINE_HEIGHT_MAX);
+    }
+
+    pub(crate) fn tighter(&mut self) {
+        self.line_height = self
+            .line_height
+            .saturating_sub(LINE_HEIGHT_STEP)
+            .max(LINE_HEIGHT_MIN);
+    }
+
     pub(crate) fn css_vars(self) -> Vec<(&'static str, String)> {
         let mut vars = self
             .theme
@@ -43,7 +63,12 @@ impl Settings {
             .collect::<Vec<_>>();
 
         vars.push(("--USER__fontSize", format!("{}%", self.font_size)));
+        vars.push(("--USER__lineHeight", self.line_height_css()));
         vars
+    }
+
+    pub(crate) fn line_height_css(self) -> String {
+        format!("{}.{:02}", self.line_height / 100, self.line_height % 100)
     }
 
     fn declarations(self) -> String {
@@ -62,7 +87,8 @@ impl Settings {
         format!(
             "{}\nhtml {{ font-size: var(--USER__fontSize) !important; }} \
                 \nbody {{ background: var(--USER__backgroundColor) !important; \
-                color: var(--USER__textColor) !important; }}",
+                color: var(--USER__textColor) !important; }} \
+                \nbody, body * {{ line-height: var(--USER__lineHeight) !important; }}",
             self.vars()
         )
     }
@@ -97,8 +123,9 @@ mod test {
 
             assert_eq!(
                 vars.len(),
-                theme.css_vars().len() + 1,
-                "the palette plus --USER__fontSize — bump this when a setting is added",
+                theme.css_vars().len() + 2,
+                "the palette plus --USER__fontSize and --USER__lineHeight — \
+                 bump this when a setting is added",
             );
         }
     }
@@ -268,5 +295,93 @@ mod test {
             "the layer declares a size it never applies — the number would move \
              and the text would not",
         );
+    }
+
+    #[test]
+    fn the_line_height_reaches_the_layer_unitless() {
+        let settings = Settings {
+            line_height: 140,
+            ..Settings::default()
+        };
+
+        assert!(settings
+            .css_vars()
+            .contains(&("--USER__lineHeight", "1.40".to_string())));
+
+        let layer = settings.user_layer();
+
+        assert!(
+            layer.contains("--USER__lineHeight: 1.40;"),
+            "the chosen leading never reached the :root block",
+        );
+        assert!(
+            layer.contains("line-height: var(--USER__lineHeight)"),
+            "the layer declares a leading it never applies — the number would move \
+             and the lines would not",
+        );
+    }
+
+    #[test]
+    fn a_line_height_below_a_tenth_keeps_its_leading_zero() {
+        // 105 hundredths is 1.05, not 1.5. `{}.{}` prints the latter, and the gap
+        // between "a hair looser" and "half again as loose" is invisible in the
+        // source and obvious on screen.
+        let settings = Settings {
+            line_height: 105,
+            ..Settings::default()
+        };
+
+        assert!(settings
+            .css_vars()
+            .contains(&("--USER__lineHeight", "1.05".to_string())));
+    }
+
+    #[test]
+    fn the_line_height_rule_reaches_the_elements_the_book_styles() {
+        // A rule on `body` alone only supplies an *inherited* value, and inheritance
+        // fills in what nothing else declares. A book that says `p { line-height: 1.2 }`
+        // has declared it, so the paragraphs — the only text you actually read — would
+        // ignore the setting entirely.
+        assert!(Settings::default().user_layer().contains("body *"));
+    }
+
+    #[test]
+    fn the_background_rule_stops_at_the_body() {
+        for rule in Settings::default().user_layer().split('}') {
+            let Some((selector, declarations)) = rule.split_once('{') else {
+                continue;
+            };
+
+            assert!(
+                !selector.contains('*') || !declarations.contains("background"),
+                "`{}` paints an !important background on every element — a book's own \
+                 backgrounds lose, and the shorthand drops their images with them. \
+                 The leading is the only thing that needs the descendant selector.",
+                selector.trim(),
+            );
+        }
+    }
+
+    #[test]
+    fn the_line_height_steps_and_clamps() {
+        let mut settings = Settings {
+            line_height: 150,
+            ..Settings::default()
+        };
+
+        settings.tighter();
+        assert_eq!(settings.line_height, 150 - LINE_HEIGHT_STEP);
+        settings.looser();
+        assert_eq!(settings.line_height, 150);
+
+        for _ in 0..20 {
+            settings.tighter();
+        }
+        assert_eq!(settings.line_height, LINE_HEIGHT_MIN);
+
+        for _ in 0..20 {
+            settings.looser();
+        }
+        assert_eq!(settings.line_height, LINE_HEIGHT_MAX);
     }
 }
