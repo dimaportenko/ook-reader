@@ -17,6 +17,9 @@ Place to quickly drop things I would like to work later.
 - [x] multiple selection for book addition
 - [ ] better error status, some popup, etc 
 - [ ] better Remove button
+- [ ] hide title bar on macos
+- [ ] change page on swipe
+- [ ] investigate memory usage
 
 
 
