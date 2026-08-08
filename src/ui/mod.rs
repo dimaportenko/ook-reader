@@ -1,5 +1,6 @@
 pub mod library;
 pub mod reader;
+pub mod settings;
 pub mod theme;
 
 pub(crate) trait OrLog<T> {

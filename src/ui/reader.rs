@@ -7,7 +7,7 @@ use crate::{
     epub,
     library::{self, Library},
     nav::{self, ReaderDataStoreExt, ReaderState},
-    ui::{library::OpenBook, theme::ThemePicker, OrLog},
+    ui::{library::OpenBook, settings::FontSizeControl, theme::ThemePicker, OrLog},
     web::settings::Settings,
 };
 
@@ -113,7 +113,8 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                     "{book.title}"
                 }
                 div {
-                    style: "padding: 0.5rem 1rem; z-index: 1;",
+                    style: "padding: 0.5rem 1rem; z-index: 1; display: flex; gap: 0.5rem;",
+                    FontSizeControl {}
                     ThemePicker {}
                 }
 

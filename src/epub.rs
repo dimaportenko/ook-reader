@@ -557,6 +557,7 @@ mod test {
             &format!("/{href}"),
             Settings {
                 theme: Theme::Night,
+                ..Settings::default()
             },
         )
         .expect("a spine document is reachable by its href");
