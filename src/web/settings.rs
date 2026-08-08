@@ -84,7 +84,7 @@ mod test {
         for theme in [Theme::Day, Theme::Sepia, Theme::Night] {
             let settings = Settings {
                 theme,
-                font_size: 100,
+                ..Settings::default()
             };
             let vars = settings.css_vars();
 
@@ -108,7 +108,7 @@ mod test {
         for theme in [Theme::Day, Theme::Sepia, Theme::Night] {
             let settings = Settings {
                 theme,
-                font_size: 100,
+                ..Settings::default()
             };
             let css = settings.vars();
 
@@ -132,7 +132,7 @@ mod test {
         for theme in [Theme::Day, Theme::Sepia, Theme::Night] {
             let settings = Settings {
                 theme,
-                font_size: 100,
+                ..Settings::default()
             };
             let css = settings.user_layer();
             let (background, text) = theme.colors();
@@ -159,7 +159,7 @@ mod test {
         for theme in [Theme::Day, Theme::Sepia, Theme::Night] {
             let settings = Settings {
                 theme,
-                font_size: 100,
+                ..Settings::default()
             };
             let layer = settings.user_layer();
 
@@ -194,15 +194,15 @@ mod test {
     fn the_three_themes_are_actually_different() {
         let day = Settings {
             theme: Theme::Day,
-            font_size: 100,
+            ..Settings::default()
         };
         let sepia = Settings {
             theme: Theme::Sepia,
-            font_size: 100,
+            ..Settings::default()
         };
         let night = Settings {
             theme: Theme::Night,
-            font_size: 100,
+            ..Settings::default()
         };
 
         assert_ne!(day.vars(), night.vars());
