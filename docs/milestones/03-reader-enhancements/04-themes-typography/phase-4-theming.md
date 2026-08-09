@@ -112,17 +112,30 @@ implementation → why. Smallest-first:
       wins for a different reason: it is the width of a `0` in the element's font, so it also
       tracks the font *family* 5g is about to make settable, holding the measure constant in
       characters under both settings. Committed in `fb7304f`, **78 tests green**.
-- [ ] **Step 5g — `--USER__fontFamily` from a curated list.** Respect embedded fonts and
-      author `!important`, the way Readium gates its aggressive overrides. **Carries 5f's
-      loose end:** `ch` resolves against "the element's font", and `--ook-column` is declared
-      on `:root` but read by `column-width` on `body`. Today both carry the same font so 5f
-      cannot tell the difference; a font-family that lands on `body` alone is what makes it
-      observable. Check it on screen here.
+- [x] **Step 5g — `--USER__fontFamily` from a curated list.** Four fallback chains, each
+      ending in a generic family — the only link that cannot miss, since a stack whose named
+      faces are all absent resolves to the UA default, i.e. the font the book was already
+      showing. Lands on `body` and its descendants with the monospace elements excluded,
+      because their font is structural. **Carried 5f's loose end:** the on-screen check found
+      no need to add `html` to the selector, so `ch` resolving at the *use* site — and with it
+      5f's reason for preferring `ch` over `rem` — stands unrefuted. Committed in `cb03a4b`
+      with 5h, **89 tests green** (83 at 5g alone).
+- [x] **Step 5h — Respect the publisher's font.** Split out of the plan's single 5g, which was
+      carrying two ideas: a stack is a value like every setting before it, but *not
+      overriding* is a rule that has to appear and disappear, and a variable push cannot carry
+      a rule. Readium's gate — `:root[style*='--USER__fontFamily']`, matching only when the
+      push has written the property onto the root's inline style — is the answer, and the
+      thing it exposes is that serve-time injection writes a `:root` **rule** while the gate
+      reads the `style` **attribute**. `bootstrap_js()` closes that by writing the stack onto
+      `documentElement` from the head, so both routes land in the same place. First step in
+      the phase to need new JavaScript: an empty pushed value now means `removeProperty`,
+      because `setProperty(name, "")` is a no-op that would weld the gate open. Committed in
+      `cb03a4b`, **89 tests green**.
 - [ ] **Step 6 — Persist the settings.** The deferral every step since 4 has been logging: a
       `settings` table beside `positions`, read *before* the signal is created so the first
       paint is already right, written on every change. Stores the struct's fields, not
       `css_vars()`'s rendered strings — `125` is the state, `"125%"` is the rendering. Placed
-      after 5g on purpose: the settings set stops growing there, so this is written once
+      after 5h on purpose: the settings set stops growing there, so this is written once
       against a finished struct.
 - [ ] **Step 7 — Review & refactor** (per the repo's phase-ending convention).
 

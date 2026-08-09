@@ -2562,13 +2562,634 @@ changes**, which is the point.
 
 ---
 
+## Step 5g — `--USER__fontFamily` from a curated list
+
+> **Status:** done — committed in `cb03a4b` **together with 5h** (**89 tests green**,
+> 78 → 83 → 89; clippy clean). **The plan's single `5g` was split here into two steps**,
+> because it was carrying two unrelated ideas: a font stack is a value like every setting
+> before it, but *respecting the publisher's font* is a rule that has to appear and disappear,
+> and a variable push cannot carry a rule. 5g is the value; [5h](#step-5h--respect-the-publishers-font-the-gate)
+> is the gate.
+>
+> **One commit for two steps, the way Steps 1 and 2 landed in `27e1d86`.** 5g on its own
+> ships the deliberate regression its scope note describes — every book's font overridden,
+> embedded faces included — and 5h exists to undo it. Both were written in one sitting, so
+> there was no green intermediate worth preserving in the history. 5g was run on its own
+> first (**83 tests green**, the predicted count exactly) before 5h was started.
+>
+> **The five planned tests landed unchanged**, and the `+ 4` → `+ 5` tripwire fired on
+> schedule for the fourth time.
+>
+> **The `dx serve` walk was confirmed by the user.** The plan's contingency — "if the physical
+> column width does not move between Old Style and Sans, add `html` to the font rule's
+> selector" — was not triggered, so the selector stayed at `body` and 5f's reasoning about
+> `ch` resolving at the *use* site stands unrefuted.
+>
+> **Implementation written by Claude at the user's request**, as with 5e and 5f, so the usual
+> learner-writes-the-code split does not apply. The tests were verified by mutating the
+> implementation — the `:not(pre)` exclusion removed, the `+ 5` reverted to `+ 4` — and
+> watching each test go red, then restoring from backup and re-confirming 89 green.
+
+Five settings in, the shape is familiar: a field, a variable, a rule, a control. This one is
+familiar right up to the point where it isn't. Two things are new — the value is a **list with
+internal punctuation** rather than a number with a unit, and the setting is the first that
+changes what a `ch` *is*, which is the loose end 5f left tied to this step.
+
+### The crux: a font stack is a fallback chain, and the last link is the only guaranteed one
+
+`font-family` does not name a font, it names a *sequence* of candidates, and the browser walks
+it until one is installed. `Iowan Old Style` exists on macOS and nowhere else; `Charter` ships
+with some systems and not others. If every named face misses, the declaration still applies —
+it just resolves to whatever the UA default is, which on this reader is the same font the book
+was already showing. The setting would appear to do nothing, on exactly the machines you did
+not test on.
+
+So each stack ends in a **generic family** — `serif` or `sans-serif`. That is the link that
+cannot miss, and it is what makes "Sans" mean *sans* on a machine that has none of the four
+faces you named. Curating a font list is really curating four fallback chains, and the
+interesting design is at the end of each one, not the start.
+
+### The second crux: `ch` is the width of a `0` in *the element's* font
+
+5f chose `ch` for the measure over `rem` on the grounds that it tracks the font *family* as
+well as the size, and then flagged the thing it could not check: `--ook-column` is declared on
+`:root`, and `column-width: var(--ook-column)` is read on `body`. If a `ch` inside a custom
+property resolved where the property is **declared**, the measure would track `html`'s font;
+if it resolves where the property is **used**, it tracks `body`'s.
+
+Until now both elements carried the same font, so the two readings were indistinguishable.
+This step makes them differ — the override lands on `body` and its descendants, and `html`
+keeps the UA font — which is what finally makes the question observable. The spec's answer is
+that an unregistered custom property's value is a *token sequence*: `70ch` is not a length
+while it sits in the variable, it becomes one only when substituted into `column-width` on
+`body`. So it should track `body`. **That is a prediction, and this step's `dx serve` walk is
+where it gets checked** — see the scope note for what to do if it comes back the other way.
+
+### Runnable check (`cargo test`)
+
+Five new tests, and one existing tripwire that fires on schedule for the fourth time. Write
+them in `src/web/settings.rs`'s `mod test` (and the enum's own round-trip beside it), watch
+them fail, then implement.
+
+```rust
+#[test]
+fn the_font_family_reaches_the_layer_as_a_stack() {
+    let settings = Settings {
+        font_family: FontFamily::Sans,
+        ..Settings::default()
+    };
+
+    let stack = FontFamily::Sans.stack();
+
+    assert!(settings
+        .css_vars()
+        .contains(&("--USER__fontFamily", stack.to_string())));
+
+    let layer = settings.user_layer();
+
+    assert!(
+        layer.contains(&format!("--USER__fontFamily: {stack};")),
+        "the chosen face never reached the :root block",
+    );
+    assert!(
+        layer.contains("font-family: var(--USER__fontFamily)"),
+        "the layer declares a family it never applies — the picker would move \
+         and the text would not",
+    );
+}
+
+#[test]
+fn every_stack_ends_in_a_generic_family() {
+    // The only link in the chain that cannot miss. Without it, a machine with none
+    // of the named faces installed falls back to the UA default — which is the font
+    // the book was already showing, so the setting silently does nothing there.
+    for family in FontFamily::ALL {
+        let stack = family.stack();
+        let last = stack.rsplit(',').next().expect("a stack is non-empty").trim();
+
+        assert!(
+            matches!(last, "serif" | "sans-serif" | "monospace"),
+            "{family:?} ends in `{last}`, which is a face and might not exist",
+        );
+    }
+}
+
+#[test]
+fn no_stack_quotes_a_family_with_double_quotes() {
+    // The stack does not only travel as CSS. `inline_styles()` puts it in a `style="…"`
+    // attribute on the reader's own chrome, where a `"` closes the attribute early and
+    // takes the rest of the declarations with it. Single quotes are legal CSS and have
+    // no such second job.
+    for family in FontFamily::ALL {
+        assert!(
+            !family.stack().contains('"'),
+            "{family:?} quotes with `\"`, which cannot survive an HTML attribute",
+        );
+    }
+}
+
+#[test]
+fn the_monospace_elements_keep_their_own_font() {
+    // `code`, `kbd`, `samp` and `pre` are monospace because the *content* is
+    // column-aligned, not because the author had a taste in fonts. Overriding them
+    // with a proportional face is how a code sample or an ASCII table stops being
+    // readable — a change nobody asked for and nobody can undo.
+    let layer = Settings::default().user_layer();
+    let rule = layer
+        .split('\n')
+        .find(|rule| rule.contains("font-family:"))
+        .expect("the layer applies the family");
+
+    for tag in ["code", "kbd", "samp", "pre", "var"] {
+        assert!(
+            rule.contains(&format!(":not({tag})")),
+            "the family lands on <{tag}>, whose font is structural",
+        );
+    }
+}
+
+#[test]
+fn a_font_family_survives_a_slug_round_trip() {
+    // Step 6 stores the choice as this slug. A variant that does not come back is a
+    // setting that silently resets to the default on the next launch.
+    for family in FontFamily::ALL {
+        assert_eq!(FontFamily::from_slug(family.slug()), family);
+    }
+
+    assert_eq!(FontFamily::from_slug("comic-sans"), FontFamily::default());
+}
+```
+
+**The tripwire that must fire.** `the_settings_variable_list_carries_the_whole_palette`
+asserts `theme.css_vars().len() + 4`. It goes to `+ 5`, and — as in 5b, 5d, 5e and 5f — you
+should watch it *fail first*. It is the only thing standing between "I added a field" and "I
+added a field and forgot to push it".
+
+**The tripwire that must *not* fire.**
+`the_pushed_vars_and_the_injected_layer_name_the_same_variables` should stay green untouched:
+the new variable is pushed, declared in the `:root` block, and read by a rule in the layer, so
+both halves of it are already satisfied. If it goes red, the field reached `css_vars()` and
+never reached `user_layer()` — which is precisely the bug it exists to catch.
+
+### Minimal implementation (sketch)
+
+**`src/web/font.rs`** — a new module, sibling to `theme.rs`, for the same reason `Theme` got
+one: a closed set of named choices with a rendering and a slug is its own thing, and
+`settings.rs` is already the longest file in the phase.
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum FontFamily {
+    #[default]
+    OldStyle,
+    Modern,
+    Sans,
+    Humanist,
+}
+
+impl FontFamily {
+    pub(crate) const ALL: [FontFamily; 4] = [
+        FontFamily::OldStyle,
+        FontFamily::Modern,
+        FontFamily::Sans,
+        FontFamily::Humanist,
+    ];
+
+    pub(crate) fn stack(self) -> &'static str {
+        match self {
+            FontFamily::OldStyle => "'Iowan Old Style', 'Sitka Text', Palatino, Georgia, serif",
+            FontFamily::Modern => "Athelas, Charter, 'Bitstream Charter', Cambria, serif",
+            FontFamily::Sans => "Seravek, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif",
+            FontFamily::Humanist => "Frutiger, Calibri, 'Gill Sans', 'Lucida Grande', sans-serif",
+        }
+    }
+
+    pub(crate) fn slug(self) -> &'static str { … }      // "old-style", "modern", …
+    pub(crate) fn from_slug(slug: &str) -> FontFamily { … }   // unknown → default
+}
+```
+
+**`src/web/settings.rs`** — a `font_family: FontFamily` field, `FontFamily::default()` in
+`Default`, one more push, and one more rule:
+
+```rust
+vars.push(("--USER__fontFamily", self.font_family.stack().to_string()));
+```
+
+```rust
+"…\nbody, body *:not(code):not(kbd):not(samp):not(pre):not(var) \
+   {{ font-family: var(--USER__fontFamily) !important; }}"
+```
+
+**`src/ui/settings.rs`** — a `FontFamilyPicker`, and it is deliberately a near-copy of
+`ThemePicker`: a `<select>`, an option per variant, `selected:` comparing to the current
+value, `from_slug` on change. Two `<select>`s that differ only in their enum is exactly the
+duplication Step 7 should collapse; write the copy now and let the refactor step see two
+instances rather than guess at one.
+
+No change to `pagination.css`, `theme-listener.js` or the push. For the fifth time, the
+transport already carries this.
+
+### Why it works
+
+- **`!important` on a descendant selector is what makes it land.** A book that says
+  `p { font-family: 'Whatever' }` has declared the property on the paragraph, so an inherited
+  value from `body` never reaches it — the same trap 5d hit with `line-height`, and the same
+  fix. The specificity is worth reading: each `:not()` argument contributes its own weight, so
+  `body *:not(code):not(kbd):not(samp):not(pre):not(var)` is a *heavier* selector than
+  anything a typical stylesheet writes, on top of being `!important` and later in document
+  order.
+- **The exclusions are a statement about content, not taste.** Everything in that `:not()`
+  chain is monospace because the characters line up in columns. This is the first sliver of
+  "respect author intent" — and it is deliberately the easy half, since the hard half
+  (embedded faces, author `!important`) needs the gate that 5h builds.
+- **Single quotes, because the value has two destinations.** `inline_styles()` interpolates
+  the declarations into a Dioxus `style:` attribute on the reader's chrome; the served
+  `:root` block goes into a CDATA-wrapped `<style>`. CSS accepts either quote, HTML attributes
+  do not, and picking the one that works everywhere costs nothing. The test is cheaper than
+  remembering.
+- **A closed enum, not a string.** `from_slug` folding an unknown value to the default is the
+  same shape `Theme::from_slug` has had since Step 4, and it is what lets Step 6 store a slug
+  without the reader ever being able to boot into a font that no longer exists.
+
+### Scope note
+
+- **No publisher's-font option yet, and that is a real regression for one step.** Every book
+  gets its face overridden, embedded fonts included — a book whose alphabet *is* the embedded
+  font will render as garbage. This is the same deliberate arrangement as 5b leaving the page
+  count stale for 5c to fix: you watch the aggressive override misbehave, then build the gate
+  that Readium built for the same reason. **5h is the fix, and it should be the next sitting,
+  not a later one.**
+- **Faces only — no weight, no `font-variant`, no `text-align`, no hyphenation.** The
+  language-sensitive settings the phase doc parks stay parked.
+- **`dx serve` is the gate, and it has two things to look at.** First, obviously: switch
+  between the four and the text changes face. Second, and this is 5f's loose end — at a fixed
+  measure, switch between **Old Style and Sans** and watch the *physical* column width. If it
+  moves, `ch` is resolving against `body`, the prediction held, and the measure is genuinely in
+  characters under both settings. If it does not move, `ch` is resolving against `:root` — the
+  fix is to add `html` to the font rule's selector, and the note in 5f about `ch` beating `rem`
+  needs the correction, not the code.
+- **A book with an embedded icon font is the interesting one to open.** Not required for this
+  step; required to *believe* 5h.
+
+---
+
+## Step 5h — respect the publisher's font (the gate)
+
+> **Status:** done — committed in `cb03a4b` together with 5g (**89 tests green**, 83 → 89;
+> clippy clean). Laid out in full at the user's request before 5g was written, and landed
+> exactly as sketched — the recommended option was taken at both forks (the serve-time
+> bootstrap over the ungated rule, and the empty-value push over omitting the variable).
+>
+> **The design question inside the tripwire was answered before typing, and the answer held.**
+> `declarations()` filters empty values, so the `:root` block simply has no `--USER__fontFamily`
+> line under Publisher; `the_pushed_vars_and_the_injected_layer_name_the_same_variables` grew
+> the empty-value case rather than losing an assertion, and its second half needed no change —
+> the layer still reads `var(--USER__fontFamily)` from inside a rule that does not match.
+>
+> **`FontFamily::Publisher => ""` was the load-bearing choice.** Every downstream branch —
+> the filter in `declarations()`, the early return in `bootstrap_js()`, the skip in
+> `every_stack_ends_in_a_generic_family` — falls out of one `is_empty()` rather than a `match`
+> in three places.
+>
+> **All four state transitions were reasoned through before the `dx serve` walk** and the walk
+> confirmed them: served-Publisher and served-Sans, each switched live in both directions. The
+> one that could have gone wrong is served-Sans → live-Publisher, which is the case the
+> rejected "ungated rule at serve time" option would have got wrong.
+>
+> **Implementation written by Claude at the user's request.** Four of the six tests were
+> verified by mutating the implementation and watching them go red — the gate dropped from the
+> second selector only, `Publisher` given a real stack, the `declarations()` filter removed,
+> and `removeProperty` swapped back to `setProperty` — then restoring from backup and
+> re-confirming 89 green.
+
+The half of the plan's `5g` that is not about fonts at all. It is about a limit in the
+transport that five settings in a row have been able to ignore.
+
+### The crux: you cannot push a rule through a variable
+
+Every setting so far is always *on*; only its value moves. That is why
+`theme-listener.js` has never needed a change — writing a new value onto
+`documentElement.style` is enough, because the rule that reads it is already in the served
+document and should always apply.
+
+A `Publisher` option breaks that. "Use the book's own font" is not a value of
+`font-family` — there is no CSS keyword meaning *the author's declaration*. `revert` rolls
+back past the author origin entirely, `unset` on an inherited property means `inherit`, and an
+undefined custom property makes the declaration invalid at computed-value time, which is also
+`inherit`. All three give you *some other font*, not the book's. The rule genuinely has to
+stop matching.
+
+### Readium's answer: gate on the *presence* of the variable
+
+```css
+:root[style*='--USER__fontFamily'] body,
+:root[style*='--USER__fontFamily'] body *:not(code):not(kbd):not(samp):not(pre):not(var) {
+  font-family: var(--USER__fontFamily) !important;
+}
+```
+
+The rule matches only when that name literally appears in the root element's **inline `style`
+attribute** — which is exactly and only what the push writes to. Choose a face, the property
+is set and the rule switches on; choose Publisher, the push removes it and the rule switches
+off, with the book's own cascade untouched underneath because nothing ever overwrote it.
+
+Two details make that selector work, and neither is obvious:
+
+- **CSSOM writes are reflected into the attribute.** `el.style.setProperty('--x', 'y')`
+  does not just mutate an internal object — the `style` *content attribute* re-serializes, so
+  `[style*='--x']` starts matching immediately. Custom properties serialize like any other
+  declaration. This is the whole reason the trick works at all, and it is the one assumption in
+  the step worth confirming in devtools rather than trusting.
+- **A substring match is a substring match.** `[style*='--USER__fontFamily']` is safe because
+  no other variable name contains it. Had the gate been written on `--USER__font`, it would
+  also match `--USER__fontSize`, which is pushed on every launch — the gate would be welded
+  open and nothing would ever look wrong until a book with an embedded alphabet turned up.
+
+### The part that will actually bite: the serve path writes to the wrong place
+
+The gate reads the `style` **attribute**; serve-time injection writes a `:root { … }`
+**rule**. They are not the same place, so a chapter that has not loaded yet comes up with the
+gate closed and the reader's chosen face ignored until the next push. Two candidate fixes:
+
+- **Emit the rule ungated at serve time** when a face is selected. One `if` in Rust, no new
+  JavaScript — but a chapter *served* under `Sans` keeps that ungated rule, so switching **to**
+  Publisher would not take effect until the chapter turns. A stale-until-you-page bug.
+- **Have the served document set its own inline style before paint** — a serve-time
+  `<script>` next to the serve-time `<style>`, writing the chosen stack onto
+  `documentElement.style` while the head is still parsing. Both routes then write to the same
+  place, which is what makes the gate honest.
+
+**Take the second.** The first is smaller and it is the one that will be tempting; it also
+re-introduces exactly the class of "the document and the reader disagree until you turn a page"
+bug that 5c and 5f went to some trouble to eliminate.
+
+### The design question inside the tripwire
+
+`the_pushed_vars_and_the_injected_layer_name_the_same_variables` has two halves, and Publisher
+puts pressure on both. Answer this *before* typing, because both naive options fail:
+
+- **Omit `--USER__fontFamily` from `css_vars()` under Publisher.** Half two — "every `var()`
+  the layer reads is something a message can set" — goes red, correctly: the gated rule reads
+  it, and if no message can ever set it, choosing a face on a loaded chapter would do nothing
+  until the chapter turned.
+- **Push it with an empty value and render it anyway.** Half one — "every pushed var is
+  declared in the layer" — passes only if the `:root` block emits `--USER__fontFamily: ;`,
+  which is not a declaration; the parser drops it, and the served CSS now contains a lie.
+
+The answer is **push the pair always with an empty value, and let an empty value mean "no
+declaration" on both sides**: `declarations()` skips it, so the `:root` block simply has no
+such line, and `theme-listener.js` calls `removeProperty` instead of `setProperty`. The
+tripwire then grows a case rather than losing one — non-empty vars must be declared, empty
+vars must be *absent*. That the test needs an edit here is the signal that the transport
+gained a genuinely new capability, not that the test was wrong.
+
+### Runnable check (`cargo test`)
+
+Five new tests plus that edit. Watch them fail first — in particular the two that fail for
+*interesting* reasons: the gate test fails because 5g's rule is ungated, and the tripwire fails
+the moment `Publisher` becomes the default.
+
+```rust
+#[test]
+fn the_publisher_is_the_default_font() {
+    // The whole point of the gate. An override that is on by default is not a gate,
+    // it is 5g — and 5g clobbers embedded fonts, which is the regression this closes.
+    assert_eq!(Settings::default().font_family, FontFamily::Publisher);
+}
+
+#[test]
+fn the_publisher_pushes_an_empty_value_and_declares_nothing() {
+    let settings = Settings {
+        font_family: FontFamily::Publisher,
+        ..Settings::default()
+    };
+
+    // Pushed, so a *live* switch back to the book's own face reaches the frame …
+    assert!(settings
+        .css_vars()
+        .contains(&("--USER__fontFamily", String::new())));
+
+    // … and not declared, because `--USER__fontFamily: ;` is not a declaration.
+    assert!(
+        !settings.vars().contains("--USER__fontFamily"),
+        "the :root block declares a face under Publisher — the gate would open \
+         the moment anything copied that block into an inline style",
+    );
+}
+
+#[test]
+fn every_selector_on_the_font_rule_carries_the_gate() {
+    // A selector *list* is the trap: prefixing the gate onto the first selector and
+    // not the second leaves `body *` matching unconditionally, and the bug shows up
+    // only on the descendants — i.e. on every paragraph, which is all the text there
+    // is. Check each comma-separated selector, not the rule.
+    let layer = Settings::default().user_layer();
+    let rule = layer
+        .split('\n')
+        .find(|rule| rule.contains("font-family:"))
+        .expect("the layer applies the family");
+    let (selectors, _) = rule.split_once('{').expect("a rule has a block");
+
+    for selector in selectors.split(',') {
+        assert!(
+            selector.contains("[style*='--USER__fontFamily']"),
+            "`{}` overrides the font unconditionally",
+            selector.trim(),
+        );
+    }
+}
+
+#[test]
+fn a_chosen_face_reaches_a_chapter_that_has_not_loaded_yet() {
+    // The gate reads the inline style; serve-time injection writes a stylesheet rule.
+    // Without this bootstrap the first paint of every new chapter ignores the setting.
+    let settings = Settings {
+        font_family: FontFamily::Sans,
+        ..Settings::default()
+    };
+    let bootstrap = settings.bootstrap_js();
+
+    assert!(bootstrap.contains("setProperty"));
+    assert!(bootstrap.contains("--USER__fontFamily"));
+    assert!(bootstrap.contains(FontFamily::Sans.stack()));
+
+    // The stack is interpolated into a JavaScript string literal here, which is the
+    // second job of 5g's `no_stack_quotes_a_family_with_double_quotes`: a `"` in a
+    // stack would close the literal and turn the document into a syntax error.
+    assert!(!FontFamily::Sans.stack().contains('"'));
+}
+
+#[test]
+fn the_publisher_bootstraps_nothing() {
+    // Not "sets it to empty" — emits no script at all. There is nothing to undo on a
+    // document that was born without the property.
+    assert!(Settings::default().bootstrap_js().is_empty());
+}
+```
+
+And the cross-language tripwire, in `ui/reader.rs`'s `mod test` beside the three that already
+do this job:
+
+```rust
+#[test]
+fn an_empty_pushed_value_removes_the_property() {
+    // `setProperty(name, "")` is a no-op, not a removal — the gate would stay open and
+    // Publisher would silently do nothing. Rust decides empty means remove; only this
+    // string in a JS file honours it, and no compiler sees both.
+    assert!(crate::web::assets::INJECTED_ASSETS.contains("removeProperty"));
+}
+```
+
+**The edit.** In `the_pushed_vars_and_the_injected_layer_name_the_same_variables`, half one
+splits on the value:
+
+```rust
+for (name, value) in settings.css_vars() {
+    if value.is_empty() {
+        assert!(!layer.contains(name), "{name} is unset and still declared");
+    } else {
+        assert!(layer.contains(&format!("{name}: {value};")), …);
+        assert!(readers.contains(&format!("var({name})")) || …, …);
+    }
+}
+```
+
+Note the `var()` reachability check moves inside the non-empty branch: under Publisher the
+layer still reads `var(--USER__fontFamily)` from inside a rule that does not match, which is
+the correct state and not a dangling reference.
+
+Expect **~83 → ~88**.
+
+### Minimal implementation (sketch)
+
+**`src/web/font.rs`** — one more variant, and it takes the `#[default]`:
+
+```rust
+pub(crate) enum FontFamily {
+    #[default]
+    Publisher,
+    OldStyle,
+    …
+}
+```
+
+`stack()` returns `""` for it, `slug()` returns `"publisher"`, and `ALL` grows to five. The
+empty stack is what makes every downstream decision fall out of one `is_empty()` rather than a
+`match` in four places — 5g's `every_stack_ends_in_a_generic_family` needs to skip it, and
+saying so with `.filter(|f| !f.stack().is_empty())` reads better than an exception list.
+
+**`src/web/settings.rs`** — three changes:
+
+```rust
+fn declarations(self) -> String {
+    self.css_vars()
+        .iter()
+        .filter(|(_, value)| !value.is_empty())
+        .map(|(name, value)| format!("{name}: {value};"))
+        …
+}
+```
+
+the gate on the font rule (both selectors), and a new method:
+
+```rust
+pub(crate) fn bootstrap_js(self) -> String {
+    let stack = self.font_family.stack();
+    if stack.is_empty() {
+        return String::new();
+    }
+    format!(
+        "document.documentElement.style.setProperty(\"--USER__fontFamily\", \"{stack}\");"
+    )
+}
+```
+
+**`src/web/assets.rs`** — `wrap_js_str`, the sibling `wrap_css_str` has been waiting for since
+Step 2. Same shape, `//<![CDATA[` instead of `/*<![CDATA[*/`.
+
+**`src/epub.rs`** — one more piece concatenated at the injection site:
+
+```rust
+let inject = format!(
+    "{INJECTED_ASSETS}{}{}",
+    wrap_css_str(&settings.user_layer()),
+    wrap_js_str(&settings.bootstrap_js()),
+);
+```
+
+**`src/web/assets/theme-listener.js`** — the first change to this file since 5c:
+
+```js
+for (const [name, value] of e.data.vars) {
+  if (value) {
+    document.documentElement.style.setProperty(name, value);
+  } else {
+    document.documentElement.style.removeProperty(name);
+  }
+}
+```
+
+**`src/ui/settings.rs`** — nothing, if 5g's picker iterates `FontFamily::ALL`. A new variant
+appearing in the `<select>` for free is the payoff of the `ALL` constant.
+
+### Why it works
+
+- **The gate turns a rule into a value.** The transport can only carry name/value pairs, so the
+  trick is to make the *presence* of a pair be the on/off state and let the selector read it.
+  Nothing new crosses the boundary; CSS does the branching. This is why Readium ships it, and
+  it is a pattern worth keeping in mind well beyond fonts.
+- **Both routes write to the same place, so there is only one state.** After the bootstrap,
+  "is the override on?" has exactly one answer — whether that property is on the root's inline
+  style — and both the serve path and the push path set it the same way. The rejected option
+  had two answers that could disagree, which is the definition of a stale-state bug.
+- **The bootstrap runs in `<head>`, so there is no flash.** `document.documentElement` exists
+  as soon as the parser has opened `<html>`; the property is set before `<body>` has any boxes
+  to lay out, so the chapter's first paint is already correct rather than repainting into it.
+  Same reasoning as Step 6's "read the settings before the signal is created".
+- **The gate is "the user asked", not "the book has `@font-face`".** It deliberately does not
+  sniff for embedded fonts. A reader who picks Sans on a book with an embedded face gets Sans —
+  that is their call, explicitly made. What the gate protects is the *default*, which is the
+  only state a reader never consciously chose.
+- **`removeProperty`, not `setProperty(name, "")`.** The empty string is a legal value to
+  assign and is treated as a no-op by CSSOM, so the wrong one of the two is silent rather than
+  wrong-looking — the worst failure shape there is.
+
+### Scope note
+
+- **Only the font family is gated.** Readium puts font-size, leading and text-align behind an
+  advanced-settings flag too; here they stay unconditional. Reversing a colour or a size is
+  something the reader can see and undo, and none of them can make text *unreadable* the way
+  substituting a face over an embedded alphabet can. Revisit if a book proves otherwise.
+- **Author `!important` still loses.** The phase's known-constraints line mentions respecting it;
+  this step respects it only in the sense that the default never fights it. A book that says
+  `p { font-family: X !important }` is still overridden once the reader picks a face, because
+  our selector is heavier and later. That is the intended order — the reader is the last word
+  when they have spoken.
+- **This is the last setting.** `Settings` is finished after this step, which is what Step 6
+  has been waiting for.
+- **A Step 7 candidate, noted not done:** with the bootstrap in place, `--USER__fontFamily`
+  lives in two places in the served document — the `:root` block *and* the inline style. The
+  inline copy wins and is the one the gate reads, so the block copy is only a fallback for a
+  document where scripts did not run. Collapsing *all* the variables into the bootstrap would
+  make the two routes literally one mechanism and delete `vars()`; it would also make theming
+  depend on JavaScript. Worth weighing in the refactor, not worth doing mid-phase.
+- **`dx serve` is the gate, and it needs the right book.** Open one with an embedded font.
+  Pick a face — it overrides. Pick Publisher — the book's own face comes back **on the page
+  you are already on**, not after a chapter turn. Then turn a chapter under each of the two
+  states and confirm the fresh document comes up matching. Finally, open devtools on the frame
+  and look at `<html>`'s `style` attribute across a switch: the property should appear and
+  disappear, which is the assumption the whole step rests on.
+
+---
+
 ## Step 6 — persist the settings (sketched)
 
 Every step since 4 has ended by writing down the same deferral — "the reader opens on the
 default every time" (Step 4 scope note), "5a is where that will eventually hook in" (5a), "a
 relaunch is back to 100% and Day" (5b), "settings still live in a `use_signal` in `main.rs`"
-(the interlude). This is the step that closes it, and it is deliberately **after 5g**: the
-settings set stops growing at 5g, so persistence is written once against a finished struct
+(the interlude). This is the step that closes it, and it is deliberately **after 5h**: the
+settings set stops growing at 5h, so persistence is written once against a finished struct
 instead of being extended by every sitting in between.
 
 ### The crux: persist the *choice*, not the CSS
@@ -2656,7 +3277,9 @@ because the settings are read before the first render rather than in an effect a
 
 The repo's phase-ending step (commit `b09d6c9`): fold duplication in the serve/inject path,
 confirm the cascade order, re-read against ADR-0003. By then `Settings` will have six fields
-and the `user_layer` string will be a `format!` with six holes — that is the shape to look
+and the `user_layer` string will be a `format!` with six holes — plus the two near-identical
+`<select>` pickers 5g leaves standing (`ThemePicker` and `FontFamilyPicker` differ only in
+their enum) — that is the shape to look
 hardest at, along with the three near-identical `{}.{:02}` formatters 5e left standing on
 purpose and the two chrome nits the popover interlude recorded (the forty-pixel circle
 declared twice, and the gear icon's raw `"view-box"` attribute).
