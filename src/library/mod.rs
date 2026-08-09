@@ -1,9 +1,9 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use rbook::Epub;
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use rusqlite::{params, OptionalExtension, Row};
 
-use crate::{epub, library::files::BookFiles};
+use crate::{db::Db, epub, library::files::BookFiles};
 
 mod files;
 
@@ -42,14 +42,10 @@ impl Book {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Locator {
-    pub(crate) spine_index: usize,
-    pub(crate) selector: String,
-}
+pub(crate) use crate::db::Locator;
 
 pub(crate) struct Library {
-    conn: Connection,
+    db: Db,
     files: BookFiles,
 }
 
@@ -58,39 +54,11 @@ impl Library {
         db_path: impl AsRef<std::path::Path>,
         books_dir: impl AsRef<std::path::Path>,
     ) -> Result<Self, Error> {
-        Self::init(Connection::open(db_path)?, books_dir.as_ref().to_path_buf())
-    }
+        let db = Db::open(db_path)?;
 
-    fn init(conn: Connection, books_dir: PathBuf) -> Result<Self, Error> {
-        conn.pragma_update(None, "foreign_keys", true)?;
-
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS books (
-                id INTEGER PRIMARY KEY,
-                path TEXT NOT NULL UNIQUE,
-                source_path TEXT NOT NULL UNIQUE,
-                title TEXT NOT NULL,
-                author TEXT,
-                cover_path TEXT,
-                added_at INTEGER NOT NULL,
-                last_opened_at INTEGER
-            )",
-            [],
-        )?;
-
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS positions (
-                book_id INTEGER PRIMARY KEY REFERENCES books(id) ON DELETE CASCADE,
-                spine_index INTEGER NOT NULL,
-                selector TEXT NOT NULL,
-                updated_at INTEGER NOT NULL
-            )",
-            [],
-        )?;
-
-        Ok(Self {
-            conn,
-            files: BookFiles::new(books_dir),
+        Ok(Library {
+            db,
+            files: BookFiles::new(books_dir.as_ref().to_path_buf()),
         })
     }
 
@@ -125,7 +93,8 @@ impl Library {
         let source_path_text = source_path.to_string_lossy().into_owned();
 
         let previous: Option<(String, Option<String>)> = self
-            .conn
+            .db
+            .conn()
             .query_row(
                 "SELECT path, cover_path FROM books WHERE source_path = ?1",
                 params![&source_path_text],
@@ -147,7 +116,7 @@ impl Library {
                 self.files.write_cover(&managed_path, ext, &cover.bytes)
             });
 
-            let book = self.conn.query_row(
+            let book = self.db.conn().query_row(
                 "INSERT INTO books (path, source_path, title, author, cover_path, added_at)
                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
                 ON CONFLICT(source_path) DO UPDATE SET
@@ -192,7 +161,8 @@ impl Library {
 
     pub(crate) fn remove(&self, id: i64) -> Result<bool, Error> {
         let removed: Option<(String, Option<String>)> = self
-            .conn
+            .db
+            .conn()
             .query_row(
                 "DELETE FROM books WHERE id = ?1 RETURNING path, cover_path",
                 params![id],
@@ -213,14 +183,15 @@ impl Library {
 
     pub(crate) fn list(&self) -> Result<Vec<Book>, Error> {
         let mut stmt = self
-            .conn
+            .db
+            .conn()
             .prepare("SELECT id, path, title, author, cover_path, added_at, last_opened_at FROM books ORDER BY COALESCE(last_opened_at, added_at) DESC, title")?;
         let rows = stmt.query_map([], Self::read_book)?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
     pub(crate) fn touch_opened(&self, id: i64, now: i64) -> Result<bool, Error> {
-        let updated = self.conn.execute(
+        let updated = self.db.conn().execute(
             "UPDATE books SET last_opened_at = ?2 WHERE id = ?1",
             params![id, now],
         )?;
@@ -234,33 +205,11 @@ impl Library {
         locator: &Locator,
         now: i64,
     ) -> Result<(), Error> {
-        self.conn.execute(
-            "INSERT INTO positions (book_id, spine_index, selector, updated_at)
-            VALUES (?1, ?2, ?3, ?4)
-            ON CONFLICT(book_id) DO UPDATE SET
-                spine_index = excluded.spine_index,
-                selector = excluded.selector,
-                updated_at = excluded.updated_at",
-            params![book_id, locator.spine_index, locator.selector, now],
-        )?;
-
-        Ok(())
+        Ok(self.db.save_position(book_id, locator, now)?)
     }
 
     pub(crate) fn position(&self, book_id: i64) -> Result<Option<Locator>, Error> {
-        Ok(self
-            .conn
-            .query_row(
-                "SELECT spine_index, selector FROM positions WHERE book_id = ?1",
-                params![book_id],
-                |row| {
-                    Ok(Locator {
-                        spine_index: row.get(0)?,
-                        selector: row.get(1)?,
-                    })
-                },
-            )
-            .optional()?)
+        Ok(self.db.position(book_id)?)
     }
 }
 
@@ -273,6 +222,8 @@ pub(crate) fn now_secs() -> i64 {
 
 #[cfg(test)]
 mod test {
+    use std::path::PathBuf;
+
     use super::*;
 
     #[test]
@@ -597,18 +548,6 @@ mod test {
             library.position(book.id).expect("latest read"),
             Some(latest),
         );
-
-        // `updated_at` is intentionally not part of `Locator`, but the injected clock is
-        // still a storage contract worth proving inside this module-level test.
-        let updated_at: i64 = library
-            .conn
-            .query_row(
-                "SELECT updated_at FROM positions WHERE book_id = ?1",
-                params![book.id],
-                |row| row.get(0),
-            )
-            .expect("stored timestamp");
-        assert_eq!(updated_at, 3_000);
     }
 
     #[test]

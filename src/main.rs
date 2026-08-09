@@ -5,6 +5,7 @@ use std::rc::Rc;
 use dioxus::prelude::*;
 
 mod components;
+mod db;
 mod epub;
 mod library;
 mod nav;
