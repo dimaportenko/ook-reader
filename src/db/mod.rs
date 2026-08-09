@@ -4,6 +4,7 @@ use rusqlite::Connection;
 
 mod books;
 mod positions;
+mod settings;
 
 pub(crate) use books::{Book, NewBook};
 pub(crate) use positions::Locator;
@@ -43,6 +44,19 @@ impl Db {
                 spine_index INTEGER NOT NULL,
                 selector TEXT NOT NULL,
                 updated_at INTEGER NOT NULL
+            )",
+            [],
+        )?;
+
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS settings (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                theme TEXT NOT NULL,
+                font_family TEXT NOT NULL,
+                font_size INTEGER NOT NULL,
+                line_height INTEGER NOT NULL,
+                page_margins INTEGER NOT NULL,
+                max_line_length INTEGER NOT NULL
             )",
             [],
         )?;
