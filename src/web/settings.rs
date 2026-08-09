@@ -15,12 +15,17 @@ pub(crate) const PAGE_MARGINS_MIN: u16 = 50;
 pub(crate) const PAGE_MARGINS_MAX: u16 = 200;
 pub(crate) const PAGE_MARGINS_STEP: u16 = 25;
 
+pub(crate) const MAX_LINE_LENGTH_MIN: u16 = 45;
+pub(crate) const MAX_LINE_LENGTH_MAX: u16 = 100;
+pub(crate) const MAX_LINE_LENGTH_STEP: u16 = 5;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Settings {
     pub(crate) theme: Theme,
     pub(crate) font_size: u16,
     pub(crate) line_height: u16,
     pub(crate) page_margins: u16,
+    pub(crate) max_line_length: u16,
 }
 
 impl Default for Settings {
@@ -30,6 +35,7 @@ impl Default for Settings {
             font_size: 100,
             line_height: 140,
             page_margins: 100,
+            max_line_length: 70,
         }
     }
 }
@@ -77,6 +83,20 @@ impl Settings {
             .max(PAGE_MARGINS_MIN);
     }
 
+    pub(crate) fn longer(&mut self) {
+        self.max_line_length = self
+            .max_line_length
+            .saturating_add(MAX_LINE_LENGTH_STEP)
+            .min(MAX_LINE_LENGTH_MAX);
+    }
+
+    pub(crate) fn shorter(&mut self) {
+        self.max_line_length = self
+            .max_line_length
+            .saturating_sub(MAX_LINE_LENGTH_STEP)
+            .max(MAX_LINE_LENGTH_MIN);
+    }
+
     pub(crate) fn css_vars(self) -> Vec<(&'static str, String)> {
         let mut vars = self
             .theme
@@ -88,6 +108,10 @@ impl Settings {
         vars.push(("--USER__fontSize", format!("{}%", self.font_size)));
         vars.push(("--USER__lineHeight", self.line_height_css()));
         vars.push(("--USER__pageMargins", self.page_margins_css()));
+        vars.push((
+            "--USER__maxLineLength",
+            format!("{}ch", self.max_line_length),
+        ));
         vars
     }
 
@@ -151,9 +175,10 @@ mod test {
 
             assert_eq!(
                 vars.len(),
-                theme.css_vars().len() + 3,
-                "the palette plus --USER__fontSize, --USER__lineHeight and \
-                 --USER__pageMargins — bump this when a setting is added",
+                theme.css_vars().len() + 4,
+                "the palette plus --USER__fontSize, --USER__lineHeight, \
+                 --USER__pageMargins and --USER__maxLineLength — bump this when \
+                 a setting is added",
             );
         }
     }
@@ -439,6 +464,62 @@ mod test {
             settings.wider();
         }
         assert_eq!(settings.page_margins, PAGE_MARGINS_MAX);
+    }
+
+    #[test]
+    fn the_measure_reaches_the_layer_in_characters() {
+        let settings = Settings {
+            max_line_length: 66,
+            ..Settings::default()
+        };
+
+        assert!(settings
+            .css_vars()
+            .contains(&("--USER__maxLineLength", "66ch".to_string())));
+        assert!(
+            settings.vars().contains("--USER__maxLineLength: 66ch;"),
+            "the chosen measure never reached the :root block",
+        );
+
+        // The unit is the whole decision. `px` would pin the measure to a physical
+        // width, so raising the font size would cut the characters per line. `rem`
+        // tracks the root font-size — so it survives a size change — but it is blind
+        // to the font *family*, which 5g is about to make user-settable. `ch` is the
+        // width of a `0` in the font actually in use, so it is the only one of the
+        // three that keeps the measure constant in characters under both settings.
+        let (_, value) = settings
+            .css_vars()
+            .into_iter()
+            .find(|(name, _)| *name == "--USER__maxLineLength")
+            .expect("the measure is pushed");
+
+        assert!(
+            value.ends_with("ch"),
+            "the measure is in {value}, not characters",
+        );
+    }
+
+    #[test]
+    fn the_measure_steps_and_clamps() {
+        let mut settings = Settings {
+            max_line_length: 70,
+            ..Settings::default()
+        };
+
+        settings.shorter();
+        assert_eq!(settings.max_line_length, 70 - MAX_LINE_LENGTH_STEP);
+        settings.longer();
+        assert_eq!(settings.max_line_length, 70);
+
+        for _ in 0..20 {
+            settings.shorter();
+        }
+        assert_eq!(settings.max_line_length, MAX_LINE_LENGTH_MIN);
+
+        for _ in 0..20 {
+            settings.longer();
+        }
+        assert_eq!(settings.max_line_length, MAX_LINE_LENGTH_MAX);
     }
 
     #[test]

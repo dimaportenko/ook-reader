@@ -85,6 +85,36 @@ mod test {
     }
 
     #[test]
+    fn the_measure_caps_the_column_alone() {
+        let column = INJECTED_ASSETS
+            .split_once("--ook-column:")
+            .and_then(|(_, rest)| rest.split_once(';'))
+            .map(|(value, _)| value)
+            .expect("pagination.css declares the derived column");
+
+        assert!(
+            column.contains("min("),
+            "the measure has to cap the column, and a cap is a min()",
+        );
+        assert!(
+            column.contains("var(--USER__maxLineLength"),
+            "the column ignores the measure entirely",
+        );
+
+        // One reference, in the column's own definition. Cap the padding or the gap
+        // separately and they stop being "the leftover" — the advance stops being
+        // 100vw and the transform drifts from `pageOf` again, which is the exact bug
+        // 5e was built to make unreachable.
+        assert_eq!(
+            INJECTED_ASSETS
+                .matches("var(--USER__maxLineLength")
+                .count(),
+            1,
+            "the cap belongs in one place — every other number derives from it",
+        );
+    }
+
+    #[test]
     fn wrapped_css_is_a_cdata_style_element() {
         let out = wrap_css_str("body > p { color: red }");
 

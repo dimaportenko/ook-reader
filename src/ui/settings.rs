@@ -6,7 +6,7 @@ use crate::{
     ui::theme::ThemePicker,
     web::settings::{
         Settings, FONT_SIZE_MAX, FONT_SIZE_MIN, LINE_HEIGHT_MAX, LINE_HEIGHT_MIN,
-        PAGE_MARGINS_MAX, PAGE_MARGINS_MIN,
+        MAX_LINE_LENGTH_MAX, MAX_LINE_LENGTH_MIN, PAGE_MARGINS_MAX, PAGE_MARGINS_MIN,
     },
 };
 
@@ -87,6 +87,30 @@ pub(crate) fn PageMarginsControl() -> Element {
     }
 }
 
+#[component]
+pub(crate) fn MaxLineLengthControl() -> Element {
+    let mut settings = use_context::<Signal<Settings>>();
+
+    rsx! {
+        div {
+            button {
+                disabled: settings().max_line_length <= MAX_LINE_LENGTH_MIN,
+                onclick: move |_| settings.write().shorter(),
+                "\u{2261}-"
+            }
+            span {
+                style: "padding: 0 0.5rem",
+                "{settings().max_line_length}"
+            }
+            button {
+                disabled: settings().max_line_length >= MAX_LINE_LENGTH_MAX,
+                onclick: move |_| settings.write().longer(),
+                "\u{2261}+"
+            }
+        }
+    }
+}
+
 pub(crate) fn SettingsPopover() -> Element {
     let mut open = use_signal(|| false);
 
@@ -128,6 +152,7 @@ pub(crate) fn SettingsPopover() -> Element {
                     LineHeightControl {}
                     FontSizeControl {}
                     PageMarginsControl {}
+                    MaxLineLengthControl {}
                     ThemePicker {}
                 }
             }

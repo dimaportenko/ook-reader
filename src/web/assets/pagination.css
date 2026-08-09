@@ -1,6 +1,9 @@
 :root {
   --ook-page: 0;
-  --ook-column: calc(100vw - 2 * var(--RS__pageGutter) * var(--USER__pageMargins, 1));
+  --ook-column: min(
+    100vw - 2 * var(--RS__pageGutter) * var(--USER__pageMargins, 1),
+    var(--USER__maxLineLength, 100ch)
+  );
 }
 html {
   width: 100vw;
