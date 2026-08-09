@@ -8,7 +8,7 @@ pub(crate) trait OrLog<T> {
     fn or_log(self, action: &str) -> Option<T>;
 }
 
-impl<T> OrLog<T> for Result<T, crate::library::Error> {
+impl<T, E: std::fmt::Display> OrLog<T> for Result<T, E> {
     fn or_log(self, action: &str) -> Option<T> {
         match self {
             Ok(value) => Some(value),

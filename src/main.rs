@@ -14,12 +14,10 @@ mod web;
 
 use library::Library;
 
-use crate::{
-    ui::{
-        library::{ImportControl, LibraryBooks, OpenBook},
-        reader::Reader,
-    },
-    web::settings::Settings,
+use crate::ui::{
+    library::{ImportControl, LibraryBooks, OpenBook},
+    reader::Reader,
+    OrLog,
 };
 
 const FAVICON: Asset = asset!("/assets/favicon.ico");
@@ -38,8 +36,17 @@ fn main() {
 
 #[component]
 fn App() -> Element {
-    let settings = use_signal(Settings::default);
     let library = use_hook(|| Rc::new(Library::open_default()));
+    let settings = use_hook(|| {
+        Signal::new(
+            library
+                .db()
+                .settings()
+                .or_log("read your settings")
+                .flatten()
+                .unwrap_or_default(),
+        )
+    });
     let (books, status) = use_hook(|| match library.list() {
         Ok(books) => (Signal::new(books), Signal::new(None)),
         Err(error) => (
@@ -54,6 +61,16 @@ fn App() -> Element {
     use_context_provider(|| status);
     use_context_provider(|| open_book);
     use_context_provider(|| settings);
+
+    use_effect({
+        let library = library.clone();
+        move || {
+            _ = library
+                .db()
+                .save_settings(&settings())
+                .or_log("save your settings");
+        }
+    });
 
     epub::use_register_covers_handler(library.books_dir().to_path_buf());
 

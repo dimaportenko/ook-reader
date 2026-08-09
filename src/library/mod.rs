@@ -59,6 +59,10 @@ impl Library {
         self.files.dir()
     }
 
+    pub(crate) fn db(&self) -> &Db {
+        &self.db
+    }
+
     pub(crate) fn add_from_path(&self, source_path: &Path, now: i64) -> Result<Book, Error> {
         let source_path = source_path.canonicalize()?;
         let source_path_text = source_path.to_string_lossy().into_owned();
