@@ -1,14 +1,11 @@
-use std::{
-    fs,
-    io::ErrorKind,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use rbook::Epub;
 use rusqlite::{params, Connection, OptionalExtension, Row};
-use uuid::Uuid;
 
-use crate::epub;
+use crate::{epub, library::files::BookFiles};
+
+mod files;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
@@ -53,7 +50,7 @@ pub(crate) struct Locator {
 
 pub(crate) struct Library {
     conn: Connection,
-    books_dir: PathBuf,
+    files: BookFiles,
 }
 
 impl Library {
@@ -91,7 +88,10 @@ impl Library {
             [],
         )?;
 
-        Ok(Self { conn, books_dir })
+        Ok(Self {
+            conn,
+            files: BookFiles::new(books_dir),
+        })
     }
 
     pub(crate) fn open_default() -> Library {
@@ -105,7 +105,7 @@ impl Library {
     }
 
     pub(crate) fn books_dir(&self) -> &Path {
-        self.books_dir.as_path()
+        self.files.dir()
     }
 
     fn read_book(row: &Row<'_>) -> rusqlite::Result<Book> {
@@ -133,12 +133,7 @@ impl Library {
             )
             .optional()?;
 
-        let managed_path = self.books_dir.join(format!("{}.epub", Uuid::new_v4()));
-
-        if let Err(error) = fs::copy(&source_path, &managed_path) {
-            cleanup_managed_file(&managed_path);
-            return Err(error.into());
-        }
+        let managed_path = self.files.import(&source_path)?;
 
         let mut cover_path: Option<String> = None;
 
@@ -149,9 +144,7 @@ impl Library {
 
             cover_path = meta.cover.as_ref().and_then(|cover| {
                 let ext = epub::extension_for(&cover.media_type)?;
-                let path = managed_path.with_extension(format!("cover.{ext}"));
-                fs::write(&path, &cover.bytes).ok()?;
-                Some(path.to_string_lossy().into_owned())
+                self.files.write_cover(&managed_path, ext, &cover.bytes)
             });
 
             let book = self.conn.query_row(
@@ -179,16 +172,16 @@ impl Library {
 
         match &result {
             Err(_) => {
-                cleanup_managed_file(&managed_path);
+                self.files.remove(&managed_path);
                 if let Some(path) = &cover_path {
-                    cleanup_managed_file(Path::new(path));
+                    self.files.remove(Path::new(path));
                 }
             }
             Ok(_) => {
                 if let Some((previous_path, previous_cover)) = previous {
-                    cleanup_managed_file(Path::new(&previous_path));
+                    self.files.remove(Path::new(&previous_path));
                     if let Some(cover) = previous_cover {
-                        cleanup_managed_file(Path::new(&cover));
+                        self.files.remove(Path::new(&cover));
                     }
                 }
             }
@@ -208,9 +201,9 @@ impl Library {
             .optional()?;
 
         if let Some((removed_path, removed_cover)) = removed {
-            cleanup_managed_file(Path::new(&removed_path));
+            self.files.remove(Path::new(&removed_path));
             if let Some(cover) = removed_cover {
-                cleanup_managed_file(Path::new(&cover));
+                self.files.remove(Path::new(&cover));
             }
             return Ok(true);
         };
@@ -268,19 +261,6 @@ impl Library {
                 },
             )
             .optional()?)
-    }
-}
-
-fn cleanup_managed_file(path: &Path) {
-    match fs::remove_file(path) {
-        Ok(()) => {}
-        Err(error) if error.kind() == ErrorKind::NotFound => {}
-        Err(error) => {
-            eprintln!(
-                "failed to clean up imported copy {}, {error}",
-                path.display()
-            );
-        }
     }
 }
 
