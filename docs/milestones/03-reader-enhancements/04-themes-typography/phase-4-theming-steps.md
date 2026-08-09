@@ -3387,6 +3387,36 @@ instead of `fs::copy` / `fs::write` / `cleanup_managed_file`.
 
 ## Step 6b — introduce `Db`, move `positions` onto it
 
+> **Status:** done — committed in `ec3196e`, **90 tests green**, `cargo clippy` clean. The count
+> is the one prediction this step missed, and it missed it for a legible reason: the `updated_at`
+> assertion moved into `db/positions.rs` as the plan asked, found no test module there to join,
+> and so became `saving_a_position_stamps_the_injected_clock`. Same assertion, same contract, new
+> home — 89 → 90 with no new behavior asserted. It needs a `books` row inserted first, because
+> `positions` carries the FK and `Db::open` turns enforcement on; that insert is an incidental
+> second proof the pragma survived the move.
+>
+> Three things went differently from the plan and are worth the record:
+>
+> - **`Locator` first moved the wrong way.** The initial implementation left it in `library` and
+>   had `db/positions.rs` import it, which compiles — Rust permits module cycles — but points the
+>   dependency at the facade from inside the store, and Step 7 would have hit the identical fork
+>   with `Settings`. Corrected before the commit.
+> - **The tests first bypassed the delegations**, calling `library.db.position(…)` directly. That
+>   left `Library::position` and `Library::save_position` — both live, at `ui/reader.rs:56` and
+>   `:241` — with no coverage at all, which the green suite could not have told anyone. Restored
+>   to `library.position(…)`, and the nine edits collapsed back to roughly the two the plan
+>   budgeted. **The test-edit budget did its job**: the overrun was the signal, exactly as Step 6
+>   said it would be.
+> - **`clippy::needless_question_mark` fired on `Db::position`** and was the refactor reporting
+>   its own success. `Ok(… .optional()?)` had been widening `rusqlite::Error` into
+>   `library::Error`; once `Db` returned the narrow type natively the pair cancelled, while the
+>   same shape in `Library::position` stayed unflagged because there the `?` still converts.
+>
+> Provenance: the implementation is the user's. The `Locator` relocation and the test
+> reconciliation were written by Claude at the user's request during validation; the new test was
+> written after the implementation and verified by mutating its expected value and watching it go
+> red, not by having been written first. The `dx serve` pass is still deferred to the end of 6c.
+
 The connection and the schema get their own module, and one entity moves with them to prove the
 shape. `positions` is chosen because it is two methods and one table — small enough that if the
 module layout is wrong, you find out cheaply.
@@ -3398,9 +3428,9 @@ Still 89. **Two edits are expected here and no more:**
 1. `position_round_trips_and_latest_save_wins` reaches into `library.conn` directly
    (`library/mod.rs`, the `updated_at` assertion) to check the injected clock landed. After the
    move, `conn` is private to `db/`, so that assertion has to live in `db/positions.rs`'s own
-   test module. **Move the assertion, do not delete it** — and do not add a `pub(crate) conn`
-   accessor to keep it where it is, because that would hand the connection back to the whole
-   crate and undo the step.
+   test module. **Move the assertion, do not delete it** — and do not route it through the
+   temporary `conn()` accessor described below, which exists for the books queries and dies in
+   6c.
 2. Whatever the test helper `library_with_source` needs to keep constructing a `Library`.
 
 If you find yourself editing a third test, stop and read why.
@@ -3423,6 +3453,34 @@ mod books;      // 6c
 mod positions;
 ```
 
+**A scaffold this sub-step cannot avoid.** The sketch above says `conn` is private and that is the
+whole point — but `library/mod.rs` has **eight** uses of `self.conn` and 6b only relocates two of
+them (`save_position:237`, `position:252`). Five belong to books and stay put until 6c
+(`add_from_path:128` and `:150`, `remove:195`, `list:216`, `touch_opened:223`), and once `conn`
+lives in `db/` those five cannot reach it: a private field is visible in its own module *and its
+descendants*, and `crate::library` is neither. So `Db` carries a deliberately temporary
+
+```rust
+pub(crate) fn conn(&self) -> &Connection   // deleted in 6c
+```
+
+and the five books queries become `self.db.conn().query_row(…)` for exactly one sub-step. This is
+not the step failing at its own rule; it is what an incremental refactor looks like when the seam
+has to hold weight while you build the other half. **The check that 6c is finished is that this
+method is gone** — `rg 'conn\(\)' src/` returning nothing outside `db/` is a better completion
+signal than the test count, which cannot see it.
+
+Its existence does *not* reprieve the test at `:604`. That assertion could reach the connection
+through the accessor and compile — but 6c deletes the accessor, so the choice is to move the
+assertion now or move it in two steps' time. Move it now.
+
+`init` today does **three** things, and the easy one to drop on the way across is the first:
+`conn.pragma_update(None, "foreign_keys", true)`. SQLite does not enforce foreign keys unless you
+ask it to, per connection, so if that line does not make the move,
+`removing_a_book_cascades_to_its_position` is the test that goes red — the `ON DELETE CASCADE` in
+the `positions` schema silently stops firing. It belongs in `Db::open`, next to the connection it
+configures, not in `migrate`: it is a property of the *session*, not of the schema.
+
 **`src/db/positions.rs`** (new) — `Locator`, plus
 
 ```rust
@@ -3435,8 +3493,25 @@ impl Db {
 ```
 
 **`src/library/mod.rs`** — `{ db: Db, files: BookFiles }`, and the two position methods become
-one-line delegations that widen the error with `?`. `pub(crate) use crate::db::positions::Locator;`
-keeps `library::Locator` resolving, so `nav.rs:3` and `ui/reader.rs:236` do not change.
+one-line delegations that widen the error with `?`. A re-export keeps `library::Locator`
+resolving, so `nav.rs:3` and `ui/reader.rs:236` do not change.
+
+That re-export is a **two-hop** one, and the first hop is easy to miss. `mod positions;` inside
+`db/mod.rs` is private to `db`, and Rust requires *every* module on a path to be visible, not just
+the item at the end — so `crate::db::positions::Locator` does not resolve from `library` even
+though `Locator` itself is `pub(crate)`. Each module re-exports what it wants to be its public
+face:
+
+```rust
+// src/db/mod.rs
+mod positions;
+pub(crate) use positions::Locator;
+
+// src/library/mod.rs
+pub(crate) use crate::db::Locator;
+```
+
+**`src/main.rs`** — one new line, `mod db;`, in the module list.
 
 ### Why it works
 
@@ -3474,8 +3549,12 @@ and no `fs` in it at all.
 
 ### Runnable check first (`cargo test`, then `dx serve`)
 
-89, unchanged, with **no test edits expected at all** this time — the books tests go through
+**90** now, not 89 — 6b's move of the `updated_at` assertion added the test that carries it — and
+unchanged, with **no test edits expected at all** this time. The books tests go through
 `Library`'s public API, which is the point. If one needs editing, the facade leaked.
+
+The second, better completion check is `rg 'conn\(\)' src/` coming back empty: 6b's scaffold
+accessor has no reason to survive this sub-step, and no test count can see it go.
 
 Then the one `dx serve` pass for the whole of Step 6: import a book, open it, page through it,
 quit, reopen, land where you stopped, remove the book. This exercises both resources and their
@@ -3502,6 +3581,13 @@ returning the paths it deleted is not a leak of file concerns into `Db` — the 
 those paths are stored, and `DELETE … RETURNING` is one round trip where a `SELECT`-then-`DELETE`
 would be two and could race.
 
+`Book` needs **the same two-hop re-export `Locator` got in 6b** — `pub(crate) use books::Book;` in
+`db/mod.rs`, `pub(crate) use crate::db::Book;` in `library/mod.rs`. `ui/library.rs` imports it
+three ways (`library::{self, Book, …}` at `:8`, then `library::Book` at `:31` and `:149`), and the
+no-test-edits claim below extends to no-UI-edits only if that path keeps resolving. `Book` is also
+a component prop (`fn BookCover(book: Book)`), so its `Clone + PartialEq` derives have to travel
+with it — they are load-bearing for Dioxus, not decoration.
+
 **`src/library/mod.rs`** — what is left, and it should be short: `open`, `open_default`,
 `books_dir`, thin delegations, and `add_from_path` / `remove` as pure orchestration — call
 `files.import`, call `db.upsert_book`, and on `Err` call `files.remove` for whatever was written.
@@ -3517,6 +3603,14 @@ would be two and could race.
   what an EPUB is; it takes the already-extracted title, author and paths. That is the boundary
   the `Error` enum has been hinting at — after this, `Error::Ebook` can only originate in
   `Library`, never in a store.
+- **…and the reason to prefer the named struct is transposition, not arity.** The insert takes six
+  values, four of them strings; clippy's `too_many_arguments` does not fire until seven, so no
+  lint is pushing here. What is pushing is that `upsert_book(&managed, &source, &title, author,
+  cover, now)` type-checks just as happily with `title` and `author` swapped, and the test that
+  would catch it is the one asserting metadata — which passes today because the fixture's title
+  and author are both non-empty strings. Field names at the call site make the swap unwriteable.
+  This is the one place in Step 6 where the refactor is allowed to *add* a type rather than only
+  move one, because the type is what makes the moved call safe.
 - **No test edits is a stronger result than the tests passing.** It means the books API never
   leaked its storage; everything the UI and the tests touch went through `Library` already. 6b
   needed two edits because `positions` had a test poking at `conn`; the absence here is a real
@@ -3533,6 +3627,15 @@ would be two and could race.
 - **No `Rc<Db>` yet.** `Library` owns its `Db` by value and Step 7 reaches it through a
   `db()` accessor. If a second component ever needs the connection without `Library`, that is
   when `Rc<Db>` and a second context earn their keep — not before.
+- **The `(String, Option<String>)` return is left unnamed — deliberately, and it is the one
+  loose end.** Today it is a local binding two lines from its `query_row`, so the shape is
+  obvious. Promoted to the return type of two `pub(crate)` methods it is no longer obvious: both
+  `managed_paths_for_source` and `delete_book` hand back "the epub path and maybe a cover path"
+  with nothing but position saying so, and the two `String`s are interchangeable to the compiler.
+  Naming it (`ManagedPaths { epub, cover }`) is a two-minute change and a real improvement; it is
+  parked rather than done because unlike `NewBook` it prevents no bug — the destructuring at both
+  call sites is immediate. **Step 8 decides.** If it bothers you while you are in there, do it —
+  just do it as its own commit so the "no behavior change, no test edits" claim stays clean.
 - **This step ships no user-visible change whatsoever.** That is the definition of done.
 
 ---

@@ -144,8 +144,13 @@ implementation → why. Smallest-first:
         `write_cover` takes an extension and bytes rather than `epub::CoverImage`, so the file
         store never imports `crate::epub`. Committed in `75aaf71`, **89 tests green** — the same
         89, none edited, none added.
-  - [ ] **6b** — introduce `Db`, move `positions` onto it; the small entity proves the layout.
-        Exactly two test edits are expected, both called out in the log.
+  - [x] **6b** — introduce `Db`, move `positions` onto it; the small entity proves the layout.
+        It proved more than that: privacy made the layout real (`db/positions.rs` reaches
+        `self.conn` as a *descendant* of the module declaring `Db`, nothing else can), and it
+        forced a scaffold the plan had missed — the five books queries still in `Library` cannot
+        reach a private field from a sibling module, so `Db::conn()` exists until 6c deletes it.
+        Committed in `ec3196e`, **90 tests green** — 89 plus the `updated_at` assertion, which
+        became its own test on arriving in a module that had none.
   - [ ] **6c** — move `books` onto `Db`; **zero** test edits expected, because the books tests
         already go through `Library`'s public API. `add_from_path` gets shorter and finally reads
         as what it is: acquire, acquire, commit, or unwind.
