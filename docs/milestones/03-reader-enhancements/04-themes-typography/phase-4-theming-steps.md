@@ -3944,8 +3944,15 @@ defensible at this size; the conversion is a Step 8 question, not a 7a one.
 
 ## Step 7b — load before the first paint, save on every change
 
-The wiring half, and the whole step is about **order**. Six lines in `App`, and each one is in
-a specific place for a reason.
+> **Status:** done — committed in `a521d54` (93 tests green, unchanged from 7a; clippy clean,
+> 7a's `dead_code` warning gone now that the methods have a caller). All four `dx serve` checks
+> confirmed, including the served-bytes route. One unplanned edit fell out of the load path:
+> the `Settings` import in `main.rs` became dead, because `use_signal(Settings::default)` was
+> the only place naming the type and it now flows out of `Db::settings()`'s signature — `App`
+> no longer picks a default, the store does.
+
+The wiring half, and the whole step is about **order**. A handful of lines in `App`, plus one
+accessor and one widened impl — and each is in a specific place for a reason.
 
 ### Runnable check first (`dx serve`)
 
@@ -3958,15 +3965,36 @@ There is no unit test for hook order — this one is eyeballs.
    visible flicker — white-then-night, 100%-then-125% — which means the settings were applied
    by an effect *after* the first render instead of being read *before* the signal was created.
    A correct 7b has no flash at all.
-4. Delete the database (`~/Library/Application Support/com.dimaportenko.ook-reader/library.sqlite3`
+4. **Page forward into a chapter you had not reached before quitting**, and check it arrives
+   already styled. This is a different route from the one point 3 exercises: an on-screen
+   document is themed by the `ook-set-theme` push, but a chapter that has never loaded is
+   themed by the *served bytes*, and those come from the snapshot `Reader` captured when it
+   mounted (`ui/reader.rs:49` hands `settings()` to `use_register_asset_handler` by value).
+   Loading before the first paint is what makes that snapshot the stored settings rather than
+   the defaults.
+5. Delete the database (`~/Library/Application Support/com.dimaportenko.ook-reader/library.sqlite3`
    on macOS) and relaunch: the reader comes up on Day / Publisher / 100% and does not crash.
    That is the `None` branch, which is the first-launch path for every user.
-5. `cargo test` still green, `cargo clippy` clean.
+6. `cargo test` still green, `cargo clippy` clean.
 
 Optionally, confirm the write happened rather than trusting the restore:
 `sqlite3 …/library.sqlite3 'select * from settings'` should show one row matching what you set.
 
 ### Minimal implementation
+
+**`src/library/mod.rs`** — the accessor 7a's scope note flagged, because `db` is a private
+field and `App` has no way to reach it:
+
+```rust
+pub(crate) fn db(&self) -> &Db {
+    &self.db
+}
+```
+
+This is the step's one real design decision, and it is worth pausing on because it looks like
+it contradicts 7a. 7a's rule was "no `Library::settings()` pass-through"; the two options here
+are exactly that pass-through or this accessor, so one of them has to give. **The accessor
+wins, and the rule stands** — see the first bullet under *Why it works*.
 
 **`src/main.rs`, in `App`** — the library moves above the settings, and the settings signal
 gets a real initial value:
@@ -4013,6 +4041,14 @@ error types, and the fix is to stop naming a concrete error at all.
 
 ### Why it works
 
+- **An accessor is not a pass-through, and that is why 7a's rule survives.** A
+  `Library::settings()` that forwards to `Db::settings()` puts *settings* in `Library`'s
+  vocabulary — it says the facade coordinates them, which is the claim 7a rejected, and it
+  needs a second method the day a seventh setting arrives with a different shape. `db()` says
+  something weaker and true: here is the store, talk to it directly. It also does not grow —
+  one accessor covers every future `Db` method, where pass-throughs are one per method. The
+  cost is that `Db` becomes visible through the facade, which matters not at all inside a
+  binary crate where both are already `pub(crate)` and there is no external API to protect.
 - **`use_hook`, not `use_signal`, for the load.** `use_signal(Settings::default)` takes a
   *function* and calls it once; here the initial value depends on `library`, which is another
   hook's value. `use_hook(|| Signal::new(…))` is what `books` and `status` two lines below

@@ -162,8 +162,11 @@ implementation → why. Smallest-first:
         assertion moved, `library/mod.rs` lost 101 lines, and `Db::conn()` — 6b's scaffold —
         is gone, which is the completion check no test count could make. Committed in `cb8f2af`,
         **90 tests green**, with the `dx serve` walk for the whole of Step 6 confirmed.
-- [ ] **Step 7 — Persist the settings.** The deferral every step since 4 has been logging, now
-      landing in the module Step 6 built for it.
+- [x] **Step 7 — Persist the settings.** The deferral every step since 4 has been logging, now
+      landing in the module Step 6 built for it. Landed in two commits and **93 tests** — the
+      same 93 after 7b as after 7a, which is the split doing its job: 7a put every assertion
+      the feature can carry into the storage half, leaving 7b a wiring step whose only real
+      failure mode is a flash no test can see.
   - [x] **7a** — a `settings` table on `Db`: one typed row (`CHECK (id = 1)`), an upsert and a
         `query_row`, provable entirely by `cargo test` with nothing wired up. Stores the struct's
         fields, not `css_vars()`'s rendered strings — `125` is the state, `"125%"` is the
@@ -172,11 +175,14 @@ implementation → why. Smallest-first:
         extraction paying for itself on first use — and the slug-corruption test needs `db.conn`,
         which only a test inside `db/` can reach, so the extraction bought the *third* test
         outright. Committed in `500cacd`, **93 tests green**.
-  - [ ] **7b** — load before the first paint, save on every change. All about order: `library`
+  - [x] **7b** — load before the first paint, save on every change. All about order: `library`
         moves above `settings` in `App` and the signal is *born* holding the stored value, because
         applying it from an effect afterwards is a visible flash. One `use_effect` reading
         `settings()` covers all six controls — and writes the row back to itself on mount, which
-        is harmless but worth knowing. `OrLog` widens to `E: Display` here.
+        is harmless but worth knowing. `OrLog` widens to `E: Display` here. The plan's one gap:
+        `Library::db()` had to be added, since Step 6 left the facade no accessor — and choosing
+        it over a `Library::settings()` pass-through is what keeps 7a's rule intact. Committed in
+        `a521d54`, **93 tests green**, `dx serve` confirmed.
 - [ ] **Step 8 — Review & refactor** (per the repo's phase-ending convention). Lighter on module
       organization than usual, since Step 6 spent it; heavier on the four questions Step 6
       deliberately deferred.
