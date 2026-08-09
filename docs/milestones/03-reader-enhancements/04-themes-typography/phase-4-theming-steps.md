@@ -3543,6 +3543,36 @@ pub(crate) use crate::db::Locator;
 
 ## Step 6c — move `books` onto `Db`
 
+> **Status:** done — committed in `cb8f2af`, **90 tests green**, `cargo clippy` clean, and the
+> `dx serve` walk covering all of Step 6 confirmed: import, open, page, quit, reopen, land where
+> you stopped, remove. **Zero test edits**, exactly as predicted — `git diff --stat` touched only
+> `db/mod.rs` and `library/mod.rs`, and not one assertion moved. That is the facade proving it was
+> real rather than the tests being lenient: everything the UI and the suite touch already went
+> through `Library`. `rg 'conn()' src/` returns nothing, which is the check the test count could
+> not perform.
+>
+> `library/mod.rs` went 632 → 531 lines, and its non-test half is now `open`, `open_default`,
+> `books_dir`, four one-line delegations and the two orchestrators.
+>
+> Three deviations from the plan, all deliberate:
+>
+> - **`list_books`, not `list`.** On a `Db` that Step 7 is about to give a settings row, a bare
+>   `list()` does not say what it lists. `Library::list()` keeps its name because there the noun
+>   is implied by the type — the same word is right on one type and wrong on the other.
+> - **`read_managed_paths` is a named row mapper**, alongside `read_book`. `delete_book` and
+>   `managed_paths_for_source` return the same shape from the same two columns, so the column
+>   order is written once instead of twice.
+> - **`ManagedPaths` was written and backed out.** It is a real improvement and it is still Step
+>   8's call; keeping it out preserved 6c's "no behavior change, no test edits" claim as something
+>   a reader can audit from the diff alone. Five lines whenever it is wanted.
+>
+> `Db::migrate` also went private here, which was Finding 4 from 6b's review folded in rather than
+> left dangling.
+>
+> Provenance: the implementation was written by Claude at the user's request, as with 5e, 5f and
+> 5h. No test was written or changed, so there is nothing to say about test-first ordering — the
+> existing 90 were the whole net, which is the property a refactor step is supposed to lean on.
+
 The same move on the big entity: `Book`, `read_book`, `list`, `touch_opened`, and the two
 `RETURNING` queries buried inside `add_from_path` and `remove`. After this `Library` has no SQL
 and no `fs` in it at all.

@@ -131,7 +131,7 @@ implementation → why. Smallest-first:
       the phase to need new JavaScript: an empty pushed value now means `removeProperty`,
       because `setProperty(name, "")` is a no-op that would weld the gate open. Committed in
       `cb03a4b`, **89 tests green**.
-- [ ] **Step 6 — Split the data layer.** Not a theming step, and it goes *before* persistence
+- [x] **Step 6 — Split the data layer.** Not a theming step, and it goes *before* persistence
       because of what planning persistence exposed: `Library` owns a SQLite connection **and** a
       managed-file directory while being named after neither, which is why `list` is five lines
       and `add_from_path` is seventy. Settings need the first and have nothing to do with the
@@ -140,6 +140,11 @@ implementation → why. Smallest-first:
       `Library` as the facade whose only remaining logic is the two-resource rollback — and whose
       public API does not change, so no UI file moves. A pure refactor: the check is that the
       same **89 tests** pass before and after, with no new ones and no changed count.
+      **Landed at 90, not 89** — 6b's relocated `updated_at` assertion arrived in a module with no
+      test to join and became one. That is the whole of the drift across three sub-steps: one test
+      renamed and rehoused, no assertion added, no behavior changed. `Library` is a facade,
+      `library/mod.rs` is 531 lines where it was 632, and `db/` holds the connection, the schema
+      and both entities.
   - [x] **6a** — extract `BookFiles`; touches no SQL, so it separates cleanly and goes first.
         `write_cover` takes an extension and bytes rather than `epub::CoverImage`, so the file
         store never imports `crate::epub`. Committed in `75aaf71`, **89 tests green** — the same
@@ -151,9 +156,12 @@ implementation → why. Smallest-first:
         reach a private field from a sibling module, so `Db::conn()` exists until 6c deletes it.
         Committed in `ec3196e`, **90 tests green** — 89 plus the `updated_at` assertion, which
         became its own test on arriving in a module that had none.
-  - [ ] **6c** — move `books` onto `Db`; **zero** test edits expected, because the books tests
+  - [x] **6c** — move `books` onto `Db`; **zero** test edits expected, because the books tests
         already go through `Library`'s public API. `add_from_path` gets shorter and finally reads
-        as what it is: acquire, acquire, commit, or unwind.
+        as what it is: acquire, acquire, commit, or unwind. The prediction held exactly: not one
+        assertion moved, `library/mod.rs` lost 101 lines, and `Db::conn()` — 6b's scaffold —
+        is gone, which is the completion check no test count could make. Committed in `cb8f2af`,
+        **90 tests green**, with the `dx serve` walk for the whole of Step 6 confirmed.
 - [ ] **Step 7 — Persist the settings.** The deferral every step since 4 has been logging, now
       landing in the module Step 6 built for it.
   - [ ] **7a** — a `settings` table on `Db`: one typed row (`CHECK (id = 1)`), an upsert and a
