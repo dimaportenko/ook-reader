@@ -3692,6 +3692,12 @@ split also means the round-trip test is green before any question of hook order 
 
 ## Step 7a — a `settings` table on `Db`
 
+> **Status:** done — committed in `500cacd` (93 tests green, clippy clean but for the
+> planned `dead_code`). The plan held with one correction found while writing it: `.optional()`
+> already returns `Result<Option<_>, rusqlite::Error>`, so the `Ok(…?)` wrapper in the sketch
+> below was redundant and `settings()` returns the `.optional()` call directly — the same
+> shape as `position()` next door.
+
 The storage half: `Settings` goes into SQLite and comes back out unchanged. Nothing in the UI
 moves in this step — `App` still calls `Settings::default`, and the new methods are called only
 by their tests. That is deliberate: the round-trip is the thing that can be silently wrong, so
@@ -3810,7 +3816,7 @@ this phase no longer has.
 **`src/db/mod.rs`, in `migrate`** — a third `CREATE TABLE IF NOT EXISTS`, after `positions`:
 
 ```rust
-conn.execute(
+self.conn.execute(
     "CREATE TABLE IF NOT EXISTS settings (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         theme TEXT NOT NULL,
@@ -3928,6 +3934,11 @@ defensible at this size; the conversion is a Step 8 question, not a 7a one.
   predates this step (it gets the table, empty, and reads as `None` — a fresh default). A
   *seventh* setting later is an `ALTER TABLE ADD COLUMN … DEFAULT`, which this shape absorbs
   fine; that is a bridge for whoever adds it.
+- **`Library::db()` does not exist yet, and 7a does not need it.** `Library` holds `db` as a
+  private field and exposes no accessor — Step 6 deliberately gave it none, since every store
+  method it wanted was already delegated. 7a's tests build a bare `Db`, so the gap is invisible
+  here; 7b is where a one-line `pub(crate) fn db(&self) -> &Db` has to appear for `library.db()`
+  to compile. Noted here so it is a decision when you get there, not a surprise.
 
 ---
 

@@ -164,12 +164,14 @@ implementation → why. Smallest-first:
         **90 tests green**, with the `dx serve` walk for the whole of Step 6 confirmed.
 - [ ] **Step 7 — Persist the settings.** The deferral every step since 4 has been logging, now
       landing in the module Step 6 built for it.
-  - [ ] **7a** — a `settings` table on `Db`: one typed row (`CHECK (id = 1)`), an upsert and a
+  - [x] **7a** — a `settings` table on `Db`: one typed row (`CHECK (id = 1)`), an upsert and a
         `query_row`, provable entirely by `cargo test` with nothing wired up. Stores the struct's
         fields, not `css_vars()`'s rendered strings — `125` is the state, `"125%"` is the
         rendering — and enum slugs rather than discriminants, so reordering a variant cannot
         re-map stored values. Its tests need a `Db` and no `Library` at all, which is the
-        extraction paying for itself on first use.
+        extraction paying for itself on first use — and the slug-corruption test needs `db.conn`,
+        which only a test inside `db/` can reach, so the extraction bought the *third* test
+        outright. Committed in `500cacd`, **93 tests green**.
   - [ ] **7b** — load before the first paint, save on every change. All about order: `library`
         moves above `settings` in `App` and the signal is *born* holding the stored value, because
         applying it from an effect afterwards is a visible flash. One `use_effect` reading
