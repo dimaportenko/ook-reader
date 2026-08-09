@@ -91,11 +91,30 @@ implementation → why. Smallest-first:
       folding the leading into the colour rule widens an `!important` `background` shorthand
       onto every element, so the layer is three rules and has a tripwire saying why. Committed
       in `eb92bb6`, **72 tests green**.
-- [ ] **Step 5e — margins / line-length.** The pair that changes page *geometry* — it is the
-      one that touches `pagination.css`'s `column-width`.
-- [ ] **Step 5f — `--USER__fontFamily` from a curated list.** Respect embedded fonts and
+- [x] **Interlude — the settings popover.** Not a planned step and not a cascade change: the
+      three controls moved behind a gear button built on `dioxus-primitives`. Recorded so the
+      log has no gap. Committed in `b0e10db`, **72 tests green** (unchanged).
+- [x] **Step 5e — `--USER__pageMargins`.** The first setting that changes page *geometry*, and
+      the first whose value is read by a stylesheet that does not declare it. `pagination.css`
+      stops hard-coding `24px`/`48px` and derives padding, `column-width` and `column-gap` from
+      one `--ook-column`, so that a column plus a gap keeps advancing exactly `100vw` — the
+      step the transform moves by and the unit `pageOf` divides by. The number splits in two:
+      `--RS__pageGutter` says how wide a comfortable margin is, `--USER__pageMargins` is the
+      bare factor the reader scales it by. No new JS — 5c's handler re-anchored it, for the
+      third time. Committed in `18b42c2`, **75 tests green**.
+- [ ] **Step 5f — `--USER__maxLineLength`.** Caps the measure with a `min()` inside
+      `--ook-column`. Split out of 5e: its real content is the unit (`ch` couples it to
+      `--USER__fontSize`, `rem` does not) and the wide-desktop case a bare margin factor
+      cannot fix.
+- [ ] **Step 5g — `--USER__fontFamily` from a curated list.** Respect embedded fonts and
       author `!important`, the way Readium gates its aggressive overrides.
-- [ ] **Step 6 — Review & refactor** (per the repo's phase-ending convention).
+- [ ] **Step 6 — Persist the settings.** The deferral every step since 4 has been logging: a
+      `settings` table beside `positions`, read *before* the signal is created so the first
+      paint is already right, written on every change. Stores the struct's fields, not
+      `css_vars()`'s rendered strings — `125` is the state, `"125%"` is the rendering. Placed
+      after 5g on purpose: the settings set stops growing there, so this is written once
+      against a finished struct.
+- [ ] **Step 7 — Review & refactor** (per the repo's phase-ending convention).
 
 ## Known constraints (from research)
 

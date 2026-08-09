@@ -38,9 +38,11 @@ that kept Phase 3 small.
 5. **Typography settings** — split into sittings, because the first one is structural and the
    rest ride on it: **5a** a `Settings` struct that owns the variable list, **5b**
    `--USER__fontSize` + its control, **5c** re-measure and re-anchor after a reflow, **5d**
-   `--USER__lineHeight` and the margin/line-length pair, **5e** `--USER__fontFamily` from a
-   curated list.
-6. **Review & refactor.**
+   `--USER__lineHeight`, **5e** `--USER__pageMargins`, **5f** `--USER__maxLineLength`,
+   **5g** `--USER__fontFamily` from a curated list.
+6. **Persist the settings** — a `settings` table beside `positions`, loaded before the signal
+   exists and written on every change. *(the deferral every step since 4 has been logging)*
+7. **Review & refactor.**
 
 > **Dependency.** Every step here serves through the Phase 3 Step 8 handler. Steps 2–3 inject
 > into the served document; Step 4 keeps that injection for the *first paint* of a chapter and
@@ -2005,10 +2007,427 @@ That is the whole step. Nothing in `epub.rs`, nothing in the JS, nothing in `nav
 
 ---
 
-## Step 6 — sketched
+## Interlude — the settings popover
 
-- **Step 6 — review & refactor.** The repo's phase-ending step (commit `b09d6c9`): fold
-  duplication in the serve/inject path, confirm the cascade order, re-read against ADR-0003.
-  By then `Settings` will have five fields and the `user_layer` string will be a `format!`
-  with five holes — that is the shape to look hardest at.
+> **Status:** done — committed in `b0e10db` (72 tests green, unchanged; clippy clean).
+> **Not a planned step.** It is chrome, not cascade: no variable was added, no rule changed,
+> and the test count did not move. Recorded here so the build log has no gap between 5d and 5e.
+
+Three controls sitting side by side in the reader header — leading, size, theme — had grown
+wider than the page they were meant to leave room for. They moved behind a single gear button
+built on `dioxus-primitives`' popover, wrapped in `src/components/popover` so the class names
+attach in one place. The close button lost its word for an icon at the same size.
+
+Worth carrying forward into **Step 6**: `.icon-button` in `assets/main.css` and
+`.dx-popover-trigger` in the popover's sheet are now the same forty-pixel circle declared
+twice, because one is a primitive's trigger and one is not. And the gear's SVG writes
+`"view-box"` as a raw string attribute where the close icon writes `view_box:` — the raw form
+is emitted literally and SVG ignores it, so that icon has no viewport and renders correctly
+only because its `width`/`height` happen to match its path coordinates.
+
+---
+
+## Step 5e — `--USER__pageMargins`
+
+> **Status:** done — committed in `18b42c2` (**75 tests green**, 72 → 75; clippy clean).
+> Suggested 2026-08-08 after `b0e10db`; predicted 72 → **76**, and the arithmetic was off by
+> one — of the "four tests" below only two are *new*, the other two being amendments to
+> existing ones. The third new test (`the_page_margins_step_and_clamp`) was added by analogy
+> with 5b and 5d, which is what makes it 75 rather than 74.
+>
+> **A test the step did not anticipate went red:**
+> `injects_pagination_css_before_head_close` asserted the literal old spelling
+> `column-width: calc(100vw`. It is a Phase 3-era test whose real subject is "the sheet
+> reaches the head," so it was retargeted to `var(--ook-column)` rather than taught the new
+> expression — the geometry itself is tested next door, and pinning it twice would mean two
+> places to edit at 5f.
+>
+> **The `dx serve` walk was the gate and passed by hand.** The tests prove the numbers derive
+> from one variable; only the walk proves the page still lands where it should, and the drift
+> this step is designed around only becomes visible some distance into a chapter.
+>
+> **Written differently from every step before it:** the implementation was written by Claude
+> at the user's explicit request, not by hand, so the usual split does not apply — the tests
+> and the code have the same author this once. Two of the tests were watched failing on their
+> assertions before the CSS existed (the geometry test, and the pairing test with *"Day
+> declares --USER__pageMargins and no rule reads it"*); the other three were only ever seen as
+> compile errors, so their assertions were confirmed live by mutating the expected values and
+> watching them go red.
+
+The first setting that changes the *shape of the page* rather than the text on it. It is also
+the first one whose value is consumed by a stylesheet that is not `user_layer()` — which is
+what makes it more than a fourth copy of 5b.
+
+### The crux: three numbers that are secretly one
+
+`pagination.css` today hard-codes the page geometry:
+
+```css
+body {
+  padding: 24px !important;
+  column-width: calc(100vw - 48px) !important;
+  column-gap: 48px !important;
+  transform: translateX(calc(var(--ook-page) * -100vw));
+}
+```
+
+Those are not three independent numbers. Paging works because **one column plus one gap
+advances exactly `100vw`** — `(100vw - 48px) + 48px` — which is the step the `transform`
+moves by and the unit `pageOf()` divides by:
+
+```js
+function pageOf(el) {
+  return Math.round(el.offsetLeft / window.innerWidth);
+}
+```
+
+Change the margin naively — bump the padding to `36px` and stop — and the content box narrows
+while the gap does not, so the advance stops being `100vw`. The transform then under-shoots a
+little more on every page, and `pageOf` disagrees with it by a growing amount. The bug does not
+show up on page 1; it shows up on page 20, which is the worst kind.
+
+So the step is not "make the padding a variable." It is: **derive all three from one column
+width**, and let the invariant be the thing that is written down.
+
+```
+column   = 100vw - 2·gutter·margins
+padding  = (100vw - column) / 2        ← half the leftover, per side
+gap      = 100vw - column              ← all of the leftover
+advance  = column + gap = 100vw        ← unchanged, by construction
+```
+
+### The second crux: the variable is read by a sheet that does not declare it
+
+Every `--USER__*` variable so far has been declared by `user_layer()` and applied by a rule in
+`user_layer()`. This one is declared by the layer and read by `pagination.css` — a *different*
+stylesheet, injected *earlier*, as part of the compile-time `INJECTED_ASSETS` const.
+
+That works, and it is worth being clear about why: source order decides which **declaration**
+of a custom property wins, but it does not limit who may **read** one. `pagination.css` sits
+ahead of the layer, so its `:root` loses the value — which is exactly right, since the layer's
+`:root` is the one carrying the user's choice. Substitution then happens at computed-value
+time on whatever won. This is the `--ook-page` trick from Phase 5 pointed the other way:
+there, JS writes and CSS reads; here, the served layer writes and CSS reads.
+
+It also means **no new message and no new JavaScript**. `theme-listener.js` already writes
+every pushed pair onto `documentElement` as an inline style, re-reports the count, and posts
+`ook-reflow` if the anchor moved column. A margin change re-columns the document exactly like
+a font-size change does, so 5c's handler carries this one for free — the third time that step
+has paid out.
+
+### Runnable check (`cargo test`)
+
+Four tests. The interesting one is the third, because it is **an existing test that this step
+breaks**, and understanding why it breaks is most of the lesson.
+
+**1 — the factor reaches the layer bare.** In `src/web/settings.rs`'s `mod test`:
+
+```rust
+#[test]
+fn the_page_margins_reach_the_layer_as_a_bare_factor() {
+    let settings = Settings {
+        page_margins: 150,
+        ..Settings::default()
+    };
+
+    assert!(settings
+        .css_vars()
+        .contains(&("--USER__pageMargins", "1.50".to_string())));
+
+    // No unit. The value is a multiplicand inside `calc(2 * 24px * m)`; give it a
+    // unit and that product is an area, the calc is invalid, and the declaration
+    // falls back to its initial value — which for `padding` is 0, i.e. no margin
+    // at all on the setting that exists to add one.
+    assert!(
+        settings.vars().contains("--USER__pageMargins: 1.50;"),
+        "the chosen margin never reached the :root block",
+    );
+}
+```
+
+**2 — the geometry stays in step.** In `src/web/assets.rs`'s `mod test`, next to the other
+`INJECTED_ASSETS` tripwires:
+
+```rust
+#[test]
+fn the_page_geometry_derives_from_one_column_width() {
+    // padding, column-width and column-gap are one number wearing three hats: the
+    // column plus one gap has to advance exactly 100vw, because that is the step
+    // `translateX(calc(var(--ook-page) * -100vw))` moves by and the unit `pageOf`
+    // divides by. Deriving all three from `--ook-column` is what keeps them in step
+    // when the margin moves; three separate expressions would drift silently.
+    assert!(
+        INJECTED_ASSETS.contains("--ook-column:"),
+        "no derived column width — the geometry is still three loose numbers",
+    );
+    assert_eq!(
+        INJECTED_ASSETS.matches("var(--ook-column)").count(),
+        3,
+        "padding, column-width and column-gap each derive from the column, \
+         or one of them is still hard-coded",
+    );
+}
+```
+
+**3 — the pairing test has to learn about the second reader.** This one is already in
+`src/web/settings.rs` and it will go **red** the moment `--USER__pageMargins` is pushed. Its
+forward half demands that every pushed variable is read by `user_layer()`, and this variable
+is read by `pagination.css`. Widen the *reader set*, and only that half:
+
+```rust
+#[test]
+fn the_pushed_vars_and_the_injected_layer_name_the_same_variables() {
+    for theme in [Theme::Day, Theme::Sepia, Theme::Night] {
+        let settings = Settings {
+            theme,
+            ..Settings::default()
+        };
+        let layer = settings.user_layer();
+        // A pushed variable must be read by *something the document gets*, which is no
+        // longer only the layer: the geometry rules live in pagination.css, served
+        // ahead of the layer and reading the value the layer sets.
+        let readers = format!("{layer}{INJECTED_ASSETS}");
+
+        // Nothing pushed that the served layer never declares …
+        for (name, value) in settings.css_vars() {
+            assert!(
+                layer.contains(&format!("{name}: {value};")),
+                "{theme:?} pushes {name}, which the injected layer never declares",
+            );
+            assert!(
+                readers.contains(&format!("var({name})"))
+                    || readers.contains(&format!("var({name},")),
+                "{theme:?} declares {name} and no rule reads it",
+            );
+        }
+
+        // … and nothing the *layer* reads that no message will ever set. This half
+        // stays narrow on purpose — see below.
+        for reference in layer.split("var(").skip(1) {
+            let name = reference.split(')').next().expect("var( … ) closes");
+            assert!(
+                settings
+                    .css_vars()
+                    .iter()
+                    .any(|(pushed, _)| *pushed == name),
+                "the layer reads {name}, which the message never sets — \
+                 that variable would only ever update on a chapter turn",
+            );
+        }
+    }
+}
+```
+
+Two details in that diff earn their keep:
+
+- **The `var({name},` arm.** `pagination.css` writes `var(--USER__pageMargins, 1)` — a
+  fallback, for the reason in the implementation below — so the exact substring `var(NAME)`
+  is not present. Without this arm the test fails for a reason that has nothing to do with
+  what it is checking.
+- **The reverse half must *not* be widened.** It scans `layer` only, and it should keep doing
+  so. `INJECTED_ASSETS` reads `--ook-page`, `--RS__pageGutter` and `--ook-column`, none of
+  which the message sets and none of which should be — they are internal, not settings. Point
+  the reverse scan at `readers` and the test starts demanding the app push variables it has no
+  business owning.
+
+**4 — bump the count.** `the_settings_variable_list_carries_the_whole_palette` asserts
+`theme.css_vars().len() + 2`; it becomes `+ 3`, and its message grows a name. That assertion
+is deliberately annoying: it is the thing that makes you come back and read this list.
+
+Run it: **1, 2 and 4 fail to compile** (no `page_margins` field), **3 fails on the assert**
+once the field exists. Then write the implementation.
+
+### Minimal implementation (sketch)
+
+**`src/web/settings.rs`** — the same shape as `line_height`, hundredths again:
+
+```rust
+pub(crate) const PAGE_MARGINS_MIN: u16 = 50;
+pub(crate) const PAGE_MARGINS_MAX: u16 = 200;
+pub(crate) const PAGE_MARGINS_STEP: u16 = 25;
+```
+
+a `page_margins: u16` field defaulting to `100`, a `wider`/`narrower` pair matching
+`looser`/`tighter`, one more `vars.push` in `css_vars`, and a formatter that is
+`line_height_css` with a different field behind it.
+
+**`src/web/assets/reading-system.css`** — the base gutter is a reading-system default, so it
+belongs in the RS layer beside `--RS__maxMediaWidth`:
+
+```css
+:root {
+  --RS__maxMediaWidth: 100%;
+  --RS__pageGutter: 24px;
+}
+```
+
+**`src/web/assets/pagination.css`** — the body rule stops carrying numbers:
+
+```css
+:root {
+  --ook-page: 0;
+  --ook-column: calc(100vw - 2 * var(--RS__pageGutter) * var(--USER__pageMargins, 1));
+}
+body {
+  padding: var(--RS__pageGutter) calc((100vw - var(--ook-column)) / 2) !important;
+  column-width: var(--ook-column) !important;
+  column-gap: calc(100vw - var(--ook-column)) !important;
+}
+```
+
+(the other declarations in that rule are unchanged)
+
+**`src/ui/settings.rs`** — a `PageMarginsControl` alongside the other two, added to the
+popover's column.
+
+### Why it works
+
+- **The invariant is now a consequence, not a coincidence.** `column-gap` is *defined* as the
+  leftover and `padding` as half of it, so `column + gap` reduces to `100vw` for any margin
+  the control can produce. There is no value of `--USER__pageMargins` that can put the
+  transform and `pageOf` out of agreement, because neither of them is mentioned in the change.
+
+- **`var(--USER__pageMargins, 1)` is a fuse, not a default.** A `var()` naming an undefined
+  custom property makes the whole declaration *invalid at computed-value time* — not ignored,
+  which would leave the previous cascade winner, but reset to the property's initial value.
+  For `column-width` that is `auto` and for `padding` it is `0`: pagination collapses into one
+  tall scrolling column. The real default lives in `Settings::default()`, and the layer is
+  always injected, so the fallback should never fire — which is exactly why it is worth
+  writing, since the failure it guards is total and silent.
+
+- **The gutter is `--RS__*` and the factor is `--USER__*`, and that split is the point.** The
+  reading system says how wide a comfortable margin is *once*; the reader says how much of one
+  they want. Multiplying them means the setting is device-independent — the same "1.5" is 36px
+  everywhere — and it keeps a single place to change if the base ever becomes responsive.
+
+- **Vertical padding stays fixed at the gutter.** `--USER__pageMargins` is about line length,
+  which is a horizontal quantity; Readium scopes it the same way. Scaling the vertical margin
+  too would work and would re-anchor fine, but it changes the column *height* and therefore
+  how many lines fit a page, which is a different setting wearing this one's name.
+
+- **`Math.round` in `pageOf` absorbs the padding, and there is a limit to that.** `offsetLeft`
+  for content in column *n* is roughly `padding-left + n·100vw`, so the ratio is
+  `n + padding/innerWidth` and rounding recovers `n` only while that fraction stays under a
+  half. At the `200` ceiling on a 375px phone the padding is 48px — about 13%, comfortably
+  clear. It is the reason the ceiling is a small number rather than "as wide as you like."
+
+### Scope note
+
+- **Line length is 5f, not this step.** Once `--ook-column` exists, capping the measure is one
+  `min()` inside its definition and everything downstream follows — which is precisely why it
+  deserves its own sitting rather than being free-ridden here: its real content is the *unit*
+  (`ch` couples it to `--USER__fontSize`; `rem` does not) and what happens on a wide desktop
+  window, where a bare margin factor leaves an unreadably long line. Splitting the pair pushes
+  font-family to **5g**.
+- **A third `{}.{:02}` formatter.** `line_height_css` and `page_margins_css` will differ in one
+  field name. Same call as 5d made about the two controls: leave it, and let **Step 6** see
+  three concrete cases before it writes the shared helper.
+- **No new JavaScript, and that is a claim to check rather than assume.** 5d made the same
+  claim about 5c's handler and it held; verify it again under `dx serve` before believing it.
+- **`dx serve` is the real gate here.** The tests can prove the numbers derive from one
+  variable; they cannot prove the page still lands where it should. Walk it: change the margin
+  mid-chapter and confirm the words hold, `N` updates, then page forward ten or twenty pages
+  and confirm the text is still framed rather than creeping off the edge — the drift bug this
+  step is designed around only becomes visible some distance in.
+
+---
+
+## Step 6 — persist the settings (sketched)
+
+Every step since 4 has ended by writing down the same deferral — "the reader opens on the
+default every time" (Step 4 scope note), "5a is where that will eventually hook in" (5a), "a
+relaunch is back to 100% and Day" (5b), "settings still live in a `use_signal` in `main.rs`"
+(the interlude). This is the step that closes it, and it is deliberately **after 5g**: the
+settings set stops growing at 5g, so persistence is written once against a finished struct
+instead of being extended by every sitting in between.
+
+### The crux: persist the *choice*, not the CSS
+
+`Settings` already knows how to turn itself into a name/value list — `css_vars()` — and it is
+tempting to store that, since it is already a list of strings. It is the wrong thing to store.
+`("--USER__fontSize", "125%")` is the *rendered* form; the state is `font_size: 125`. Storing
+the rendering means parsing `"125%"` and `"1.40"` back into `u16`s on every launch, and it
+welds the on-disk format to a CSS convention that Step 7 might want to change. Persist the
+struct's fields; let `css_vars()` stay a pure function of them.
+
+The second decision is the **table shape**, and it is the one worth thinking about before
+typing:
+
+- **A one-row typed table** — `theme TEXT, font_size INTEGER, line_height INTEGER, …`,
+  `CHECK (id = 1)` so there can only ever be one row. Matches how `positions` stores a
+  `Locator`: typed columns, one `query_row`, one struct out. Every future setting is an
+  `ALTER TABLE ADD COLUMN`.
+- **A key/value table** — `key TEXT PRIMARY KEY, value TEXT`. No migration ever, but every
+  value is a string that has to be parsed and defaulted individually, and a field you forget
+  to write is silently missing rather than a compile error.
+
+Recommendation: **the typed one-row table**, because the settings set is finished by the time
+this step runs and because it is the shape the repo already reads fluently. The migration cost
+that key/value buys off is a cost this phase no longer has.
+
+### The thing that will actually bite: load order
+
+`App` today builds the settings signal *before* the library:
+
+```rust
+let settings = use_signal(Settings::default);          // main.rs:40
+let library = use_hook(|| Rc::new(Library::open_default()));  // main.rs:41
+```
+
+Persistence inverts that — the stored settings are an input to the signal's initial value, so
+the library has to open first. And the save side is a `use_effect` that reads `settings()`;
+its **first run happens at mount**, writing back the row it was just loaded from. Harmless,
+but know it is happening rather than discover it in the SQLite file.
+
+### Runnable check (`cargo test`, sketch)
+
+The one test that carries this step is a **round-trip on a settings value where every field
+differs from the default** — in `library.rs`'s `mod test`, beside
+`position_round_trips_and_latest_save_wins`:
+
+```rust
+let saved = Settings {
+    theme: Theme::Night,
+    font_size: 125,
+    line_height: 170,
+    // …every other field, each different from Settings::default()
+};
+library.save_settings(&saved).expect("save");
+assert_eq!(library.settings().expect("read"), Some(saved));
+```
+
+Why "every field differs" is the whole design of the test: a field dropped from the `INSERT`
+comes back as its default, and if the test value *is* the default the assertion still passes.
+This is the same class of tripwire as
+`the_pushed_vars_and_the_injected_layer_name_the_same_variables` — the compiler cannot see
+across the SQL string, so a test has to.
+
+Two more to expect: an empty table reads as `None` (a first launch, and the reason the load is
+`unwrap_or_default()` rather than an `expect`), and a stored theme slug that no longer names a
+variant falls back to `Theme::default()` instead of failing the whole read — `from_slug`
+already does exactly that, which is the second job it has been waiting for since Step 4 took
+the theme out of the URL.
+
+**`dx serve`:** change all the settings, quit, relaunch — the reader comes back as you left
+it, and the *first paint* is already correct rather than flickering through the default,
+because the settings are read before the first render rather than in an effect after it.
+
+### Scope note
+
+- **Settings are global, not per-book.** `positions` is keyed by `book_id` because a position
+  is about one book; a font size is about your eyes. One row, no foreign key.
+- **No debounce.** One `UPDATE` of one row per click on a local SQLite file. Revisit only if a
+  future control is a drag-slider rather than a stepper.
+- **The stale-handler note from 5a is not this step's problem** and should not be fixed here.
+
+---
+
+## Step 7 — review & refactor (sketched)
+
+The repo's phase-ending step (commit `b09d6c9`): fold duplication in the serve/inject path,
+confirm the cascade order, re-read against ADR-0003. By then `Settings` will have six fields
+and the `user_layer` string will be a `format!` with six holes — that is the shape to look
+hardest at, along with the three near-identical `{}.{:02}` formatters 5e left standing on
+purpose and the two chrome nits the popover interlude recorded (the forty-pixel circle
+declared twice, and the gear icon's raw `"view-box"` attribute).
 </content>
