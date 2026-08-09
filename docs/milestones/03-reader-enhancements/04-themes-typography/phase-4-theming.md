@@ -102,12 +102,22 @@ implementation → why. Smallest-first:
       `--RS__pageGutter` says how wide a comfortable margin is, `--USER__pageMargins` is the
       bare factor the reader scales it by. No new JS — 5c's handler re-anchored it, for the
       third time. Committed in `18b42c2`, **75 tests green**.
-- [ ] **Step 5f — `--USER__maxLineLength`.** Caps the measure with a `min()` inside
-      `--ook-column`. Split out of 5e: its real content is the unit (`ch` couples it to
-      `--USER__fontSize`, `rem` does not) and the wide-desktop case a bare margin factor
-      cannot fix.
+- [x] **Step 5f — `--USER__maxLineLength`.** Caps the measure with a `min()` inside
+      `--ook-column` — one line, because 5e made padding and gap the leftover, so a smaller
+      column widens both and still advances `100vw`. Answers the wide-desktop case a bare
+      margin factor cannot: `--USER__pageMargins` scales a fixed 24px gutter, so it cannot
+      reach a 1300px column. ~~its real content is the unit (`ch` couples it to
+      `--USER__fontSize`, `rem` does not)~~ — **that premise was wrong.** `rem` *is* the root
+      font-size, which is exactly what `--USER__fontSize` sets, so both units track it. `ch`
+      wins for a different reason: it is the width of a `0` in the element's font, so it also
+      tracks the font *family* 5g is about to make settable, holding the measure constant in
+      characters under both settings. Committed in `fb7304f`, **78 tests green**.
 - [ ] **Step 5g — `--USER__fontFamily` from a curated list.** Respect embedded fonts and
-      author `!important`, the way Readium gates its aggressive overrides.
+      author `!important`, the way Readium gates its aggressive overrides. **Carries 5f's
+      loose end:** `ch` resolves against "the element's font", and `--ook-column` is declared
+      on `:root` but read by `column-width` on `body`. Today both carry the same font so 5f
+      cannot tell the difference; a font-family that lands on `body` alone is what makes it
+      observable. Check it on screen here.
 - [ ] **Step 6 — Persist the settings.** The deferral every step since 4 has been logging: a
       `settings` table beside `positions`, read *before* the signal is created so the first
       paint is already right, written on every change. Stores the struct's fields, not

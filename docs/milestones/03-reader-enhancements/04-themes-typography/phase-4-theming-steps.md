@@ -2332,6 +2332,236 @@ popover's column.
 
 ---
 
+## Step 5f — `--USER__maxLineLength`
+
+> **Status:** done — committed in `fb7304f` (**78 tests green**, 75 → 78 as predicted;
+> clippy clean). Suggested 2026-08-09 after `18b42c2`, and landed exactly as sketched — the
+> first step of this phase where the plan and the build agreed on every point.
+>
+> **The prediction that mattered held.**
+> `the_page_geometry_derives_from_one_column_width` stayed green **without being touched**.
+> Capping changed what `--ook-column` holds, not how many rules derive from it, and that it
+> needed no edit is the cheapest available proof that 5e's design absorbed this step.
+>
+> **The unit correction was the step's real content**, and it was found by checking the
+> plan's premise against MDN rather than building on it. `rem` *is* the root font-size —
+> exactly what `--USER__fontSize` sets — so the plan's stated reason for preferring `ch` did
+> not survive contact. `ch` still wins, on the font-*family* argument the plan never made.
+>
+> **The `dx serve` walk was the gate and passed by hand**, wide window included: the text
+> stopped growing and centred, twenty pages forward held their advance with the gap larger
+> than it has ever been, a narrow window was unchanged, and a font-size change kept the
+> characters per line rather than the physical width. 5c's handler re-anchored it with no new
+> JavaScript, for the fourth time — verified rather than assumed, as 5d and 5e both insisted.
+>
+> **Implementation written by Claude at the user's request**, as with 5e, so the usual
+> learner-writes-the-code split does not apply. Three of the four tests were watched failing
+> on real assertions before the implementation existed (`the_measure_caps_the_column_alone`,
+> `the_measure_reaches_the_layer_in_characters`, and the `+ 3` → `+ 4` tripwire firing on
+> schedule for the third time); `the_measure_steps_and_clamps` went green on its first run,
+> so its assertion was confirmed live by inverting the expected value and watching it fail.
+
+5e made the page geometry derive from one number. This step puts a **ceiling** on that number,
+and the whole implementation is one `min()` in one place. The interesting content is not the
+change — it is the **unit**, and a claim in the plan that turns out to be wrong.
+
+### The crux: a margin factor cannot fix a wide window
+
+`--USER__pageMargins` scales a *fixed* 24px gutter. On a 1400px-wide window at the `200`
+ceiling the column is still `1400 - 96 = 1304px` — about 160 characters at a normal size,
+roughly twice a readable measure. The margin control cannot reach it, because it was never
+about the measure: it multiplies a constant, and the constant is small.
+
+So the cap has to be an **absolute** quantity, not a proportion of the viewport. That is a
+different kind of setting from every one before it, and it is why 5e's note said this deserved
+its own sitting rather than a free ride.
+
+### The second crux: the plan's premise about the unit is wrong
+
+The phase doc has said since 5e that the content of this step is the unit, because "`ch`
+couples it to `--USER__fontSize`, `rem` does not." Checked against MDN, **that is not true**,
+and the real distinction is more interesting.
+
+- **`rem` is the root element's font-size.** `--USER__fontSize` is applied as
+  `html { font-size: var(--USER__fontSize) !important; }` — that *is* the root's font-size, so
+  `rem` tracks it exactly. Set 125% and `1rem` goes from 16px to 20px.
+- **`ch` is the width of the `0` glyph in *the element's font*** — a *local* font-relative
+  length, in the same family as `em` and `ex`, not a root-relative one like `rem`.
+
+So both units scale with font size, and the plan's stated reason for preferring `ch`
+evaporates. `ch` is still the right choice, for a reason the plan did not name: it is
+sensitive to the **font family**, and `rem` is blind to it. A condensed face fits more
+characters into the same width; `66ch` narrows to match, `41rem` does not. `ch` holds the
+measure constant in *characters* — which is the thing a measure is actually specified in —
+across both settings that can change it, and the second of those settings is **5g**.
+
+There is a loose end here, and it should be named rather than assumed. `ch` resolves against
+"the element's font," and `--ook-column` is *declared* on `:root` but *read* by
+`column-width` on `body`. Which element's font a `ch` inside a custom property resolves
+against is exactly the sort of thing to confirm on screen rather than reason about — and it
+does not become observable until `body` and `html` have *different* fonts, which is 5g's
+doing, not this step's. Both elements carry the same font today, so 5f cannot tell the
+difference. **Recorded as 5g's problem**, with a note there to re-check it.
+
+### Runnable check (`cargo test`)
+
+Three new tests and one tripwire bump: **75 → 78**.
+
+**1 — the measure reaches the layer in characters.** In `src/web/settings.rs`'s `mod test`:
+
+```rust
+#[test]
+fn the_measure_reaches_the_layer_in_characters() {
+    let settings = Settings {
+        max_line_length: 66,
+        ..Settings::default()
+    };
+
+    assert!(settings
+        .css_vars()
+        .contains(&("--USER__maxLineLength", "66ch".to_string())));
+    assert!(
+        settings.vars().contains("--USER__maxLineLength: 66ch;"),
+        "the chosen measure never reached the :root block",
+    );
+
+    // The unit is the whole decision. `px` would pin the measure to a physical
+    // width, so raising the font size would cut the characters per line. `rem`
+    // tracks the root font-size — so it survives a size change — but it is blind
+    // to the font *family*, which 5g is about to make user-settable. `ch` is the
+    // width of a `0` in the font actually in use, so it is the only one of the
+    // three that keeps the measure constant in characters under both settings.
+    let (_, value) = settings
+        .css_vars()
+        .into_iter()
+        .find(|(name, _)| *name == "--USER__maxLineLength")
+        .expect("the measure is pushed");
+
+    assert!(value.ends_with("ch"), "the measure is in {value}, not characters");
+}
+```
+
+**2 — the cap enters through the column and nowhere else.** In `src/web/assets.rs`, next to
+`the_page_geometry_derives_from_one_column_width`. This is the test that carries the step:
+
+```rust
+#[test]
+fn the_measure_caps_the_column_alone() {
+    let column = INJECTED_ASSETS
+        .split_once("--ook-column:")
+        .and_then(|(_, rest)| rest.split_once(';'))
+        .map(|(value, _)| value)
+        .expect("pagination.css declares the derived column");
+
+    assert!(
+        column.contains("min("),
+        "the measure has to cap the column, and a cap is a min()",
+    );
+    assert!(
+        column.contains("var(--USER__maxLineLength"),
+        "the column ignores the measure entirely",
+    );
+
+    // One reference, in the column's own definition. Cap the padding or the gap
+    // separately and they stop being "the leftover" — the advance stops being
+    // 100vw and the transform drifts from `pageOf` again, which is the exact bug
+    // 5e was built to make unreachable.
+    assert_eq!(
+        INJECTED_ASSETS.matches("var(--USER__maxLineLength").count(),
+        1,
+        "the cap belongs in one place — every other number derives from it",
+    );
+}
+```
+
+**3 — the measure steps and clamps**, the same shape as `the_page_margins_step_and_clamp`.
+
+**4 — the tripwire.** `the_settings_variable_list_carries_the_whole_palette` goes from
+`theme.css_vars().len() + 3` to `+ 4`, and its message grows a name. Third time it has fired
+on schedule.
+
+**And one prediction worth checking:** `the_page_geometry_derives_from_one_column_width` must
+stay green **without being touched**. It counts three `var(--ook-column)` references, and
+capping the column changes what that variable *holds*, not how many rules derive from it. If
+that test needs editing, the cap went somewhere it should not have. That it survives is the
+payoff of 5e's design, and it is the cheapest possible proof of it.
+
+### Minimal implementation (sketch)
+
+**`src/web/settings.rs`** — the same shape as the last three settings, but the field is a
+plain character count, so there is no `{}.{:02}` formatter this time:
+
+```rust
+pub(crate) const MAX_LINE_LENGTH_MIN: u16 = 45;
+pub(crate) const MAX_LINE_LENGTH_MAX: u16 = 100;
+pub(crate) const MAX_LINE_LENGTH_STEP: u16 = 5;
+```
+
+a `max_line_length: u16` field defaulting to **70**, a `longer`/`shorter` pair, and one more
+`vars.push` with `format!("{}ch", self.max_line_length)`.
+
+**`src/web/assets/pagination.css`** — the only change, and it is one line:
+
+```css
+:root {
+  --ook-page: 0;
+  --ook-column: min(
+    100vw - 2 * var(--RS__pageGutter) * var(--USER__pageMargins, 1),
+    var(--USER__maxLineLength, 100ch)
+  );
+}
+```
+
+`min()` is itself a math function, so its arguments are calc-expressions already — the inner
+`calc()` wrapper is optional and dropping it reads better. **Nothing else in the file
+changes**, which is the point.
+
+**`src/ui/settings.rs`** — a `MaxLineLengthControl` beside the other three.
+
+### Why it works
+
+- **`min()` is the cap, and the leftover machinery does the rest.** `padding` is defined as
+  half of `100vw - column` and `column-gap` as all of it, so shrinking the column *widens both
+  automatically* and `column + gap` is still exactly `100vw`. On a wide window the extra space
+  becomes symmetric margin and the text sits centred — with no rule anywhere mentioning
+  centring. This is what "derive everything from one number" bought, and 5f is where it gets
+  collected.
+- **A cap, not a width.** `min()` means the setting only ever *binds* — on a phone the
+  viewport branch is smaller and wins, so narrow screens are untouched and a default of `70`
+  changes nothing there. A setting that can only remove space is much harder to misuse than
+  one that sets it outright.
+- **`var(--USER__maxLineLength, 100ch)` is a fuse, same as 5e's.** An undefined custom
+  property invalidates the whole declaration at computed-value time, which would reset
+  `column-width` to `auto` and collapse pagination into one tall scroll. The fallback is
+  deliberately *generous* rather than sensible: it should never fire, and if it does, a wide
+  column is a far better failure than a broken pager.
+- **Characters are the unit a measure is specified in.** Typographic advice — 45–75
+  characters — is in characters, so a control in characters is a control in the same units
+  as the recommendation, and the numbers on screen mean something. The `u16` is the count;
+  the `ch` is only how CSS is told about it.
+- **Why 70 by default.** Inside the classic 45–75 band, and wide enough that a laptop window
+  is capped noticeably while a tablet in portrait mostly is not — so the setting announces
+  itself on the device where the problem is real.
+- **Nothing new in the transport, for the fourth time.** `theme-listener.js` writes every
+  pushed pair onto `documentElement`, re-reports the count and re-anchors. A cap re-columns
+  the document exactly like a margin change, so 5c carries this too — a claim to *verify*
+  under `dx serve`, not assume, which is what 5d and 5e both said and both were right about.
+
+### Scope note
+
+- **No "off" switch.** The ceiling can be raised to 100 characters, which on any real window
+  is not binding; a tri-state control (on / off / value) is a UI question, not a cascade one.
+- **Horizontal only**, like 5e. Nothing here touches how many lines fit a page.
+- **The `ch`-resolution question is 5g's**, as above — flagged there, not answered here.
+- **`dx serve` is the gate, and this one needs a wide window.** Widen the window past roughly
+  a laptop's width: the text should stop growing and centre instead. Then page forward twenty
+  pages *in that wide window* — with the cap binding, the gap is much larger than it has ever
+  been, so if the advance invariant were going to break, this is the configuration that would
+  show it. Then check a narrow window is unchanged, and that a font-size change keeps roughly
+  the same number of characters per line rather than the same physical width.
+
+---
+
 ## Step 6 — persist the settings (sketched)
 
 Every step since 4 has ended by writing down the same deferral — "the reader opens on the
@@ -2343,8 +2573,8 @@ instead of being extended by every sitting in between.
 
 ### The crux: persist the *choice*, not the CSS
 
-`Settings` already knows how to turn itself into a name/value list — `css_vars()` — and it is
-tempting to store that, since it is already a list of strings. It is the wrong thing to store.
+`Settings` already knows how to turn itself into a name/value list — `css_vars()` — and it
+is tempting to store that, since it is already a list of strings. It is the wrong thing to store.
 `("--USER__fontSize", "125%")` is the *rendered* form; the state is `font_size: 125`. Storing
 the rendering means parsing `"125%"` and `"1.40"` back into `u16`s on every launch, and it
 welds the on-disk format to a CSS convention that Step 7 might want to change. Persist the
