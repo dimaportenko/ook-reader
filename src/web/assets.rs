@@ -35,6 +35,10 @@ pub(crate) fn wrap_css_str(css: &str) -> String {
     format!("<style type=\"text/css\">\n/*<![CDATA[*/\n{css}\n/*]]>*/\n</style>\n")
 }
 
+pub(crate) fn wrap_js_str(js: &str) -> String {
+    format!("<script type=\"text/javascript\">\n//<![CDATA[\n{js}\n//]]>\n</script>\n")
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

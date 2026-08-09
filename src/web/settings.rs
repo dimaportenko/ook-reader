@@ -1,4 +1,4 @@
-use crate::web::theme::Theme;
+use crate::web::{font::FontFamily, theme::Theme};
 
 #[cfg(test)]
 use crate::web::assets::INJECTED_ASSETS;
@@ -22,6 +22,7 @@ pub(crate) const MAX_LINE_LENGTH_STEP: u16 = 5;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Settings {
     pub(crate) theme: Theme,
+    pub(crate) font_family: FontFamily,
     pub(crate) font_size: u16,
     pub(crate) line_height: u16,
     pub(crate) page_margins: u16,
@@ -32,6 +33,7 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             theme: Theme::default(),
+            font_family: FontFamily::default(),
             font_size: 100,
             line_height: 140,
             page_margins: 100,
@@ -112,6 +114,7 @@ impl Settings {
             "--USER__maxLineLength",
             format!("{}ch", self.max_line_length),
         ));
+        vars.push(("--USER__fontFamily", self.font_family.stack().to_string()));
         vars
     }
 
@@ -126,9 +129,19 @@ impl Settings {
     fn declarations(self) -> String {
         self.css_vars()
             .iter()
+            .filter(|(_, value)| !value.is_empty())
             .map(|(name, value)| format!("{name}: {value};"))
             .collect::<Vec<_>>()
             .join(" ")
+    }
+
+    pub(crate) fn bootstrap_js(self) -> String {
+        let stack = self.font_family.stack();
+        if stack.is_empty() {
+            return String::new();
+        }
+
+        format!("document.documentElement.style.setProperty(\"--USER__fontFamily\", \"{stack}\");")
     }
 
     pub(crate) fn vars(self) -> String {
@@ -140,7 +153,11 @@ impl Settings {
             "{}\nhtml {{ font-size: var(--USER__fontSize) !important; }} \
                 \nbody {{ background: var(--USER__backgroundColor) !important; \
                 color: var(--USER__textColor) !important; }} \
-                \nbody, body * {{ line-height: var(--USER__lineHeight) !important; }}",
+                \nbody, body * {{ line-height: var(--USER__lineHeight) !important; }} \
+                \n:root[style*='--USER__fontFamily'] body, \
+                :root[style*='--USER__fontFamily'] \
+                body *:not(code):not(kbd):not(samp):not(pre):not(var) \
+                {{ font-family: var(--USER__fontFamily) !important; }}",
             self.vars()
         )
     }
@@ -175,10 +192,10 @@ mod test {
 
             assert_eq!(
                 vars.len(),
-                theme.css_vars().len() + 4,
+                theme.css_vars().len() + 5,
                 "the palette plus --USER__fontSize, --USER__lineHeight, \
-                 --USER__pageMargins and --USER__maxLineLength — bump this when \
-                 a setting is added",
+                 --USER__pageMargins, --USER__maxLineLength and --USER__fontFamily — \
+                 bump this when a setting is added",
             );
         }
     }
@@ -249,6 +266,17 @@ mod test {
 
             // Nothing pushed that the served layer never declares …
             for (name, value) in settings.css_vars() {
+                // … except an *empty* value, whose whole meaning is "no declaration".
+                // `--USER__fontFamily: ;` is not a declaration; the parser drops it and
+                // the served CSS would carry a statement that is not true.
+                if value.is_empty() {
+                    assert!(
+                        !layer.contains(&format!("{name}:")),
+                        "{theme:?} pushes {name} unset and the layer declares it anyway",
+                    );
+                    continue;
+                }
+
                 assert!(
                     layer.contains(&format!("{name}: {value};")),
                     "{theme:?} pushes {name}, which the injected layer never declares",
@@ -497,6 +525,176 @@ mod test {
             value.ends_with("ch"),
             "the measure is in {value}, not characters",
         );
+    }
+
+    #[test]
+    fn the_font_family_reaches_the_layer_as_a_stack() {
+        let settings = Settings {
+            font_family: FontFamily::Sans,
+            ..Settings::default()
+        };
+
+        let stack = FontFamily::Sans.stack();
+
+        assert!(settings
+            .css_vars()
+            .contains(&("--USER__fontFamily", stack.to_string())));
+
+        let layer = settings.user_layer();
+
+        assert!(
+            layer.contains(&format!("--USER__fontFamily: {stack};")),
+            "the chosen face never reached the :root block",
+        );
+        assert!(
+            layer.contains("font-family: var(--USER__fontFamily)"),
+            "the layer declares a family it never applies — the picker would move \
+             and the text would not",
+        );
+    }
+
+    #[test]
+    fn every_stack_ends_in_a_generic_family() {
+        // The only link in the chain that cannot miss. Without it, a machine with none
+        // of the named faces installed falls back to the UA default — which is the font
+        // the book was already showing, so the setting silently does nothing there.
+        for family in FontFamily::ALL
+            .into_iter()
+            .filter(|f| !f.stack().is_empty())
+        {
+            let stack = family.stack();
+            let last = stack
+                .rsplit(',')
+                .next()
+                .expect("a stack is non-empty")
+                .trim();
+
+            assert!(
+                matches!(last, "serif" | "sans-serif" | "monospace"),
+                "{family:?} ends in `{last}`, which is a face and might not exist",
+            );
+        }
+    }
+
+    #[test]
+    fn no_stack_quotes_a_family_with_double_quotes() {
+        // The stack does not only travel as CSS. `inline_styles()` puts it in a `style="…"`
+        // attribute on the reader's own chrome, where a `"` closes the attribute early and
+        // takes the rest of the declarations with it. Single quotes are legal CSS and have
+        // no such second job.
+        for family in FontFamily::ALL {
+            assert!(
+                !family.stack().contains('"'),
+                "{family:?} quotes with `\"`, which cannot survive an HTML attribute",
+            );
+        }
+    }
+
+    #[test]
+    fn the_monospace_elements_keep_their_own_font() {
+        // `code`, `kbd`, `samp` and `pre` are monospace because the *content* is
+        // column-aligned, not because the author had a taste in fonts. Overriding them
+        // with a proportional face is how a code sample or an ASCII table stops being
+        // readable — a change nobody asked for and nobody can undo.
+        let layer = Settings::default().user_layer();
+        let rule = layer
+            .split('\n')
+            .find(|rule| rule.contains("font-family:"))
+            .expect("the layer applies the family");
+
+        for tag in ["code", "kbd", "samp", "pre", "var"] {
+            assert!(
+                rule.contains(&format!(":not({tag})")),
+                "the family lands on <{tag}>, whose font is structural",
+            );
+        }
+    }
+
+    #[test]
+    fn the_publisher_is_the_default_font() {
+        // The whole point of the gate. An override that is on by default is not a gate,
+        // it is 5g — and 5g clobbers embedded fonts, which is the regression this closes.
+        assert_eq!(Settings::default().font_family, FontFamily::Publisher);
+    }
+
+    #[test]
+    fn the_publisher_pushes_an_empty_value_and_declares_nothing() {
+        let settings = Settings {
+            font_family: FontFamily::Publisher,
+            ..Settings::default()
+        };
+
+        // Pushed, so a *live* switch back to the book's own face reaches the frame …
+        assert!(settings
+            .css_vars()
+            .contains(&("--USER__fontFamily", String::new())));
+
+        // … and not declared, because `--USER__fontFamily: ;` is not a declaration.
+        assert!(
+            !settings.vars().contains("--USER__fontFamily"),
+            "the :root block declares a face under Publisher — the gate would open \
+             the moment anything copied that block into an inline style",
+        );
+    }
+
+    #[test]
+    fn every_selector_on_the_font_rule_carries_the_gate() {
+        // A selector *list* is the trap: prefixing the gate onto the first selector and
+        // not the second leaves `body *` matching unconditionally, and the bug shows up
+        // only on the descendants — i.e. on every paragraph, which is all the text there
+        // is. Check each comma-separated selector, not the rule.
+        let layer = Settings::default().user_layer();
+        let rule = layer
+            .split('\n')
+            .find(|rule| rule.contains("font-family:"))
+            .expect("the layer applies the family");
+        let (selectors, _) = rule.split_once('{').expect("a rule has a block");
+
+        for selector in selectors.split(',') {
+            assert!(
+                selector.contains("[style*='--USER__fontFamily']"),
+                "`{}` overrides the font unconditionally",
+                selector.trim(),
+            );
+        }
+    }
+
+    #[test]
+    fn a_chosen_face_reaches_a_chapter_that_has_not_loaded_yet() {
+        // The gate reads the inline style; serve-time injection writes a stylesheet rule.
+        // Without this bootstrap the first paint of every new chapter ignores the setting.
+        let settings = Settings {
+            font_family: FontFamily::Sans,
+            ..Settings::default()
+        };
+        let bootstrap = settings.bootstrap_js();
+
+        assert!(bootstrap.contains("setProperty"));
+        assert!(bootstrap.contains("--USER__fontFamily"));
+        assert!(bootstrap.contains(FontFamily::Sans.stack()));
+
+        // The stack is interpolated into a JavaScript string literal here, which is the
+        // second job of `no_stack_quotes_a_family_with_double_quotes`: a `"` in a stack
+        // would close the literal and turn the document into a syntax error.
+        assert!(!FontFamily::Sans.stack().contains('"'));
+    }
+
+    #[test]
+    fn the_publisher_bootstraps_nothing() {
+        // Not "sets it to empty" — emits no script at all. There is nothing to undo on a
+        // document that was born without the property.
+        assert!(Settings::default().bootstrap_js().is_empty());
+    }
+
+    #[test]
+    fn a_font_family_survives_a_slug_round_trip() {
+        // Step 6 stores the choice as this slug. A variant that does not come back is a
+        // setting that silently resets to the default on the next launch.
+        for family in FontFamily::ALL {
+            assert_eq!(FontFamily::from_slug(family.slug()), family);
+        }
+
+        assert_eq!(FontFamily::from_slug("comic-sans"), FontFamily::default());
     }
 
     #[test]

@@ -6,7 +6,7 @@ use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 use rbook::epub::rewrite::{EpubRewriteOptions, PathRewrite};
 use rbook::Epub;
 
-use crate::web::assets::{wrap_css_str, INJECTED_ASSETS, READING_SYSTEM_DEFAULTS};
+use crate::web::assets::{wrap_css_str, wrap_js_str, INJECTED_ASSETS, READING_SYSTEM_DEFAULTS};
 use crate::web::settings::Settings;
 
 pub(crate) const EPUB_ROUTE: &str = "epub";
@@ -56,10 +56,14 @@ pub(crate) fn serve_epub_resource(epub: &Epub, path: &str, settings: Settings) -
             EpubRewriteOptions::default().rewrite_paths(PathRewrite::prefix(EPUB_URL_PREFIX));
         let xhtml = epub.read_resource_str_with(path, &rewrite).ok()?;
 
-        let inject_css = format!("{INJECTED_ASSETS}{}", wrap_css_str(&settings.user_layer()));
+        let mut inject = format!("{INJECTED_ASSETS}{}", wrap_css_str(&settings.user_layer()));
+        let bootstrap = settings.bootstrap_js();
+        if !bootstrap.is_empty() {
+            inject.push_str(&wrap_js_str(&bootstrap));
+        }
 
         let with_defaults = insert_after_head_open(&xhtml, READING_SYSTEM_DEFAULTS);
-        let with_assets = insert_before_head_close(&with_defaults, &inject_css);
+        let with_assets = insert_before_head_close(&with_defaults, &inject);
         return Some(Served {
             content_type: XHTML_UTF8.to_owned(),
             body: with_assets.into_bytes(),

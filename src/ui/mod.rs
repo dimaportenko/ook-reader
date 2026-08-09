@@ -1,3 +1,4 @@
+pub mod font;
 pub mod library;
 pub mod reader;
 pub mod settings;

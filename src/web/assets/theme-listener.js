@@ -8,7 +8,11 @@ window.addEventListener("message", function (e) {
   const anchor = anchorEl && selectorFor(anchorEl);
 
   for (const [name, value] of e.data.vars) {
-    document.documentElement.style.setProperty(name, value);
+    if (value) {
+      document.documentElement.style.setProperty(name, value);
+    } else {
+      document.documentElement.style.removeProperty(name);
+    }
   }
 
   report();

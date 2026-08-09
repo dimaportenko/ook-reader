@@ -284,6 +284,14 @@ mod test {
     }
 
     #[test]
+    fn an_empty_pushed_value_removes_the_property() {
+        // `setProperty(name, "")` is a no-op, not a removal — the gate would stay open
+        // and Publisher would silently do nothing. Rust decides empty means remove; only
+        // this string in a JS file honours it, and no compiler sees both.
+        assert!(crate::web::assets::INJECTED_ASSETS.contains("removeProperty"));
+    }
+
+    #[test]
     fn bridge_parses_a_position_selector_whole() {
         assert!(BRIDGE_JS.contains("ook-position"));
 
