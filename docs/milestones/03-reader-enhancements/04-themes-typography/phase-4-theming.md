@@ -131,13 +131,40 @@ implementation → why. Smallest-first:
       the phase to need new JavaScript: an empty pushed value now means `removeProperty`,
       because `setProperty(name, "")` is a no-op that would weld the gate open. Committed in
       `cb03a4b`, **89 tests green**.
-- [ ] **Step 6 — Persist the settings.** The deferral every step since 4 has been logging: a
-      `settings` table beside `positions`, read *before* the signal is created so the first
-      paint is already right, written on every change. Stores the struct's fields, not
-      `css_vars()`'s rendered strings — `125` is the state, `"125%"` is the rendering. Placed
-      after 5h on purpose: the settings set stops growing there, so this is written once
-      against a finished struct.
-- [ ] **Step 7 — Review & refactor** (per the repo's phase-ending convention).
+- [ ] **Step 6 — Split the data layer.** Not a theming step, and it goes *before* persistence
+      because of what planning persistence exposed: `Library` owns a SQLite connection **and** a
+      managed-file directory while being named after neither, which is why `list` is five lines
+      and `add_from_path` is seventy. Settings need the first and have nothing to do with the
+      second. Extract `Db` (connection + schema, queries as `impl Db` blocks in child modules so
+      `conn` stays private to `db/`) and `BookFiles` (the directory, copy, cover, unlink), leaving
+      `Library` as the facade whose only remaining logic is the two-resource rollback — and whose
+      public API does not change, so no UI file moves. A pure refactor: the check is that the
+      same **89 tests** pass before and after, with no new ones and no changed count.
+  - [x] **6a** — extract `BookFiles`; touches no SQL, so it separates cleanly and goes first.
+        `write_cover` takes an extension and bytes rather than `epub::CoverImage`, so the file
+        store never imports `crate::epub`. Committed in `75aaf71`, **89 tests green** — the same
+        89, none edited, none added.
+  - [ ] **6b** — introduce `Db`, move `positions` onto it; the small entity proves the layout.
+        Exactly two test edits are expected, both called out in the log.
+  - [ ] **6c** — move `books` onto `Db`; **zero** test edits expected, because the books tests
+        already go through `Library`'s public API. `add_from_path` gets shorter and finally reads
+        as what it is: acquire, acquire, commit, or unwind.
+- [ ] **Step 7 — Persist the settings.** The deferral every step since 4 has been logging, now
+      landing in the module Step 6 built for it.
+  - [ ] **7a** — a `settings` table on `Db`: one typed row (`CHECK (id = 1)`), an upsert and a
+        `query_row`, provable entirely by `cargo test` with nothing wired up. Stores the struct's
+        fields, not `css_vars()`'s rendered strings — `125` is the state, `"125%"` is the
+        rendering — and enum slugs rather than discriminants, so reordering a variant cannot
+        re-map stored values. Its tests need a `Db` and no `Library` at all, which is the
+        extraction paying for itself on first use.
+  - [ ] **7b** — load before the first paint, save on every change. All about order: `library`
+        moves above `settings` in `App` and the signal is *born* holding the stored value, because
+        applying it from an effect afterwards is a visible flash. One `use_effect` reading
+        `settings()` covers all six controls — and writes the row back to itself on mount, which
+        is harmless but worth knowing. `OrLog` widens to `E: Display` here.
+- [ ] **Step 8 — Review & refactor** (per the repo's phase-ending convention). Lighter on module
+      organization than usual, since Step 6 spent it; heavier on the four questions Step 6
+      deliberately deferred.
 
 ## Known constraints (from research)
 

@@ -40,9 +40,21 @@ that kept Phase 3 small.
    `--USER__fontSize` + its control, **5c** re-measure and re-anchor after a reflow, **5d**
    `--USER__lineHeight`, **5e** `--USER__pageMargins`, **5f** `--USER__maxLineLength`,
    **5g** `--USER__fontFamily` from a curated list.
-6. **Persist the settings** — a `settings` table beside `positions`, loaded before the signal
-   exists and written on every change. *(the deferral every step since 4 has been logging)*
-7. **Review & refactor.**
+6. **Split the data layer** — `Library` is two resources wearing one name (a SQLite connection
+   *and* a managed-file store). Extract `BookFiles` and `Db`, leave `Library` as the facade
+   that coordinates them. **6a** `BookFiles`, **6b** `Db` + positions, **6c** books.
+   *(module privacy, `#[from]` at the facade, refactoring under a green suite)*
+7. **Persist the settings** — a `settings` table on `Db`, loaded before the signal exists and
+   written on every change. **7a** the table, **7b** the wiring. *(the deferral every step
+   since 4 has been logging)*
+8. **Review & refactor.**
+
+> **Renumbered after 5h.** Persistence was Step 6 and the data-layer split did not exist; the
+> split was raised while planning persistence and moved *ahead* of it, so settings are born in
+> the right module instead of being written into `library.rs` and moved a step later. Steps 1–5h
+> are unaffected. **Earlier entries in this log that say "Step 6" mean persistence — now Step 7
+> — and the ones that park a cleanup for later mean the review step, now Step 8.** They are left
+> as written; a build log records what was thought at the time.
 
 > **Dependency.** Every step here serves through the Phase 3 Step 8 handler. Steps 2–3 inject
 > into the served document; Step 4 keeps that injection for the *first paint* of a chapter and
@@ -3183,97 +3195,734 @@ appearing in the `<select>` for free is the payoff of the `ALL` constant.
 
 ---
 
-## Step 6 — persist the settings (sketched)
+## Step 6 — split the data layer
+
+This step exists because of a question asked while planning persistence: *why is settings
+storage going into `library.rs` at all?* It should not be, and the reason is visible in the
+struct:
+
+```rust
+pub(crate) struct Library {
+    conn: Connection,
+    books_dir: PathBuf,
+}
+```
+
+**Two resources, one name.** `Library` owns a SQLite connection *and* a managed-file directory,
+and it is named after neither — it is named after one of the entities stored in the first.
+That is why `list` is five lines and `add_from_path` is seventy: the short ones are queries, the
+long ones are *coordinating two resources with rollback* (copy the file, write the cover, insert
+the row; unlink everything already written if any of it fails).
+
+Settings expose the mismatch because they need the connection and have nothing whatever to do
+with the file store. Putting them on `Library` would mean a settings read reaching through a
+type whose other half manages `.epub` copies on disk.
+
+### The crux: a facade over two stores, not one type doing two jobs
+
+The target shape keeps every current call site working:
+
+```
+Db          owns the Connection + the schema; queries live in impl Db blocks per entity
+BookFiles   owns books_dir; copy, cover write, unlink
+Library     owns one of each; the only logic left is the two-resource rollback
+```
+
+Three things make this cheap in Rust, and each is the actual lesson of a sub-step:
+
+- **Privacy is per module *subtree*, not per file.** A child module can read its ancestor's
+  private fields. So `db/positions.rs` can touch `Db`'s private `conn` while nothing outside
+  `db/` can — the connection is encapsulated *by the module*, and the queries still get direct
+  access. A sibling `src/positions.rs` could not, and would force `conn` to `pub(crate)`, which
+  leaks it to the whole crate. This asymmetry is why the layout is `db/` with children rather
+  than flat files.
+- **Multiple inherent `impl` blocks are legal** as long as they are in the same crate. `impl Db`
+  can appear in `db/books.rs`, `db/positions.rs` and later `db/settings.rs` with no trait, no
+  re-export, no indirection.
+- **`#[from]` makes the facade the only place errors widen.** `Db` methods return
+  `rusqlite::Error`; `BookFiles` returns `std::io::Error`; `Library` keeps today's rich `Error`
+  and `?` converts on the way out, because the `#[from]` variants already exist. Each store's
+  signature then tells the truth about what it can fail at — a settings read cannot return
+  `Error::Ebook`, and after this step the type says so.
+
+### Why this lands before persistence, not in the review step
+
+The repo's convention puts reorganization in the phase-ending review step, and the first plan
+for this said so. That reasoning does not survive the resequence:
+
+- The objection was **"a refactor needs the moved code under test, and settings have no tests
+  yet."** Under this order the settings code is not being moved — it is *born* in `db/settings.rs`
+  in Step 7. What Step 6 moves is books, positions and file handling, which have **89 tests**
+  sitting on them, including the file-leak ones. The safety net is already the strongest it will
+  ever be.
+- The other objection was **"you would be designing the seam against code that does not exist."**
+  Also gone: the seam is designed against `library.rs` as it stands today, and Step 7 writes
+  *into* it rather than guessing at it.
+
+What stays true: this is a **refactor**, so the rule that governs it is that behavior does not
+change. Which makes the check unusual —
+
+### Runnable check first — the safety net, not a target
+
+For all three sub-steps the check is the same and it is a *negative* one:
+
+```
+cargo test     # 89 passing, before and after, the same 89 names
+cargo clippy   # clean
+```
+
+**No new tests, no changed assertions, no changed count.** If a test has to be edited to make
+the refactor compile, that edit is the thing to look at hardest — it means something crossed a
+privacy or API boundary the move was supposed to preserve. Two are expected and are called out
+in 6b; anything beyond those two is a signal the move went further than intended.
+
+If a behavior *should* change, it is not part of this step. Split it out.
+
+`dx serve` once at the end of 6c: import a book, open it, turn pages, quit, reopen, land where
+you stopped. Nothing here should touch any of that — which is exactly why it is worth watching.
+
+### The three sub-steps
+
+Smallest-first, and ordered so the easy half proves the pattern before the hard half uses it:
+
+- **6a — extract `BookFiles`.** The file store. Touches no SQL, so it is cleanly separable and
+  it shrinks `library.rs` before the harder half.
+- **6b — introduce `Db`, move `positions` onto it.** Establishes the module shape on the small
+  entity: two methods, two tests, one table.
+- **6c — move `books` onto `Db`.** The same move on the big entity, after which `Library` is a
+  facade whose only remaining code is the rollback.
+
+---
+
+## Step 6a — extract `BookFiles`
+
+> **Status:** done — committed in `75aaf71` (**89 tests green**, unchanged before and after,
+> with no test edited and none added — which for a refactor is the result, not an omission).
+> `cargo clippy` clean. The `dx serve` pass is deliberately deferred to the end of 6c, where it
+> covers the whole of Step 6 at once.
+
+The managed-file store leaves `Library`: `books_dir`, the `.epub` copy, the cover write, and
+`cleanup_managed_file`. `Library` keeps `add_from_path` and `remove` — they stay where they are
+because they are the *coordination*, and they start calling `self.files` instead of doing the
+work inline.
+
+### Runnable check first (`cargo test`)
+
+The 89 existing tests, unchanged. Four of them are the real net here and they already exist:
+
+- `reimport_replaces_the_managed_copy_without_leaking_the_old_file`
+- `reimport_repairs_a_missing_managed_copy`
+- `remove_deletes_the_cover_file_too`
+- `remove_succeeds_when_the_managed_copy_is_already_missing`
+
+Those four pin down the rollback and the not-found tolerance, which are the only parts of this
+move where a slip would be silent. Run them before you start so you have seen them green.
+
+### Minimal implementation
+
+**`src/library/files.rs`** (new; `library.rs` becomes `library/mod.rs`) —
+
+```rust
+pub(crate) struct BookFiles {
+    dir: PathBuf,
+}
+
+impl BookFiles {
+    pub(crate) fn new(dir: PathBuf) -> Self
+    pub(crate) fn dir(&self) -> &Path
+    pub(crate) fn import(&self, source: &Path) -> Result<PathBuf, std::io::Error>
+    pub(crate) fn write_cover(&self, managed: &Path, ext: &str, bytes: &[u8]) -> Option<String>
+    pub(crate) fn remove(&self, path: &Path)
+}
+```
+
+`write_cover` takes an extension and bytes rather than the `epub::CoverImage` it is called with,
+so that `BookFiles` never imports `crate::epub`. `epub::extension_for` — a media-type → extension
+map — is EPUB knowledge and stays at the call site:
+
+```rust
+cover_path = meta.cover.as_ref().and_then(|cover| {
+    let ext = epub::extension_for(&cover.media_type)?;
+    self.files.write_cover(&managed_path, ext, &cover.bytes)
+});
+```
+
+Same short-circuit as today: an unknown media type means no cover, not a failed import. And the
+same boundary rule 6c applies when it refuses to pass `&Epub` into `Db` — a store takes values,
+not domain objects.
+
+`remove` is the current free function `cleanup_managed_file` — including its
+`ErrorKind::NotFound` tolerance and its `eprintln!`. It returns `()` for the same reason it does
+today: cleanup failing must not mask the error being cleaned up after.
+
+**`src/library/mod.rs`** — the struct becomes `{ conn: Connection, files: BookFiles }`,
+`books_dir()` delegates to `self.files.dir()`, and the two long methods call the four helpers
+instead of `fs::copy` / `fs::write` / `cleanup_managed_file`.
+
+### Why it works
+
+- **The file half has no SQL in it, so it moves without touching a query.** That is the whole
+  reason it goes first: a move that cannot possibly affect the database is a move you can verify
+  by test count alone.
+- **`import` returns the path it created rather than storing it.** `BookFiles` stays stateless
+  past its directory — no "current book," no cached path. The caller already needs the path for
+  the `INSERT`, so returning it costs nothing and keeps the store free of lifecycle.
+- **`Result<_, std::io::Error>`, not `library::Error`.** The narrower type is the point of the
+  extraction: `BookFiles` cannot fail to parse an EPUB, and now it cannot *say* it did. `?` in
+  `add_from_path` widens it via the `#[from] std::io::Error` variant that already exists.
+- **`write_cover` keeps returning `Option`, not `Result`.** Today's code does
+  `.ok()?` — a missing cover is not an import failure. Preserving that shape is not laziness; it
+  is the refactor rule. Changing it to `Result` would be a behavior change and belongs in Step 8
+  if anywhere.
+
+### Scope note
+
+- **`Library`'s public API does not change.** `ui/library.rs`, `ui/reader.rs` and `main.rs` are
+  untouched by this step — that is the test that the facade is real.
+- **The `mod test` block stays in `library/mod.rs`** even though some tests are now really about
+  `BookFiles`. Moving tests during a refactor weakens the net; relocating them is Step 8's call.
+- **`now_secs`, `Book`, `Locator`, `Error` all stay put** in this sub-step.
+
+---
+
+## Step 6b — introduce `Db`, move `positions` onto it
+
+The connection and the schema get their own module, and one entity moves with them to prove the
+shape. `positions` is chosen because it is two methods and one table — small enough that if the
+module layout is wrong, you find out cheaply.
+
+### Runnable check first (`cargo test`)
+
+Still 89. **Two edits are expected here and no more:**
+
+1. `position_round_trips_and_latest_save_wins` reaches into `library.conn` directly
+   (`library/mod.rs`, the `updated_at` assertion) to check the injected clock landed. After the
+   move, `conn` is private to `db/`, so that assertion has to live in `db/positions.rs`'s own
+   test module. **Move the assertion, do not delete it** — and do not add a `pub(crate) conn`
+   accessor to keep it where it is, because that would hand the connection back to the whole
+   crate and undo the step.
+2. Whatever the test helper `library_with_source` needs to keep constructing a `Library`.
+
+If you find yourself editing a third test, stop and read why.
+
+### Minimal implementation
+
+**`src/db/mod.rs`** (new) —
+
+```rust
+pub(crate) struct Db {
+    conn: Connection,
+}
+
+impl Db {
+    pub(crate) fn open(path: impl AsRef<Path>) -> Result<Self, rusqlite::Error>
+    fn migrate(&self) -> Result<(), rusqlite::Error>   // the CREATE TABLEs from init
+}
+
+mod books;      // 6c
+mod positions;
+```
+
+**`src/db/positions.rs`** (new) — `Locator`, plus
+
+```rust
+impl Db {
+    pub(crate) fn save_position(&self, book_id: i64, locator: &Locator, now: i64)
+        -> Result<(), rusqlite::Error>
+    pub(crate) fn position(&self, book_id: i64)
+        -> Result<Option<Locator>, rusqlite::Error>
+}
+```
+
+**`src/library/mod.rs`** — `{ db: Db, files: BookFiles }`, and the two position methods become
+one-line delegations that widen the error with `?`. `pub(crate) use crate::db::positions::Locator;`
+keeps `library::Locator` resolving, so `nav.rs:3` and `ui/reader.rs:236` do not change.
+
+### Why it works
+
+- **`conn` stays private and the queries still reach it.** This is the module-privacy point from
+  the crux, now load-bearing: `db/positions.rs` is a descendant of the module that declares
+  `Db`, so `self.conn` is in scope there and nowhere else. The encapsulation boundary is the
+  directory.
+- **`migrate` is one place, called once.** Today `init` creates both tables inline in the
+  constructor; naming it makes "the schema" a thing that exists, which is what Step 7 adds a
+  third `CREATE TABLE` to and what a future real migration would grow into.
+- **The re-export is a facade, not indirection.** `pub(crate) use` makes `library::Locator` and
+  `crate::db::positions::Locator` the same type — no wrapper, no conversion, no cost. It is how
+  you move a type without a crate-wide import churn, and how you keep one module the public face
+  of several.
+- **One-line delegation looks like boilerplate and is buying the error widening.** `Library`'s
+  method returns `library::Error`; `Db`'s returns `rusqlite::Error`; the `?` in the middle is the
+  `#[from]` conversion. If a delegation ever does more than that, it is the signal that the
+  method belonged on `Library` all along.
+
+### Scope note
+
+- **Positions arguably belong with books, not on their own.** They are FK-cascaded to `books` and
+  meaningless without one. They get their own module here because it is the cheapest place to
+  test the layout, not because it is obviously the final home — revisit in Step 8.
+- **`Db::open` takes only the db path.** The `books_dir` argument stays on `Library::open`, which
+  passes it to `BookFiles`. Two resources, two constructors, one facade wiring them together.
+
+---
+
+## Step 6c — move `books` onto `Db`
+
+The same move on the big entity: `Book`, `read_book`, `list`, `touch_opened`, and the two
+`RETURNING` queries buried inside `add_from_path` and `remove`. After this `Library` has no SQL
+and no `fs` in it at all.
+
+### Runnable check first (`cargo test`, then `dx serve`)
+
+89, unchanged, with **no test edits expected at all** this time — the books tests go through
+`Library`'s public API, which is the point. If one needs editing, the facade leaked.
+
+Then the one `dx serve` pass for the whole of Step 6: import a book, open it, page through it,
+quit, reopen, land where you stopped, remove the book. This exercises both resources and their
+rollback, which no unit test does end to end.
+
+### Minimal implementation
+
+**`src/db/books.rs`** (new) — `Book`, `Book::cover_name`, `Db::read_book`, and
+
+```rust
+impl Db {
+    pub(crate) fn list(&self) -> Result<Vec<Book>, rusqlite::Error>
+    pub(crate) fn touch_opened(&self, id: i64, now: i64) -> Result<bool, rusqlite::Error>
+    pub(crate) fn upsert_book(&self, row: NewBook<'_>) -> Result<Book, rusqlite::Error>
+    pub(crate) fn delete_book(&self, id: i64)
+        -> Result<Option<(String, Option<String>)>, rusqlite::Error>
+    pub(crate) fn managed_paths_for_source(&self, source: &str)
+        -> Result<Option<(String, Option<String>)>, rusqlite::Error>
+}
+```
+
+The last three are the queries currently inline in `add_from_path` and `remove`. `delete_book`
+returning the paths it deleted is not a leak of file concerns into `Db` — the row *is* where
+those paths are stored, and `DELETE … RETURNING` is one round trip where a `SELECT`-then-`DELETE`
+would be two and could race.
+
+**`src/library/mod.rs`** — what is left, and it should be short: `open`, `open_default`,
+`books_dir`, thin delegations, and `add_from_path` / `remove` as pure orchestration — call
+`files.import`, call `db.upsert_book`, and on `Err` call `files.remove` for whatever was written.
+
+### Why it works
+
+- **`add_from_path` gets *shorter* and its shape gets legible.** Right now the rollback logic is
+  interleaved with `fs::copy`, cover encoding and a fifteen-line SQL string, so the
+  two-resource transaction it is implementing is invisible. Once both halves are calls, the
+  function reads as: acquire, acquire, commit, or unwind. **This is the payoff of the whole
+  step** — the code did not get smaller overall, it got honest about what it is.
+- **`NewBook<'_>` (or the parameters spelled out) beats passing `&Epub`.** `Db` should not know
+  what an EPUB is; it takes the already-extracted title, author and paths. That is the boundary
+  the `Error` enum has been hinting at — after this, `Error::Ebook` can only originate in
+  `Library`, never in a store.
+- **No test edits is a stronger result than the tests passing.** It means the books API never
+  leaked its storage; everything the UI and the tests touch went through `Library` already. 6b
+  needed two edits because `positions` had a test poking at `conn`; the absence here is a real
+  signal, not luck.
+
+### Scope note
+
+- **`Error` stays in `library/mod.rs`** and keeps all four variants. `Error::Sqlite` and
+  `Error::Io` are now only ever *converted* there rather than raised there, which is the correct
+  end state for a facade error. Splitting it per-store is a Step 8 question and probably a no.
+- **`OrLog` still targets `library::Error`** (`ui/mod.rs:11`). It keeps working because every
+  call site goes through `Library`. Step 7b is the first caller that will not, and it says what
+  to do about it there.
+- **No `Rc<Db>` yet.** `Library` owns its `Db` by value and Step 7 reaches it through a
+  `db()` accessor. If a second component ever needs the connection without `Library`, that is
+  when `Rc<Db>` and a second context earn their keep — not before.
+- **This step ships no user-visible change whatsoever.** That is the definition of done.
+
+---
+
+## Step 7 — persist the settings
 
 Every step since 4 has ended by writing down the same deferral — "the reader opens on the
 default every time" (Step 4 scope note), "5a is where that will eventually hook in" (5a), "a
 relaunch is back to 100% and Day" (5b), "settings still live in a `use_signal` in `main.rs`"
-(the interlude). This is the step that closes it, and it is deliberately **after 5h**: the
-settings set stops growing at 5h, so persistence is written once against a finished struct
-instead of being extended by every sitting in between.
+(the interlude). This is the step that closes it, and its two placements are both deliberate:
+**after 5h**, because the settings set stops growing there so persistence is written once
+against a finished struct; and **after Step 6**, because `db/settings.rs` now exists as an
+obvious home and the alternative was writing it into `library.rs` and moving it a step later.
 
-### The crux: persist the *choice*, not the CSS
+### Split in two
 
-`Settings` already knows how to turn itself into a name/value list — `css_vars()` — and it
-is tempting to store that, since it is already a list of strings. It is the wrong thing to store.
-`("--USER__fontSize", "125%")` is the *rendered* form; the state is `font_size: 125`. Storing
-the rendering means parsing `"125%"` and `"1.40"` back into `u16`s on every launch, and it
-welds the on-disk format to a CSS convention that Step 7 might want to change. Persist the
-struct's fields; let `css_vars()` stay a pure function of them.
-
-The second decision is the **table shape**, and it is the one worth thinking about before
-typing:
-
-- **A one-row typed table** — `theme TEXT, font_size INTEGER, line_height INTEGER, …`,
-  `CHECK (id = 1)` so there can only ever be one row. Matches how `positions` stores a
-  `Locator`: typed columns, one `query_row`, one struct out. Every future setting is an
-  `ALTER TABLE ADD COLUMN`.
-- **A key/value table** — `key TEXT PRIMARY KEY, value TEXT`. No migration ever, but every
-  value is a string that has to be parsed and defaulted individually, and a field you forget
-  to write is silently missing rather than a compile error.
-
-Recommendation: **the typed one-row table**, because the settings set is finished by the time
-this step runs and because it is the shape the repo already reads fluently. The migration cost
-that key/value buys off is a cost this phase no longer has.
-
-### The thing that will actually bite: load order
-
-`App` today builds the settings signal *before* the library:
-
-```rust
-let settings = use_signal(Settings::default);          // main.rs:40
-let library = use_hook(|| Rc::new(Library::open_default()));  // main.rs:41
-```
-
-Persistence inverts that — the stored settings are an input to the signal's initial value, so
-the library has to open first. And the save side is a `use_effect` that reads `settings()`;
-its **first run happens at mount**, writing back the row it was just loaded from. Harmless,
-but know it is happening rather than discover it in the SQLite file.
-
-### Runnable check (`cargo test`, sketch)
-
-The one test that carries this step is a **round-trip on a settings value where every field
-differs from the default** — in `library.rs`'s `mod test`, beside
-`position_round_trips_and_latest_save_wins`:
-
-```rust
-let saved = Settings {
-    theme: Theme::Night,
-    font_size: 125,
-    line_height: 170,
-    // …every other field, each different from Settings::default()
-};
-library.save_settings(&saved).expect("save");
-assert_eq!(library.settings().expect("read"), Some(saved));
-```
-
-Why "every field differs" is the whole design of the test: a field dropped from the `INSERT`
-comes back as its default, and if the test value *is* the default the assertion still passes.
-This is the same class of tripwire as
-`the_pushed_vars_and_the_injected_layer_name_the_same_variables` — the compiler cannot see
-across the SQL string, so a test has to.
-
-Two more to expect: an empty table reads as `None` (a first launch, and the reason the load is
-`unwrap_or_default()` rather than an `expect`), and a stored theme slug that no longer names a
-variant falls back to `Theme::default()` instead of failing the whole read — `from_slug`
-already does exactly that, which is the second job it has been waiting for since Step 4 took
-the theme out of the URL.
-
-**`dx serve`:** change all the settings, quit, relaunch — the reader comes back as you left
-it, and the *first paint* is already correct rather than flickering through the default,
-because the settings are read before the first render rather than in an effect after it.
-
-### Scope note
-
-- **Settings are global, not per-book.** `positions` is keyed by `book_id` because a position
-  is about one book; a font size is about your eyes. One row, no foreign key.
-- **No debounce.** One `UPDATE` of one row per click on a local SQLite file. Revisit only if a
-  future control is a drag-slider rather than a stepper.
-- **The stale-handler note from 5a is not this step's problem** and should not be fixed here.
+It lands as two sub-steps, cut along the seam where the verification changes hands. **7a is
+storage** — a table and two `Db` methods, provable entirely by `cargo test` with no app running.
+**7b is wiring** — six lines in `App` that decide *when* the row is read and written, provable
+only by quitting and relaunching. Two different kinds of mistake, two different checks; the
+split also means the round-trip test is green before any question of hook order is on the table.
 
 ---
 
-## Step 7 — review & refactor (sketched)
+## Step 7a — a `settings` table on `Db`
+
+The storage half: `Settings` goes into SQLite and comes back out unchanged. Nothing in the UI
+moves in this step — `App` still calls `Settings::default`, and the new methods are called only
+by their tests. That is deliberate: the round-trip is the thing that can be silently wrong, so
+it gets proven on its own before anything depends on it.
+
+### Runnable check first (`cargo test`)
+
+Three tests in a `mod test` inside **`src/db/settings.rs`** — the module's own tests, next to
+the code, the way `db/positions.rs` got its `updated_at` assertion in 6b. They need only a `Db`,
+not a `Library`: `Db::open(dir.path().join("test.sqlite3"))`. Not needing the file store to test
+settings is the extraction paying for itself on its first use.
+
+```rust
+#[test]
+fn settings_round_trip_and_the_latest_save_wins() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let db = Db::open(dir.path().join("test.sqlite3")).expect("open");
+
+    assert_eq!(db.settings().expect("empty settings"), None);
+
+    let saved = Settings {
+        theme: Theme::Night,
+        font_family: FontFamily::Humanist,
+        font_size: 125,
+        line_height: 170,
+        page_margins: 150,
+        max_line_length: 55,
+    };
+    db.save_settings(&saved).expect("first save");
+    assert_eq!(db.settings().expect("first read"), Some(saved));
+
+    let latest = Settings {
+        theme: Theme::Sepia,
+        ..saved
+    };
+    db.save_settings(&latest).expect("second save");
+    assert_eq!(db.settings().expect("second read"), Some(latest));
+}
+
+#[test]
+fn every_settings_field_differs_from_the_default_in_the_round_trip() {
+    let default = Settings::default();
+    let saved = Settings {
+        theme: Theme::Night,
+        font_family: FontFamily::Humanist,
+        font_size: 125,
+        line_height: 170,
+        page_margins: 150,
+        max_line_length: 55,
+    };
+
+    assert_ne!(saved.theme, default.theme);
+    assert_ne!(saved.font_family, default.font_family);
+    assert_ne!(saved.font_size, default.font_size);
+    assert_ne!(saved.line_height, default.line_height);
+    assert_ne!(saved.page_margins, default.page_margins);
+    assert_ne!(saved.max_line_length, default.max_line_length);
+}
+
+#[test]
+fn an_unknown_stored_theme_slug_falls_back_to_the_default() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let db = Db::open(dir.path().join("test.sqlite3")).expect("open");
+
+    db.save_settings(&Settings::default()).expect("seed the row");
+    db.conn
+        .execute("UPDATE settings SET theme = 'chartreuse' WHERE id = 1", [])
+        .expect("corrupt the slug");
+
+    let read = db.settings().expect("read").expect("a row exists");
+    assert_eq!(read.theme, Theme::default());
+}
+```
+
+`db.conn` in the third test is reachable **because the test module is inside `db/`** — the same
+module-privacy rule 6b was built on, now letting a test corrupt a row without any accessor being
+added for it. That test would have been impossible to write from `library.rs` without widening
+`conn`'s visibility, which is the concrete version of "settings do not belong on `Library`."
+
+The second test looks like it is testing nothing, and it is the important one. **A field
+dropped from the `INSERT` comes back as its column default, and if the fixture's value for that
+field happens to *be* the struct default, the round-trip assertion still passes.** The
+round-trip test only has teeth if every field differs, and that property is invisible when you
+read the fixture — so it is asserted rather than assumed. Same class of tripwire as
+`the_pushed_vars_and_the_injected_layer_name_the_same_variables`: the compiler cannot see
+across a SQL string, so a test has to stand where the compiler can't.
+
+Watch the first test fail to compile (no `save_settings`), then fail on the empty read, then
+pass. `assert_eq!` on `Option<Settings>` needs `Settings` to be `PartialEq` and `Debug` — it
+already derives both.
+
+### The crux: persist the *choice*, not the CSS
+
+`Settings` already knows how to turn itself into a name/value list — `css_vars()` — and it is
+tempting to store that, since it is already a list of strings. It is the wrong thing to store.
+`("--USER__fontSize", "125%")` is the *rendered* form; the state is `font_size: 125`. Storing
+the rendering means parsing `"125%"` and `"1.40"` back into `u16`s on every launch, and it
+welds the on-disk format to a CSS convention Step 7 might want to change. Persist the struct's
+fields; let `css_vars()` stay a pure function of them.
+
+The second decision is the **table shape**:
+
+- **A one-row typed table** — `theme TEXT, font_size INTEGER, …`, with `CHECK (id = 1)` so
+  there can only ever be one row. Matches how `positions` stores a `Locator`: typed columns,
+  one `query_row`, one struct out. Every future setting is an `ALTER TABLE ADD COLUMN`.
+- **A key/value table** — `key TEXT PRIMARY KEY, value TEXT`. No migration ever, but every
+  value is a string parsed and defaulted individually, and a field you forget to write is
+  silently missing rather than a compile error.
+
+**The typed one-row table**, because the settings set is finished as of 5h and because it is
+the shape the repo already reads fluently. The migration cost that key/value buys off is a cost
+this phase no longer has.
+
+### Minimal implementation
+
+**`src/db/mod.rs`, in `migrate`** — a third `CREATE TABLE IF NOT EXISTS`, after `positions`:
+
+```rust
+conn.execute(
+    "CREATE TABLE IF NOT EXISTS settings (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        theme TEXT NOT NULL,
+        font_family TEXT NOT NULL,
+        font_size INTEGER NOT NULL,
+        line_height INTEGER NOT NULL,
+        page_margins INTEGER NOT NULL,
+        max_line_length INTEGER NOT NULL
+    )",
+    [],
+)?;
+```
+
+**`src/db/settings.rs`** (new) — an `impl Db` block holding the two methods, the same shape as
+`db/positions.rs`, plus `mod settings;` in `db/mod.rs`:
+
+```rust
+pub(crate) fn save_settings(&self, settings: &Settings) -> Result<(), rusqlite::Error> {
+    self.conn.execute(
+        "INSERT INTO settings
+            (id, theme, font_family, font_size, line_height, page_margins, max_line_length)
+        VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)
+        ON CONFLICT(id) DO UPDATE SET
+            theme = excluded.theme,
+            font_family = excluded.font_family,
+            font_size = excluded.font_size,
+            line_height = excluded.line_height,
+            page_margins = excluded.page_margins,
+            max_line_length = excluded.max_line_length",
+        params![
+            settings.theme.slug(),
+            settings.font_family.slug(),
+            settings.font_size,
+            settings.line_height,
+            settings.page_margins,
+            settings.max_line_length,
+        ],
+    )?;
+
+    Ok(())
+}
+
+pub(crate) fn settings(&self) -> Result<Option<Settings>, rusqlite::Error> {
+    Ok(self
+        .conn
+        .query_row(
+            "SELECT theme, font_family, font_size, line_height, page_margins, max_line_length
+            FROM settings WHERE id = 1",
+            [],
+            |row| {
+                Ok(Settings {
+                    theme: Theme::from_slug(&row.get::<_, String>(0)?),
+                    font_family: FontFamily::from_slug(&row.get::<_, String>(1)?),
+                    font_size: row.get(2)?,
+                    line_height: row.get(3)?,
+                    page_margins: row.get(4)?,
+                    max_line_length: row.get(5)?,
+                })
+            },
+        )
+        .optional()?)
+}
+```
+
+`Settings`, `Theme` and `FontFamily` need importing at the top of `db/settings.rs`. Note the
+direction of that dependency: `db` reaches into `web::settings` for the type it stores. If that
+reads backwards to you, it is worth sitting with — the alternative is a `db`-owned row struct
+converted at the boundary, which is more honest layering and more code for one struct. Either is
+defensible at this size; the conversion is a Step 8 question, not a 7a one.
+
+### Why it works
+
+- **`INSERT … ON CONFLICT(id) DO UPDATE` is one statement for both cases.** The row either does
+  not exist yet (first save) or does (every save after), and upsert collapses that into one
+  call with no `SELECT`-then-branch. It is the same idiom `save_position` uses on
+  `ON CONFLICT(book_id)`, which is why this reads as the repo's existing style rather than a new
+  one. `excluded` is SQLite's name for *the row you tried to insert* — so each `SET` says "take
+  the new value".
+- **`CHECK (id = 1)` makes "there is only one row" the database's job, not the code's.** The
+  invariant is enforced at the only place it can't be forgotten; a future `INSERT` with a
+  different id fails loudly instead of quietly creating a second settings row that nothing ever
+  reads.
+- **Slugs, not integers, for the enums.** `theme.slug()` already exists (Step 4 gave it one for
+  the URL) and a text column is readable in a SQLite browser and stable when a variant is added
+  in the middle of the enum. Storing `Theme as i64` would silently re-map every stored value
+  the day someone reorders the variants.
+- **`from_slug` degrading to the default is the point, not a shortcut.** A row written by a
+  future version — or hand-edited — should cost the reader their *theme*, not their whole
+  settings row and every other field in it. `from_slug` has had this fallback since Step 4; this
+  is the second job it has been waiting for.
+- **`.optional()?` turns "no rows" into `Ok(None)`.** `query_row` treats an empty result as
+  `Err(QueryReturnedNoRows)`, which is not an error here — a first launch has no row. The
+  `Option` in the signature is what lets 7b write `unwrap_or_default()` instead of guessing
+  which errors are benign.
+- **`&Settings` by reference, mirroring `save_position(&Locator)`.** `Settings` is `Copy`, so
+  by-value would work and cost nothing — the reference is for consistency with the sibling
+  method, and it keeps the call site's intent ("read this, don't consume it") obvious.
+- **`rusqlite::Error`, not `library::Error` — and there is no `Library` delegation.** Every other
+  store method got a one-line pass-through on the facade in Step 6, because books and positions
+  are things `Library` coordinates. Settings are not: nothing about them involves the file store,
+  so they stay reachable only as `Db` methods and 7b calls them through `library.db()`. If you
+  find yourself adding `Library::settings()`, you have re-created the thing Step 6 removed.
+
+### Scope note
+
+- **Nothing calls these yet outside tests.** Expect `dead_code` warnings until 7b, exactly like
+  Step 1's planned-for warning. If they bother you, do 7a and 7b in one sitting and commit them
+  together — but write and green the tests first regardless.
+- **Settings are global, not per-book.** `positions` is keyed by `book_id` because a position is
+  about one book; a font size is about your eyes. One row, no foreign key, no cascade.
+- **No `updated_at` column.** `positions` has one because "which position is newest" is a real
+  question when a book is open on two devices. A single global row has nothing to compare
+  against, so the column would be write-only noise.
+- **No migration story.** `CREATE TABLE IF NOT EXISTS` handles the upgrade from a database that
+  predates this step (it gets the table, empty, and reads as `None` — a fresh default). A
+  *seventh* setting later is an `ALTER TABLE ADD COLUMN … DEFAULT`, which this shape absorbs
+  fine; that is a bridge for whoever adds it.
+
+---
+
+## Step 7b — load before the first paint, save on every change
+
+The wiring half, and the whole step is about **order**. Six lines in `App`, and each one is in
+a specific place for a reason.
+
+### Runnable check first (`dx serve`)
+
+There is no unit test for hook order — this one is eyeballs.
+
+1. Open a book, change **every** setting (theme, font, size, leading, margins, measure), quit
+   the app.
+2. Relaunch. The library screen and then the book come up **already** in your settings.
+3. **Watch the first frame, not the second.** The failure this check exists to catch is a
+   visible flicker — white-then-night, 100%-then-125% — which means the settings were applied
+   by an effect *after* the first render instead of being read *before* the signal was created.
+   A correct 7b has no flash at all.
+4. Delete the database (`~/Library/Application Support/com.dimaportenko.ook-reader/library.sqlite3`
+   on macOS) and relaunch: the reader comes up on Day / Publisher / 100% and does not crash.
+   That is the `None` branch, which is the first-launch path for every user.
+5. `cargo test` still green, `cargo clippy` clean.
+
+Optionally, confirm the write happened rather than trusting the restore:
+`sqlite3 …/library.sqlite3 'select * from settings'` should show one row matching what you set.
+
+### Minimal implementation
+
+**`src/main.rs`, in `App`** — the library moves above the settings, and the settings signal
+gets a real initial value:
+
+```rust
+let library = use_hook(|| Rc::new(Library::open_default()));
+let settings = use_hook(|| {
+    Signal::new(
+        library
+            .db()
+            .settings()
+            .or_log("read your settings")
+            .flatten()
+            .unwrap_or_default(),
+    )
+});
+```
+
+and, after the other hooks, the save side:
+
+```rust
+use_effect({
+    let library = library.clone();
+    move || {
+        _ = library
+            .db()
+            .save_settings(&settings())
+            .or_log("save your settings");
+    }
+});
+```
+
+**`src/ui/mod.rs`** — one line changes. `OrLog` is implemented only for
+`Result<T, crate::library::Error>` (`ui/mod.rs:11`), and these two calls return
+`rusqlite::Error`. Widen the impl rather than adding a second one:
+
+```rust
+impl<T, E: std::fmt::Display> OrLog<T> for Result<T, E> {
+```
+
+The body is unchanged — it already only does `eprintln!("could not {action}: {error}")`, which
+is all `Display` provides. This is the first place the phase benefits from Step 6's narrower
+error types, and the fix is to stop naming a concrete error at all.
+
+### Why it works
+
+- **`use_hook`, not `use_signal`, for the load.** `use_signal(Settings::default)` takes a
+  *function* and calls it once; here the initial value depends on `library`, which is another
+  hook's value. `use_hook(|| Signal::new(…))` is what `books` and `status` two lines below
+  already do for exactly this reason — it runs its closure on the first render only and hands
+  back the same `Signal` on every render after. The type is identical (`Signal<Settings>`), so
+  the `use_context_provider` line and every consumer are untouched.
+- **Reading before the signal exists is what kills the flash.** The signal's *initial* value is
+  the stored one, so the very first render already produces the right `inline_styles()` and the
+  first served chapter already carries the right `--USER__*` bytes. The alternative — default
+  the signal, then write it from an effect — renders once wrong and once right, and you can see
+  the difference. Same reasoning as 5h's bootstrap running in `<head>`.
+- **Order of hooks is order of execution, and Dioxus requires it be stable.** Moving `library`
+  above `settings` is not cosmetic: hooks are stored in a list indexed by call order, so they
+  must be called in the same sequence on every render — which they are, since both are
+  unconditional. The reason the move is *needed* is plain data flow: `library.db()` cannot
+  be called before `library` exists.
+- **Generalizing `OrLog` over `E: Display` deletes a coupling rather than adding a case.** The
+  trait's whole body is a `Display` format — naming `library::Error` in the impl was always
+  narrower than what the code used. A blanket impl over the trait's own type parameter is legal
+  and does not conflict with anything, because `OrLog` is a local trait; the alternative, a
+  second impl for `rusqlite::Error`, would need a third the next time a store's error surfaced.
+- **`.or_log(…).flatten()` collapses two "nothing" cases into one.** `settings()` returns
+  `Result<Option<Settings>, rusqlite::Error>`; `or_log` turns the `Err` into `None` after printing it,
+  leaving `Option<Option<Settings>>`, and `flatten` merges "the read failed" with "there was no
+  row". Both mean the same thing to the caller — use the defaults — and `unwrap_or_default()`
+  says so in one word. A corrupt database costs you your settings, not your app.
+- **`use_effect` re-runs when a signal it read changes.** The closure reads `settings()`, which
+  subscribes the effect; every `settings.write()` in a control then schedules it. No manual
+  wiring from each button to a save, and no chance of adding a seventh control and forgetting to
+  persist it — the subscription is on the whole struct.
+- **The effect's first run writes back what it just read.** It runs once at mount, when
+  `settings()` is still the loaded value, so the first thing it does is save the row to itself.
+  Harmless — an idempotent upsert of identical values — but know it is happening rather than
+  find it while staring at the SQLite file wondering who wrote that.
+- **`library.clone()` into the effect, because the closure is `'static`.** `library` is an
+  `Rc<Library>`; the effect outlives this render's stack frame, so it needs its own handle
+  rather than a borrow. The `Rc` clone bumps a refcount — it does not copy the database
+  connection. The `use_context_provider(|| library.clone())` line right below does the same
+  thing for the same reason.
+
+### Scope note
+
+- **No debounce.** One `UPDATE` of one row per click, on a local SQLite file. Revisit only if a
+  future control is a drag-slider rather than a stepper, where a single gesture would fire
+  dozens of writes.
+- **The stale-handler note from 5a is not this step's problem** and should not be fixed here.
+- **Window size and the open book are still not persisted.** Only `Settings` is. Reopening the
+  app lands you on the library screen, as before — restoring the last-open book is a Milestone 3
+  question, not a theming one.
+- **This closes the phase's feature work.** Everything after it is Step 8's review.
+
+---
+
+## Step 8 — review & refactor (sketched)
 
 The repo's phase-ending step (commit `b09d6c9`): fold duplication in the serve/inject path,
 confirm the cascade order, re-read against ADR-0003. By then `Settings` will have six fields
@@ -3283,4 +3932,26 @@ their enum) — that is the shape to look
 hardest at, along with the three near-identical `{}.{:02}` formatters 5e left standing on
 purpose and the two chrome nits the popover interlude recorded (the forty-pixel circle
 declared twice, and the gear icon's raw `"view-box"` attribute).
+
+**What Step 6 removed from this list, and what it added.** Module organization — normally this
+step's biggest item — is largely spent: `Library` was split into `Db` + `BookFiles` + a facade
+before persistence rather than after it. Four questions it deliberately deferred here instead:
+
+- **Should `positions` live in `db/books.rs`?** It is FK-cascaded to `books` and meaningless
+  without one; 6b gave it its own module because that was the cheapest place to prove the layout,
+  not because it is the right home.
+- **Should `Settings` be converted at the db boundary?** 7a stores `web::settings::Settings`
+  directly, which points `db` at `web`. A `db`-owned row struct with a conversion is more honest
+  layering and more code; decide it here with both call sites visible.
+- **Do the `mod test` blocks belong where they now sit?** 6a deliberately left the file-store
+  tests in `library/mod.rs` rather than weakening the safety net mid-refactor. Relocating them to
+  `library/files.rs` is safe now that everything is green.
+- **Does `Error` want splitting per store?** Probably not — but after Step 6 it is a facade error
+  whose `Sqlite` and `Io` variants are only ever converted, never raised, and that is worth
+  stating in the enum's docs if it is not worth changing.
+
+Plus the one 5h recorded: `--USER__fontFamily` now lives both in the served `:root` block and in
+the bootstrap's inline style. Collapsing *all* the variables into the bootstrap would make the
+two injection routes one mechanism and delete `vars()` — at the cost of making theming depend on
+JavaScript. Weigh it here.
 </content>
