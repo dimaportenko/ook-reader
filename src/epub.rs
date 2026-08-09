@@ -347,7 +347,7 @@ mod test {
         let paged = insert_before_head_close(xhtml, INJECTED_ASSETS);
 
         assert!(paged.contains("--ook-page: 0"));
-        assert!(paged.contains("column-width: calc(100vw"));
+        assert!(paged.contains("column-width: var(--ook-column)"));
         assert!(paged.find("--ook-page: 0").unwrap() < paged.find("</head>").unwrap());
         assert!(paged.contains("<p>Hello</p>"));
     }

@@ -1,5 +1,6 @@
 :root {
   --ook-page: 0;
+  --ook-column: calc(100vw - 2 * var(--RS__pageGutter) * var(--USER__pageMargins, 1));
 }
 html {
   width: 100vw;
@@ -10,13 +11,13 @@ body {
   width: 100vw !important;
   height: 100vh !important;
   margin: 0 !important;
-  padding: 24px !important;
+  padding: var(--RS__pageGutter) calc((100vw - var(--ook-column)) / 2) !important;
   box-sizing: border-box !important;
   max-width: none !important;
 
   overflow: visible;
-  column-width: calc(100vw - 48px) !important;
-  column-gap: 48px !important;
+  column-width: var(--ook-column) !important;
+  column-gap: calc(100vw - var(--ook-column)) !important;
   column-fill: auto;
   transform: translateX(calc(var(--ook-page) * -100vw));
 }

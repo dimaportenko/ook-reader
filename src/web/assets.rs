@@ -66,6 +66,25 @@ mod test {
     }
 
     #[test]
+    fn the_page_geometry_derives_from_one_column_width() {
+        // padding, column-width and column-gap are one number wearing three hats: the
+        // column plus one gap has to advance exactly 100vw, because that is the step
+        // `translateX(calc(var(--ook-page) * -100vw))` moves by and the unit `pageOf`
+        // divides by. Deriving all three from `--ook-column` is what keeps them in step
+        // when the margin moves; three separate expressions would drift silently.
+        assert!(
+            INJECTED_ASSETS.contains("--ook-column:"),
+            "no derived column width — the geometry is still three loose numbers",
+        );
+        assert_eq!(
+            INJECTED_ASSETS.matches("var(--ook-column)").count(),
+            3,
+            "padding, column-width and column-gap each derive from the column, \
+             or one of them is still hard-coded",
+        );
+    }
+
+    #[test]
     fn wrapped_css_is_a_cdata_style_element() {
         let out = wrap_css_str("body > p { color: red }");
 

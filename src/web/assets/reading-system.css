@@ -1,5 +1,6 @@
 :root {
   --RS__maxMediaWidth: 100%;
+  --RS__pageGutter: 24px;
 }
 
 img,

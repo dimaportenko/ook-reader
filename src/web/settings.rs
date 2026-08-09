@@ -1,5 +1,8 @@
 use crate::web::theme::Theme;
 
+#[cfg(test)]
+use crate::web::assets::INJECTED_ASSETS;
+
 pub(crate) const FONT_SIZE_MIN: u16 = 75;
 pub(crate) const FONT_SIZE_MAX: u16 = 250;
 pub(crate) const FONT_SIZE_STEP: u16 = 25;
@@ -8,11 +11,16 @@ pub(crate) const LINE_HEIGHT_MIN: u16 = 100;
 pub(crate) const LINE_HEIGHT_MAX: u16 = 200;
 pub(crate) const LINE_HEIGHT_STEP: u16 = 10;
 
+pub(crate) const PAGE_MARGINS_MIN: u16 = 50;
+pub(crate) const PAGE_MARGINS_MAX: u16 = 200;
+pub(crate) const PAGE_MARGINS_STEP: u16 = 25;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Settings {
     pub(crate) theme: Theme,
     pub(crate) font_size: u16,
     pub(crate) line_height: u16,
+    pub(crate) page_margins: u16,
 }
 
 impl Default for Settings {
@@ -21,6 +29,7 @@ impl Default for Settings {
             theme: Theme::default(),
             font_size: 100,
             line_height: 140,
+            page_margins: 100,
         }
     }
 }
@@ -54,6 +63,20 @@ impl Settings {
             .max(LINE_HEIGHT_MIN);
     }
 
+    pub(crate) fn wider(&mut self) {
+        self.page_margins = self
+            .page_margins
+            .saturating_add(PAGE_MARGINS_STEP)
+            .min(PAGE_MARGINS_MAX);
+    }
+
+    pub(crate) fn narrower(&mut self) {
+        self.page_margins = self
+            .page_margins
+            .saturating_sub(PAGE_MARGINS_STEP)
+            .max(PAGE_MARGINS_MIN);
+    }
+
     pub(crate) fn css_vars(self) -> Vec<(&'static str, String)> {
         let mut vars = self
             .theme
@@ -64,11 +87,16 @@ impl Settings {
 
         vars.push(("--USER__fontSize", format!("{}%", self.font_size)));
         vars.push(("--USER__lineHeight", self.line_height_css()));
+        vars.push(("--USER__pageMargins", self.page_margins_css()));
         vars
     }
 
     pub(crate) fn line_height_css(self) -> String {
         format!("{}.{:02}", self.line_height / 100, self.line_height % 100)
+    }
+
+    pub(crate) fn page_margins_css(self) -> String {
+        format!("{}.{:02}", self.page_margins / 100, self.page_margins % 100)
     }
 
     fn declarations(self) -> String {
@@ -123,9 +151,9 @@ mod test {
 
             assert_eq!(
                 vars.len(),
-                theme.css_vars().len() + 2,
-                "the palette plus --USER__fontSize and --USER__lineHeight — \
-                 bump this when a setting is added",
+                theme.css_vars().len() + 3,
+                "the palette plus --USER__fontSize, --USER__lineHeight and \
+                 --USER__pageMargins — bump this when a setting is added",
             );
         }
     }
@@ -189,20 +217,27 @@ mod test {
                 ..Settings::default()
             };
             let layer = settings.user_layer();
+            // A pushed variable must be read by *something the document gets*, which is no
+            // longer only the layer: the geometry rules live in pagination.css, served
+            // ahead of the layer and reading the value the layer sets.
+            let readers = format!("{layer}{INJECTED_ASSETS}");
 
-            // Nothing pushed that the served layer never declares or never applies …
+            // Nothing pushed that the served layer never declares …
             for (name, value) in settings.css_vars() {
                 assert!(
                     layer.contains(&format!("{name}: {value};")),
                     "{theme:?} pushes {name}, which the injected layer never declares",
                 );
                 assert!(
-                    layer.contains(&format!("var({name})")),
+                    readers.contains(&format!("var({name})"))
+                        || readers.contains(&format!("var({name},")),
                     "{theme:?} declares {name} and no rule reads it",
                 );
             }
 
-            // … and nothing read that no message will ever set.
+            // … and nothing the *layer* reads that no message will ever set. This half
+            // stays narrow on purpose: INJECTED_ASSETS reads --ook-page, --ook-column and
+            // --RS__pageGutter, which are internal and not settings.
             for reference in layer.split("var(").skip(1) {
                 let name = reference.split(')').next().expect("var( … ) closes");
                 assert!(
@@ -360,6 +395,50 @@ mod test {
                 selector.trim(),
             );
         }
+    }
+
+    #[test]
+    fn the_page_margins_reach_the_layer_as_a_bare_factor() {
+        let settings = Settings {
+            page_margins: 150,
+            ..Settings::default()
+        };
+
+        assert!(settings
+            .css_vars()
+            .contains(&("--USER__pageMargins", "1.50".to_string())));
+
+        // No unit. The value is a multiplicand inside `calc(2 * 24px * m)`; give it a
+        // unit and that product is an area, the calc is invalid, and the declaration
+        // falls back to its initial value — which for `padding` is 0, i.e. no margin
+        // at all on the setting that exists to add one.
+        assert!(
+            settings.vars().contains("--USER__pageMargins: 1.50;"),
+            "the chosen margin never reached the :root block",
+        );
+    }
+
+    #[test]
+    fn the_page_margins_step_and_clamp() {
+        let mut settings = Settings {
+            page_margins: 150,
+            ..Settings::default()
+        };
+
+        settings.narrower();
+        assert_eq!(settings.page_margins, 150 - PAGE_MARGINS_STEP);
+        settings.wider();
+        assert_eq!(settings.page_margins, 150);
+
+        for _ in 0..20 {
+            settings.narrower();
+        }
+        assert_eq!(settings.page_margins, PAGE_MARGINS_MIN);
+
+        for _ in 0..20 {
+            settings.wider();
+        }
+        assert_eq!(settings.page_margins, PAGE_MARGINS_MAX);
     }
 
     #[test]

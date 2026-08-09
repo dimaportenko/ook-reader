@@ -4,7 +4,10 @@ use dioxus_primitives::ContentAlign;
 use crate::{
     components::popover::{PopoverContent, PopoverRoot, PopoverTrigger},
     ui::theme::ThemePicker,
-    web::settings::{Settings, FONT_SIZE_MAX, FONT_SIZE_MIN, LINE_HEIGHT_MAX, LINE_HEIGHT_MIN},
+    web::settings::{
+        Settings, FONT_SIZE_MAX, FONT_SIZE_MIN, LINE_HEIGHT_MAX, LINE_HEIGHT_MIN,
+        PAGE_MARGINS_MAX, PAGE_MARGINS_MIN,
+    },
 };
 
 #[css_module("/src/ui/settings.css")]
@@ -59,6 +62,31 @@ pub(crate) fn LineHeightControl() -> Element {
     }
 }
 
+#[component]
+pub(crate) fn PageMarginsControl() -> Element {
+    let mut settings = use_context::<Signal<Settings>>();
+    let margins = settings().page_margins_css();
+
+    rsx! {
+        div {
+            button {
+                disabled: settings().page_margins <= PAGE_MARGINS_MIN,
+                onclick: move |_| settings.write().narrower(),
+                "\u{2194}-"
+            }
+            span {
+                style: "padding: 0 0.5rem",
+                "{margins}"
+            }
+            button {
+                disabled: settings().page_margins >= PAGE_MARGINS_MAX,
+                onclick: move |_| settings.write().wider(),
+                "\u{2194}+"
+            }
+        }
+    }
+}
+
 pub(crate) fn SettingsPopover() -> Element {
     let mut open = use_signal(|| false);
 
@@ -99,6 +127,7 @@ pub(crate) fn SettingsPopover() -> Element {
                     style: "padding: 0.5rem; display: flex; gap: 0.5rem; flex-direction: column;",
                     LineHeightControl {}
                     FontSizeControl {}
+                    PageMarginsControl {}
                     ThemePicker {}
                 }
             }
