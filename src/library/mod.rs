@@ -1,9 +1,12 @@
 use std::path::Path;
 
 use rbook::Epub;
-use rusqlite::{params, OptionalExtension, Row};
 
-use crate::{db::Db, epub, library::files::BookFiles};
+use crate::{
+    db::{Db, NewBook},
+    epub,
+    library::files::BookFiles,
+};
 
 mod files;
 
@@ -22,27 +25,7 @@ pub(crate) enum Error {
     Spine(#[from] epub::Error),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Book {
-    pub(crate) id: i64,
-    pub(crate) path: String,
-    pub(crate) title: String,
-    pub(crate) author: Option<String>,
-    pub(crate) cover_path: Option<String>,
-    pub(crate) added_at: i64,
-    pub(crate) last_opened_at: Option<i64>,
-}
-
-impl Book {
-    pub(crate) fn cover_name(&self) -> Option<&str> {
-        self.cover_path
-            .as_deref()
-            .and_then(|cover| std::path::Path::new(cover).file_name())
-            .and_then(|name| name.to_str())
-    }
-}
-
-pub(crate) use crate::db::Locator;
+pub(crate) use crate::db::{Book, Locator};
 
 pub(crate) struct Library {
     db: Db,
@@ -76,31 +59,11 @@ impl Library {
         self.files.dir()
     }
 
-    fn read_book(row: &Row<'_>) -> rusqlite::Result<Book> {
-        Ok(Book {
-            id: row.get(0)?,
-            path: row.get(1)?,
-            title: row.get(2)?,
-            author: row.get(3)?,
-            cover_path: row.get(4)?,
-            added_at: row.get(5)?,
-            last_opened_at: row.get(6)?,
-        })
-    }
-
     pub(crate) fn add_from_path(&self, source_path: &Path, now: i64) -> Result<Book, Error> {
         let source_path = source_path.canonicalize()?;
         let source_path_text = source_path.to_string_lossy().into_owned();
 
-        let previous: Option<(String, Option<String>)> = self
-            .db
-            .conn()
-            .query_row(
-                "SELECT path, cover_path FROM books WHERE source_path = ?1",
-                params![&source_path_text],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?;
+        let previous = self.db.managed_paths_for_source(&source_path_text)?;
 
         let managed_path = self.files.import(&source_path)?;
 
@@ -116,25 +79,14 @@ impl Library {
                 self.files.write_cover(&managed_path, ext, &cover.bytes)
             });
 
-            let book = self.db.conn().query_row(
-                "INSERT INTO books (path, source_path, title, author, cover_path, added_at)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                ON CONFLICT(source_path) DO UPDATE SET
-                    path = excluded.path,
-                    title = excluded.title,
-                    author = excluded.author,
-                    cover_path = excluded.cover_path
-                RETURNING id, path, title, author, cover_path, added_at, last_opened_at",
-                params![
-                    &managed_path_text,
-                    &source_path_text,
-                    &meta.title,
-                    meta.author.as_deref(),
-                    cover_path.as_deref(),
-                    now
-                ],
-                Self::read_book,
-            )?;
+            let book = self.db.upsert_book(NewBook {
+                path: &managed_path_text,
+                source_path: &source_path_text,
+                title: &meta.title,
+                author: meta.author.as_deref(),
+                cover_path: cover_path.as_deref(),
+                added_at: now,
+            })?;
 
             Ok(book)
         })();
@@ -160,15 +112,7 @@ impl Library {
     }
 
     pub(crate) fn remove(&self, id: i64) -> Result<bool, Error> {
-        let removed: Option<(String, Option<String>)> = self
-            .db
-            .conn()
-            .query_row(
-                "DELETE FROM books WHERE id = ?1 RETURNING path, cover_path",
-                params![id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?;
+        let removed = self.db.delete_book(id)?;
 
         if let Some((removed_path, removed_cover)) = removed {
             self.files.remove(Path::new(&removed_path));
@@ -182,21 +126,11 @@ impl Library {
     }
 
     pub(crate) fn list(&self) -> Result<Vec<Book>, Error> {
-        let mut stmt = self
-            .db
-            .conn()
-            .prepare("SELECT id, path, title, author, cover_path, added_at, last_opened_at FROM books ORDER BY COALESCE(last_opened_at, added_at) DESC, title")?;
-        let rows = stmt.query_map([], Self::read_book)?;
-        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        Ok(self.db.list_books()?)
     }
 
     pub(crate) fn touch_opened(&self, id: i64, now: i64) -> Result<bool, Error> {
-        let updated = self.db.conn().execute(
-            "UPDATE books SET last_opened_at = ?2 WHERE id = ?1",
-            params![id, now],
-        )?;
-
-        Ok(updated == 1)
+        Ok(self.db.touch_opened(id, now)?)
     }
 
     pub(crate) fn save_position(

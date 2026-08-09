@@ -2,8 +2,10 @@ use std::path::Path;
 
 use rusqlite::Connection;
 
+mod books;
 mod positions;
 
+pub(crate) use books::{Book, NewBook};
 pub(crate) use positions::Locator;
 
 pub(crate) struct Db {
@@ -20,11 +22,7 @@ impl Db {
         Ok(db)
     }
 
-    pub(crate) fn conn(&self) -> &Connection {
-        &self.conn
-    }
-
-    pub(crate) fn migrate(&self) -> Result<(), rusqlite::Error> {
+    fn migrate(&self) -> Result<(), rusqlite::Error> {
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS books (
                 id INTEGER PRIMARY KEY,
