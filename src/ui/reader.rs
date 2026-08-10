@@ -23,6 +23,7 @@ pub(crate) enum BridgeMsg {
     Pages(usize),
     Position(String),
     Reflow(usize),
+    Ready,
     Warn(String),
 }
 
@@ -38,6 +39,8 @@ impl BridgeMsg {
             (!selector.is_empty()).then(|| BridgeMsg::Position(selector.to_string()))
         } else if let Some(page) = msg.strip_prefix("reflow:") {
             page.parse().ok().map(BridgeMsg::Reflow)
+        } else if msg == "ready:" {
+            Some(BridgeMsg::Ready)
         } else {
             msg.strip_prefix("warn:")
                 .map(|message| BridgeMsg::Warn(message.to_string()))
@@ -63,6 +66,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
     let chapter = state.data.chapter();
     let pending = state.data.pending();
     let (page, page_count) = (state.data.page(), state.data.page_count());
+    let hidden = nav::chapter_is_hidden(state.data.phase()(), &pending());
     let docs_for_iframe = docs.clone();
 
     let page_label = format!("Page {} of {}", page() + 1, page_count());
@@ -147,11 +151,22 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
 
             }
 
-            iframe {
-                id: "reader-frame",
-                "sandbox": "allow-same-origin allow-scripts",
-                style: "flex: 1; width: 100%; border: none;",
-                class: if pending().is_settling() { "invisible" },
+            div {
+                style: "flex: 1; position: relative; display: flex;",
+
+                iframe {
+                    id: "reader-frame",
+                    "sandbox": "allow-same-origin allow-scripts",
+                    style: "flex: 1; width: 100%; border: none;",
+                    class: if hidden { "invisible" },
+                }
+
+                if hidden {
+                    div {
+                        class: "reader-loading",
+                        div { class: "reader-loading__spinner" }
+                    }
+                }
             }
 
             NavRow {
@@ -244,6 +259,7 @@ fn use_bridge(state: ReaderState, docs: Rc<Vec<String>>, library: Rc<Library>, b
                             .or_log("save the reading position");
                     }
                     Some(BridgeMsg::Reflow(page)) => state.on_reflow(page),
+                    Some(BridgeMsg::Ready) => state.on_ready(),
                     Some(BridgeMsg::Warn(message)) => eprintln!("ook: {message}"),
                     None => {}
                 }

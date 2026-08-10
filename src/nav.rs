@@ -36,12 +36,24 @@ impl Pending {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) enum Phase {
+    #[default]
+    Loading,
+    Ready,
+}
+
 #[derive(Store, Default)]
 pub(crate) struct ReaderData {
     pub(crate) chapter: usize,
     pub(crate) page: usize,
     pub(crate) page_count: usize,
     pub(crate) pending: Pending,
+    pub(crate) phase: Phase,
+}
+
+pub(crate) fn chapter_is_hidden(phase: Phase, pending: &Pending) -> bool {
+    phase == Phase::Loading || pending.is_settling()
 }
 
 #[derive(Clone, Copy)]
@@ -96,6 +108,7 @@ impl ReaderState {
             } => {
                 page.set(0);
                 chapter.set(index);
+                self.data.phase().set(Phase::Loading);
             }
             Nav::Chapter {
                 index,
@@ -103,6 +116,7 @@ impl ReaderState {
             } => {
                 chapter.set(index);
                 self.data.pending().set(Pending::LastPage);
+                self.data.phase().set(Phase::Loading);
             }
         }
     }
@@ -118,6 +132,9 @@ impl ReaderState {
     }
 
     pub(crate) fn follow_link(self, target: epub::LinkTarget) {
+        if *self.data.chapter().peek() != target.spine_index {
+            self.data.phase().set(Phase::Loading);
+        }
         self.data.chapter().set(target.spine_index);
         self.data.page().set(0);
         self.data.pending().set(match target.fragment {
@@ -145,6 +162,10 @@ impl ReaderState {
 
     pub(crate) fn on_reflow(self, page: usize) {
         self.data.page().set(page);
+    }
+
+    pub(crate) fn on_ready(self) {
+        self.data.phase().set(Phase::Ready);
     }
 }
 

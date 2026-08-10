@@ -16,6 +16,31 @@ html {
   opacity: 0;
 }
 
+/* ---- Reader ---- */
+.reader-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.reader-loading__spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  opacity: 0.4;
+  animation: reader-loading-spin 0.8s linear infinite;
+}
+
+@keyframes reader-loading-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
 /* ---- Library Books ---- */
 .library-books__list {
   display: grid;

@@ -145,8 +145,7 @@ mod test {
 
         // One `load` listener owns the whole opening sequence. Three files each
         // registering their own put the order at the mercy of the concat below,
-        // and the count has to be reported before the fragment resolves against it,
-        // which has to resolve before a position is derived from the page it lands on.
+        // and the count has to be reported before the fragment resolves against it.
         assert_eq!(
             INJECTED_ASSETS
                 .matches(r#"addEventListener("load""#)
@@ -161,6 +160,7 @@ mod test {
         let step = |name: &str| boot.find(name).expect("boot runs {name}");
         assert!(step("report()") < step("reportFragmentPage()"));
         assert!(step("reportFragmentPage()") < step("reportPosition("));
+        assert!(step("reportPosition(") < step("ook-ready"));
     }
 
     #[test]

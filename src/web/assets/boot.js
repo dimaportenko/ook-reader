@@ -5,5 +5,6 @@ window.addEventListener("load", function () {
     if (!location.hash) {
       reportPosition(currentPage());
     }
+    window.parent.postMessage({ kind: "ook-ready" }, "*");
   });
 });
