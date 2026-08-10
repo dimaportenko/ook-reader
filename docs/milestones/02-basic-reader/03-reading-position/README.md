@@ -24,13 +24,31 @@ in nine steps across four focuses:
 | Persist | 6 | Save the latest locator per book in `rusqlite` |
 | Restore | 7–8 | On open, mount the saved spine item and resolve the selector back to a page |
 
+## Rework — measuring position across a reflow
+
+Restore shipped ✅, then dogfooding
+[Phase 4](../../03-reader-enhancements/04-themes-typography/phase-4-theming.md) showed it
+landing **one page behind** on every reopen. Chasing it turned up three bugs of one shape:
+a layout change moved the text after the page had been measured, and nothing re-anchored.
+
+| # | Document | Outcome | Status |
+|---|---|---|---|
+| 1 | [Position across a reflow](position-across-a-reflow.md) | Measure after `document.fonts.ready`; one `load` sequence; re-anchor on resize from an anchor that predates the reflow | 🚧 implemented, commit pending |
+
+Filed here rather than under Themes & Typography, where the work happened, on the rule
+Phase 4 used for the rendering bug it surfaced: **file by what it repairs.** Late font
+loading is the cause; the deliverable is *reopen lands where you stopped*.
+
 ## Notes
 
 - **The page number is not the position.** Phase 5 paginates with CSS multi-columns, so the
   page index is derived from `window.innerWidth` (`page-count.js`:
   `scrollWidth / innerWidth`) and changes when the window resizes. Persisting it would
   restore the wrong spot at any other size. The durable locator is
-  `{spine_index, element selector}`; the page is recomputed on restore.
+  `{spine_index, element selector}`; the page is recomputed on restore. **This note came
+  true from an angle it did not anticipate** — the page is recomputed correctly, but only
+  if something recomputes it *after* the layout settles, and for a long time nothing did:
+  [Position across a reflow](position-across-a-reflow.md).
 - **Restore is the fragment-scroll path, generalized.** `fragment-scroll.js` already does
   element → page with `Math.round(el.offsetLeft / window.innerWidth)`, reports it over the
   `ook-scroll` bridge message, and rides the existing `pending_fragment` state machine
