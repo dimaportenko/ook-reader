@@ -17,6 +17,10 @@ html {
 }
 
 /* ---- Reader ---- */
+.reader-root:focus {
+  outline: none;
+}
+
 .reader-loading {
   position: absolute;
   inset: 0;

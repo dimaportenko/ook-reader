@@ -149,6 +149,7 @@ pub(crate) fn SettingsPopover() -> Element {
                 align: ContentAlign::End,
                 div {
                     style: "padding: 0.5rem; display: flex; gap: 0.5rem; flex-direction: column;",
+                    onkeydown: move |e| e.stop_propagation(),
                     LineHeightControl {}
                     FontSizeControl {}
                     PageMarginsControl {}

@@ -15,6 +15,9 @@ window.addEventListener("message", (e) => {
   if (e.data.kind === "ook-reflow") {
     dioxus.send("reflow:" + e.data.page);
   }
+  if (e.data.kind === "ook-key") {
+    dioxus.send("key:" + e.data.key);
+  }
   if (e.data.kind === "ook-ready") {
     dioxus.send("ready:");
   }

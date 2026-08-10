@@ -16,6 +16,29 @@ const CHAPTER_LOADER_JS: &str = include_str!("../web/assets/chapter-loader.js");
 const BLOB_CLEANUP_JS: &str = include_str!("../web/assets/blob-cleanup.js");
 const THEME_PUSH_JS: &str = include_str!("../web/assets/theme-push.js");
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Turn {
+    Prev,
+    Next,
+}
+
+impl Turn {
+    fn of(key: &Key) -> Option<Turn> {
+        match key {
+            Key::ArrowLeft => Some(Turn::Prev),
+            Key::ArrowRight => Some(Turn::Next),
+            _ => None,
+        }
+    }
+
+    fn apply(self, state: ReaderState) {
+        match self {
+            Turn::Prev => state.page_prev(),
+            Turn::Next => state.page_next(),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub(crate) enum BridgeMsg {
     Link(String),
@@ -23,6 +46,7 @@ pub(crate) enum BridgeMsg {
     Pages(usize),
     Position(String),
     Reflow(usize),
+    Turn(Turn),
     Ready,
     Warn(String),
 }
@@ -31,6 +55,12 @@ impl BridgeMsg {
     fn parse(msg: &str) -> Option<BridgeMsg> {
         if let Some(href) = msg.strip_prefix("link:") {
             Some(BridgeMsg::Link(href.to_string()))
+        } else if let Some(key) = msg.strip_prefix("key:") {
+            key.parse::<Key>()
+                .ok()
+                .as_ref()
+                .and_then(Turn::of)
+                .map(BridgeMsg::Turn)
         } else if let Some(page) = msg.strip_prefix("scroll:") {
             page.parse().ok().map(BridgeMsg::Scroll)
         } else if let Some(page_count) = msg.strip_prefix("pages:") {
@@ -105,7 +135,18 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
 
     rsx! {
         div {
+            class: "reader-root",
             style: "display: flex; flex-direction: column; height: 100vh; {settings().inline_styles()}",
+            tabindex: "0",
+            onmounted: move |e| async move {
+                _ = e.set_focus(true).await;
+            },
+            onkeydown: move |e| {
+                if let Some(turn) = Turn::of(&e.key()) {
+                    e.prevent_default();
+                    turn.apply(state);
+                }
+            },
 
             div {
                 style: "display: flex; justify-content: space-between;",
@@ -259,6 +300,7 @@ fn use_bridge(state: ReaderState, docs: Rc<Vec<String>>, library: Rc<Library>, b
                             .or_log("save the reading position");
                     }
                     Some(BridgeMsg::Reflow(page)) => state.on_reflow(page),
+                    Some(BridgeMsg::Turn(turn)) => turn.apply(state),
                     Some(BridgeMsg::Ready) => state.on_ready(),
                     Some(BridgeMsg::Warn(message)) => eprintln!("ook: {message}"),
                     None => {}
@@ -346,6 +388,33 @@ mod test {
                 "no element on page 3, position not saved".to_string()
             )),
         );
+    }
+
+    #[test]
+    fn an_arrow_key_inside_the_frame_survives_all_three_hops() {
+        // The frame owns the keyboard the moment it is clicked, so the host's own
+        // `onkeydown` never sees an arrow pressed while reading. key-listener.js posts
+        // it, ook-events-listener.js forwards it, `parse` reads it back — same three
+        // files, same no-compiler-between-them hazard as `ook-reflow`.
+        assert!(crate::web::assets::INJECTED_ASSETS.contains("ook-key"));
+        assert!(BRIDGE_JS.contains("ook-key"));
+
+        // The wire carries the DOM key name so both entry points end at one mapping:
+        // `Turn::of` decides what an arrow means, whether the press arrived through
+        // the bridge or through the host's `onkeydown`.
+        assert_eq!(
+            BridgeMsg::parse("key:ArrowLeft"),
+            Some(BridgeMsg::Turn(Turn::Prev))
+        );
+        assert_eq!(
+            BridgeMsg::parse("key:ArrowRight"),
+            Some(BridgeMsg::Turn(Turn::Next))
+        );
+
+        // A key with no meaning here is dropped rather than parsed into a turn, and
+        // an unrecognised name is not a panic.
+        assert_eq!(BridgeMsg::parse("key:ArrowUp"), None);
+        assert_eq!(BridgeMsg::parse("key:notakey"), None);
     }
 
     #[test]
