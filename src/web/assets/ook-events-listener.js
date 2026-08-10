@@ -15,4 +15,7 @@ window.addEventListener("message", (e) => {
   if (e.data.kind === "ook-reflow") {
     dioxus.send("reflow:" + e.data.page);
   }
+  if (e.data.kind === "ook-warn") {
+    dioxus.send("warn:" + e.data.message);
+  }
 });

@@ -29,20 +29,25 @@ function firstElementOnPage(page) {
 function reportPosition(page) {
   const el = firstElementOnPage(page);
   if (!el) {
+    ookWarn(`no element on page ${page}, position not saved`);
     return;
   }
 
   const selector = selectorFor(el);
   if (!selector) {
+    ookWarn(`no selector for <${el.localName}> on page ${page}, position not saved`);
     return;
   }
 
+  rememberAnchor(selector);
   window.parent.postMessage({ kind: "ook-position", selector }, "*");
 }
 
-window.addEventListener("load", () => reportPosition(currentPage()));
 window.addEventListener("message", function (e) {
   if (!e.data || e.data.kind !== "ook-set-page") {
+    return;
+  }
+  if (isReflowEcho(e.data.page)) {
     return;
   }
   reportPosition(e.data.page);

@@ -23,6 +23,7 @@ pub(crate) enum BridgeMsg {
     Pages(usize),
     Position(String),
     Reflow(usize),
+    Warn(String),
 }
 
 impl BridgeMsg {
@@ -38,7 +39,8 @@ impl BridgeMsg {
         } else if let Some(page) = msg.strip_prefix("reflow:") {
             page.parse().ok().map(BridgeMsg::Reflow)
         } else {
-            None
+            msg.strip_prefix("warn:")
+                .map(|message| BridgeMsg::Warn(message.to_string()))
         }
     }
 }
@@ -242,6 +244,7 @@ fn use_bridge(state: ReaderState, docs: Rc<Vec<String>>, library: Rc<Library>, b
                             .or_log("save the reading position");
                     }
                     Some(BridgeMsg::Reflow(page)) => state.on_reflow(page),
+                    Some(BridgeMsg::Warn(message)) => eprintln!("ook: {message}"),
                     None => {}
                 }
             }
@@ -307,6 +310,26 @@ mod test {
         // An empty payload is not a position. Reject it here rather than storing a
         // selector that can never resolve — Step 6 writes this straight to SQLite.
         assert_eq!(BridgeMsg::parse("position:"), None);
+    }
+
+    #[test]
+    fn a_warning_from_the_frame_survives_all_three_hops() {
+        // The frame is sandboxed, so its `console` goes to the webview's console and
+        // not the terminal. This hop is the only way anything inside it can speak.
+        // It carries failures only — a fragment that will not resolve, a position
+        // that could not be saved, fonts that never finished — because a trace on
+        // every page turn is how a real warning goes unread.
+        assert!(crate::web::assets::INJECTED_ASSETS.contains("ook-warn"));
+        assert!(BRIDGE_JS.contains("ook-warn"));
+
+        // Same whole-remainder parse as `position:` — a warning is prose and will
+        // contain colons.
+        assert_eq!(
+            BridgeMsg::parse("warn:no element on page 3, position not saved"),
+            Some(BridgeMsg::Warn(
+                "no element on page 3, position not saved".to_string()
+            )),
+        );
     }
 
     #[test]

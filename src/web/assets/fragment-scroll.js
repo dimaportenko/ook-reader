@@ -23,9 +23,12 @@ function reportFragmentPage() {
   // fragment left pending gets re-applied to whatever chapter comes next.
   const page = el ? pageOf(el) : currentPage();
 
+  if (!el) {
+    ookWarn(`fragment did not resolve, staying on page ${page}: ${id}`);
+  }
+
   document.documentElement.scrollLeft = 0; // undo the browser's native anchor scroll
   window.parent.postMessage({ kind: "ook-scroll", page: page }, "*");
 }
 
-window.addEventListener("load", reportFragmentPage);
 window.addEventListener("hashchange", reportFragmentPage);

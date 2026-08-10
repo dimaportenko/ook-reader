@@ -5,5 +5,3 @@ const report = function () {
   );
   window.parent.postMessage({ kind: "ook-pages", count: count }, "*");
 };
-window.addEventListener("load", report);
-window.addEventListener("resize", report);
