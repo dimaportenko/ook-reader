@@ -19,6 +19,20 @@ uuid = { version = "1", features = ["v4"] }
 thiserror = "2"
 dioxus-primitives = { git = "https://github.com/DioxusLabs/components", rev = "bf007c15d0cf4d04d3181cc46cf12325aa773955", version = "0.0.1", default-features = false }
 
+# AppKit's own window-frame autosave, reached through the NSWindow behind tao's
+# `ns_window()`. `default-features = false` because both crates default to binding
+# every class in their framework.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSResponder",
+    "NSWindow",
+] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSString",
+] }
+
 [dev-dependencies]
 tempfile = "3"
 

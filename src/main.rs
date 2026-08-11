@@ -11,6 +11,7 @@ mod library;
 mod nav;
 mod ui;
 mod web;
+mod window;
 
 use library::Library;
 
@@ -55,6 +56,9 @@ fn App() -> Element {
         ),
     });
     let open_book = use_signal(|| None::<OpenBook>);
+
+    let desktop = dioxus::desktop::use_window();
+    use_hook(move || window::remember_frame(&desktop.window));
 
     use_context_provider(|| library.clone());
     use_context_provider(|| books);

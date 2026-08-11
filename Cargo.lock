@@ -3549,6 +3549,8 @@ dependencies = [
  "dioxus",
  "dioxus-primitives",
  "directories",
+ "objc2-app-kit",
+ "objc2-foundation",
  "percent-encoding",
  "rbook",
  "rusqlite",
