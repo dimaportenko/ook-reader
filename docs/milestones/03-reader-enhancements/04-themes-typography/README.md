@@ -26,6 +26,15 @@ fork `rbook`**, is [ADR-0003](../../../adr/0003-reader-controlled-theming-inject
 > pagination, and a position bridge, so its injection seam has more neighbours than the plan
 > assumes.
 
+> **A defect this phase surfaced, fixed elsewhere.** Same shape as the rendering bug above,
+> and filed by the same rule. Dogfooding the typography work showed every book reopening
+> **one page behind** where it was closed — because `FontFamily::Publisher`, the default,
+> deliberately leaves the stack empty so the book's own `@font-face` files apply, and those
+> load *after* the `load` event that position restore measures on. The cause is typography;
+> the deliverable is that reopening lands where you stopped, so the fix and the investigation
+> live with Reading Position:
+> [Position across a reflow](../../02-basic-reader/03-reading-position/position-across-a-reflow.md).
+
 ## Phases
 
 | # | Phase | Outcome | Status |

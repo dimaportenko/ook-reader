@@ -183,9 +183,21 @@ implementation → why. Smallest-first:
         `Library::db()` had to be added, since Step 6 left the facade no accessor — and choosing
         it over a `Library::settings()` pass-through is what keeps 7a's rule intact. Committed in
         `a521d54`, **93 tests green**, `dx serve` confirmed.
-- [ ] **Step 8 — Review & refactor** (per the repo's phase-ending convention). Lighter on module
-      organization than usual, since Step 6 spent it; heavier on the four questions Step 6
-      deliberately deferred.
+- [ ] **Step 8 — Review & refactor** (per the repo's phase-ending convention). **Heavier on module
+      organization than planned, not lighter.** Step 6 was expected to have spent that budget, and
+      it did — for the *data* layer. Three findings since say otherwise elsewhere: `Library` owning
+      `Db` is what forces `library.db().settings()` and hides four dead pass-throughs behind it;
+      `src/components/` is a `dx`-generated top-level module with one consumer; and `settings`,
+      `theme` and `font` sit in `web/`, which exists for the webview payload, not the reader's
+      model. The first deletes code from three files, so it goes first. Plus the four questions
+      Step 6 deferred — one of which the module move largely answers.
+    - [x] **8a — hoist `Db` to `App`.** The ownership move only. `App` holds `Rc<Db>` and hands a
+          clone to `Library::new`; `Library::db()` is gone. Deleting `Library::open_default` took
+          the `create_dir_all` with it, which is what created the data dir *and* the books dir —
+          so a new `Config` type now owns both paths and creates them, and a fresh install no
+          longer panics before the first frame. Committed in `66472df`, **102 tests green**.
+    - [ ] **8b — the deletions 8a unlocks.** The four pass-throughs, the `library::Error` shrink,
+          and `ui/reader.rs`'s positions moving to `Db`.
 
 ## Known constraints (from research)
 
