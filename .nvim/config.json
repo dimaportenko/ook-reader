@@ -2,7 +2,7 @@
   "commands": {
     "dx:bundle": "dx bundle --bundle macos --release",
     "dx:serve": "dx serve --platform desktop",
-    "test": "cargo test",
+    "test": "RUST_BACKTRACE=1 cargo test",
     "validate": "cargo test && cargo clippy --all-targets"
   }
 }
