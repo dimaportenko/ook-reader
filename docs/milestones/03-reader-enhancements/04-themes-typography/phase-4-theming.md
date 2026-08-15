@@ -230,7 +230,11 @@ implementation → why. Smallest-first:
           crate-nameable — rustc's `private_interfaces` said so), and the optional test was taken,
           making this 102 → 103 rather than 102 → 102. Writing it turned up an unrelated latent
           defect in `serve_epub_resource`, filed into 8e.
-    - [ ] **8d — `src/components/` under `src/ui/`.** Sketched above.
+    - [x] **8d — `src/components/` under `src/ui/`.** Sketched above. Committed in `9786a73`,
+          **103 tests green** — unchanged by design, and four files at 100% rename similarity.
+          The only edited line in the moved tree is the `css_module` path, which resolves at
+          compile time (`error: Asset at … doesn't exist` when pointed at a missing file), so
+          the build is what proves the stylesheet travelled with the module.
     - [ ] **8e — the small misfilings, then the duplication pass.** Now also carries 8c's finding:
           `serve_epub_resource`'s `by_href` lookup misses on every resource, because rbook's
           manifest hrefs keep the leading `/` that `spine_hrefs` trims — so the content type always
