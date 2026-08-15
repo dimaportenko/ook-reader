@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 
-use crate::web::{settings::Settings, theme::Theme};
+use crate::settings::{theme::Theme, Settings};
 
 #[component]
 pub(crate) fn ThemePicker() -> Element {

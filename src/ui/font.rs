@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 
-use crate::web::{font::FontFamily, settings::Settings};
+use crate::settings::{font::FontFamily, Settings};
 
 #[component]
 pub(crate) fn FontFamilyPicker() -> Element {

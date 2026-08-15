@@ -7,8 +7,8 @@ use crate::{
     epub,
     library::{self, Library},
     nav::{self, ReaderDataStoreExt, ReaderState},
+    settings::Settings,
     ui::{library::OpenBook, settings::SettingsPopover, OrLog},
-    web::settings::Settings,
 };
 
 const BRIDGE_JS: &str = include_str!("../web/assets/ook-events-listener.js");

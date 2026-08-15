@@ -1,7 +1,7 @@
 use rusqlite::{params, OptionalExtension};
 
 use crate::db::Db;
-use crate::web::{font::FontFamily, settings::Settings, theme::Theme};
+use crate::settings::{font::FontFamily, theme::Theme, Settings};
 
 impl Db {
     pub(crate) fn save_settings(&self, settings: &Settings) -> Result<(), rusqlite::Error> {

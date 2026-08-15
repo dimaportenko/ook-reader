@@ -6,8 +6,8 @@ use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 use rbook::epub::rewrite::{EpubRewriteOptions, PathRewrite};
 use rbook::Epub;
 
+use crate::settings::Settings;
 use crate::web::assets::{wrap_css_str, wrap_js_str, INJECTED_ASSETS, READING_SYSTEM_DEFAULTS};
-use crate::web::settings::Settings;
 
 pub(crate) const EPUB_ROUTE: &str = "epub";
 pub(crate) const EPUB_URL_PREFIX: &str = "dioxus://index.html/epub/"; // must embed EPUB_ROUTE
@@ -284,7 +284,7 @@ pub(crate) fn spine_hrefs(epub: &Epub) -> Result<Vec<String>, Error> {
 
 #[cfg(test)]
 mod test {
-    use crate::web::theme::Theme;
+    use crate::settings::theme::Theme;
 
     use super::*;
 

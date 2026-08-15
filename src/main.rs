@@ -10,6 +10,7 @@ mod db;
 mod epub;
 mod library;
 mod nav;
+mod settings;
 mod ui;
 mod web;
 mod window;

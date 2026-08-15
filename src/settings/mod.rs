@@ -1,4 +1,7 @@
-use crate::web::{font::FontFamily, theme::Theme};
+pub mod font;
+pub mod theme;
+
+use crate::settings::{font::FontFamily, theme::Theme};
 
 #[cfg(test)]
 use crate::web::assets::INJECTED_ASSETS;
