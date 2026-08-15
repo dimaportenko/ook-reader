@@ -4923,3 +4923,229 @@ list does not keep carrying a resolved item.
 - **`ui/theme.rs` and `ui/font.rs` stayed separate files.** The sketch floated merging them once
   the pickers collapsed; they cannot fully merge, since each writes a different field, and two
   nineteen-line files match the repo's one-component-per-file idiom.
+
+---
+
+## R6 — the hygiene sitting (case-insensitive matching, and the "Page 1 of 0" label)
+
+> **Status:** code landed — committed in `fb3de22` (Act 1) and `d372db2` (Act 2),
+> **108 tests green** (105 → 108), `cargo clippy --all-targets` clean. **The `dx serve` eyeball
+> is still owed** — see the three-point checklist under Act 2; until it is done, Act 2's
+> placeholder and 8e's picker rewrite are green in the suite but unseen on screen.
+
+The last open item from the [July 2026 review backlog](../../02-basic-reader/review-2026-07-steps.md#r6--hygiene-batch-content-types-page-label),
+which the roadmap has been parking "inside Phase 4" since the phase opened. It sits **after**
+Step 8 rather than inside it for the reason 8e already established: **R6 is a behavior change,
+and a refactor step that also changes behavior is two steps pretending to be one.** Step 8's
+punch-list is spent; this is the sitting the phase was carrying alongside it.
+
+It also **clears 8e's one outstanding item for free.** 8e landed the picker rewrite with no
+`dx serve` check, and R6's second half needs a `dx serve` eyeball anyway — so one session
+verifies both. That is the whole reason to do R6 before closing the phase rather than after.
+
+Two independent fixes, one sitting. (The third item in the original batch — fragment
+sanitization — was obsoleted by `30e4b0c`; the fragment now travels in the URL hash and there is
+no interpolation site left to escape.)
+
+### Act 1 — normalize case before matching a type or an extension
+
+**The reachability, stated honestly first.** The backlog wrote this up as "a `COVER.JPG` inside a
+zip comes back `application/octet-stream`," and that is still what the code does — but 8e moved
+the ground under it. `serve_epub_resource` now asks the **manifest** first and only falls back to
+`content_type_for`, so the extension path runs for a resource the manifest does not declare. And
+the other call site, `use_register_covers_handler`, reads a filename **we** wrote, whose extension
+came from `extension_for` — always one of four lowercase literals. So the bug as originally
+described is latent, not live.
+
+What is *not* latent is its twin, one function up:
+
+```rust
+pub(crate) fn extension_for(media_type: &str) -> Option<&'static str> {
+    match media_type {
+        "image/jpeg" => Some("jpg"),
+```
+
+That key is publisher-supplied — it is the `media-type` attribute straight out of the OPF
+manifest. RFC 2045 says media types are **case-insensitive**, so `IMAGE/JPEG` is a legal
+declaration; this `match` returns `None` for it, `write_cover` is never called, and the book lands
+in the library **with no cover image and no error**. Same defect, same one-line shape, but this
+one has a real book behind it.
+
+So the step is one idea — *normalize the key before matching a type or an extension* — applied at
+the two sites that match a case-insensitive string verbatim.
+
+**Runnable check first.** Two tests in `src/epub.rs`'s existing `mod test`:
+
+```rust
+#[test]
+fn extension_lookup_ignores_media_type_case() {
+    assert_eq!(extension_for("image/jpeg"), Some("jpg"));
+    assert_eq!(extension_for("IMAGE/JPEG"), Some("jpg"));
+    assert_eq!(extension_for("Image/SVG+XML"), Some("svg"));
+    assert_eq!(extension_for("application/pdf"), None);
+}
+
+#[test]
+fn content_type_ignores_extension_case() {
+    assert_eq!(content_type_for("OEBPS/COVER.JPG"), "image/jpeg");
+    assert_eq!(content_type_for("OEBPS/Styles/Main.CSS"), "text/css");
+    assert_eq!(content_type_for("OEBPS/ch01.XHTML"), XHTML);
+    assert_eq!(content_type_for("OEBPS/cover.jpg"), "image/jpeg");
+}
+```
+
+Watch both go red before touching the source. The predicted failures are
+`left: None, right: Some("jpg")` and `left: "application/octet-stream", right: "image/jpeg"` —
+worth reading, because they are the two shapes the fallback hides in production.
+
+Each test keeps one already-passing lowercase assertion. That is not padding: it is what stops a
+"fix" that lowercases the *pattern* instead of the key from passing.
+
+**Minimal implementation.** The same two-line shape twice:
+
+```rust
+pub(crate) fn extension_for(media_type: &str) -> Option<&'static str> {
+    let media_type = media_type.to_ascii_lowercase();
+    match media_type.as_str() {
+        // arms unchanged
+```
+
+```rust
+pub(crate) fn content_type_for(path: &str) -> &'static str {
+    let ext = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    match ext.as_str() {
+        // arms unchanged
+```
+
+**Why it works — and the two Rust bits worth slowing down on.**
+
+- **`.as_str()` is not optional, and the reason is specific.** `to_ascii_lowercase()` on a `&str`
+  has to allocate — lowercasing may change the bytes, so it returns an owned `String`. Everywhere
+  else in Rust a `String` slides into a `&str` position by deref coercion, which is why
+  `takes_a_str(&owned)` just works. **Match patterns are the exception: they do not deref-coerce.**
+  A `"image/jpeg"` pattern has type `&'static str`, the scrutinee has type `String`, and rustc
+  rejects the mismatch rather than inserting the deref for you. `as_str()` is you doing by hand
+  what the coercion would have done — and matching on `&*media_type` or `media_type.as_ref()` are
+  the same move under different spellings.
+- **`to_ascii_lowercase`, not `to_lowercase`.** The Unicode version walks the string applying full
+  case mappings, which is both slower and *wrong for identifiers*: it would fold a Turkish
+  dotless `İ` into something a media type never contains, and its whole purpose — respecting
+  human language — is the opposite of what a protocol token wants. Media types and file
+  extensions are ASCII by definition, so ASCII-only is the narrower and therefore safer tool.
+  The general rule: **`to_ascii_lowercase` for machine tokens, `to_lowercase` for human text.**
+
+**Scope note.** This normalizes the *key*, not the parsing. A manifest declaring
+`image/jpeg; charset=binary` still returns `None`, because the parameter is part of the string —
+that is a media-type *parser*, a different job, and no book in the fixture set needs it. Also
+untouched: `content_type_for("README")` treats the whole filename as the extension when there is
+no dot, and falls through to `application/octet-stream` — correct by accident, but correct.
+
+### Act 2 — no more "Page 1 of 0"
+
+`ui/reader.rs:103` formats the label unconditionally:
+
+```rust
+let page_label = format!("Page {} of {}", page() + 1, page_count());
+```
+
+Before `page-count.js` reports, `page_count` is `0`, so the nav row briefly reads **"Page 1 of
+0"** on every chapter load — a count that is not merely unknown but arithmetically impossible.
+
+**Runnable check first — and this one gets a test, where the backlog only planned an eyeball.**
+The backlog filed this as `dx serve`-only because it is a display fix. It does not have to be:
+pull the formatting out as a pure function and it is `cargo test`-able, which is the repo's
+standing preference. `ui/reader.rs` already has a `mod test` (it holds `BridgeMsg::parse`), so
+there is somewhere for it to go.
+
+```rust
+#[test]
+fn the_page_label_waits_for_a_real_count() {
+    // Before the probe reports there is no denominator, so there is no fraction to show.
+    assert_eq!(page_label(0, 0), "Page …");
+    assert_eq!(page_label(3, 0), "Page …");
+
+    // Once it reports, the label is 1-based on both halves.
+    assert_eq!(page_label(0, 12), "Page 1 of 12");
+    assert_eq!(page_label(11, 12), "Page 12 of 12");
+}
+```
+
+The second pair is the guard rail: the fix is a placeholder, and a placeholder that swallowed the
+real count too would still satisfy the first pair alone.
+
+**Minimal implementation.** A free function beside the component, and one changed line inside it:
+
+```rust
+fn page_label(page: usize, count: usize) -> String {
+    match count {
+        0 => "Page …".to_string(),
+        count => format!("Page {} of {}", page + 1, count),
+    }
+}
+```
+
+```rust
+let page_label = page_label(page(), page_count());
+```
+
+**Why it works.** Two things, and the smaller one is the point of the step.
+
+- The `match` on `count` names the state instead of testing for it. `0` is not a small number
+  here — it is the sentinel for *the probe has not answered yet*, and a `match` arm says that
+  where an `if count == 0` reads like a bounds check. The second arm shadows `count` with the
+  non-zero value, so nothing inside it can accidentally reach the sentinel.
+- **The extraction is what makes it testable, and the extraction is only possible because the
+  function is pure.** `page_label(3, 0)` takes two `usize`s and returns a `String` — no signals,
+  no component, no renderer. Calling `page()` and `page_count()` at the *call site* and passing
+  plain numbers in is the seam: the component keeps the reactive reads (which is what subscribes
+  it to re-render), and the formatting rule becomes ordinary Rust a test can call. That split —
+  **read signals at the edge, pass values inward** — is worth more than this particular label.
+
+**Then the `dx serve` eyeball**, which covers three things in one pass:
+
+1. Load a chapter: the label reads **"Page …"** for a beat, then the real count appears. No
+   "Page 1 of 0" flash.
+2. **8e's outstanding item** — open the gear popover, and check that the Theme and Font
+   dropdowns still show the *current* value on open and still apply on change. Both went through
+   the `SlugPicker` rewrite and nothing renders them in a test.
+3. Change the font size while you are in there — the count re-reports (5c's re-anchor), so the
+   label goes from a real number to a real number, never back to the placeholder.
+
+Also `cargo clippy --all-targets`.
+
+### Scope note
+
+- **105 → 108**, all three tests taken (two in Act 1, one in Act 2), and nothing else in the
+  suite moved — both changes are additive at their call sites. All three were **watched red
+  first**, with the predicted failures: `left: None / right: Some("jpg")`,
+  `left: "application/octet-stream" / right: "image/jpeg"`, and `E0425: cannot find function
+  page_label`. The last is the weakest of the three — a compile error proves the symbol was
+  absent, not that the assertion discriminates — but the other two are value mismatches on a
+  live implementation, which is the stronger form.
+- **One thing the plan did not anticipate:** `let page_label = page_label(page(),
+  page_count());` shadows the function with a `String`. It compiles because the right-hand side
+  is evaluated before the binding enters scope, but functions and locals share the value
+  namespace, so from that line down the name means the string. Harmless here — the component
+  only uses it as a value — and left as written.
+- **Two commits, not one.** Act 1 is `fix:` in the serve/import path, Act 2 is `fix:` in the UI.
+  They share only the word "hygiene", and the backlog batched them for scheduling, not because
+  they are one change.
+- **Not in scope:** a real media-type parser (parameters, `+xml` structured suffixes), and the
+  `library/` test-module question — see below.
+
+### The one thing left after this
+
+The last of Step 8's five deferred questions — *"do the `mod test` blocks belong where they now
+sit?"* — was left standing in 8e as "still true, still safe to move." **Re-reading the code says
+the premise is wrong**, and that is worth recording rather than acting on:
+
+There are no file-store tests to relocate. Every test in `library/mod.rs` drives `Library`'s
+public API (`add_from_path`, `remove`, `list`); the ones that assert on files assert on them
+*through the facade*. Not one of them names `BookFiles`, so "move the file-store tests to
+`files.rs`" has an empty subject. The accurate statement of what 8e found is different and
+smaller: **`BookFiles` has no direct test of its own**, and exactly one of its arms is
+unreachable from the facade — `import`'s copy-failure cleanup, which the facade can never enter
+because `add_from_path` canonicalizes the source path first and fails earlier.
+
+That is a real gap, and a two-line test closes it. It is also not a relocation, so it is not the
+deferred question — it is a new, optional finding. Decide it when Phase 4 closes, not here.

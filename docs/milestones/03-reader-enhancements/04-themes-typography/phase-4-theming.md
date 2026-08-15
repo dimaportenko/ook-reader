@@ -248,6 +248,23 @@ implementation → why. Smallest-first:
           in the build log; two of them as *leave it alone*, with the reasoning recorded.
           **Outstanding:** no `dx serve` eyeball on the rewritten pickers, and the `library/`
           test-module relocation is still open.
+- [ ] **R6 — the hygiene sitting.** The last open item of the
+      [July 2026 review backlog](../../02-basic-reader/review-2026-07-steps.md), which the roadmap
+      has been parking "inside Phase 4" since the phase opened. It sits **after** Step 8, not
+      inside it, for the reason 8e established: it is a *behavior* change, and a refactor step
+      that also changes behavior is two steps pretending to be one. Two acts. **(1) Normalize
+      case before matching a type or an extension** — and the reachability turns out to be the
+      opposite of what the backlog assumed: `content_type_for`'s `COVER.JPG` is now latent (8e
+      made the manifest win, and the covers handler reads a filename we wrote), while its twin
+      `extension_for` is live, because its key is the publisher's `media-type` attribute and RFC
+      2045 says media types are case-insensitive — so `IMAGE/JPEG` silently imports a book with
+      no cover. **(2) "Page 1 of 0" becomes "Page …"**, extracted as a pure `page_label(page,
+      count)` so it gets a `cargo test` rather than the eyeball-only check the backlog planned.
+      Doing this before the phase closes **clears 8e's outstanding item for free**: Act 2 needs a
+      `dx serve` session anyway, and the picker eyeball rides along in it. Code committed in
+      `fb3de22` and `d372db2`, **108 tests green** (105 → 108), all three watched red first.
+      **Left unchecked deliberately:** the `dx serve` pass is still owed, and it is the gate for
+      both this step and 8e's outstanding item.
 
 ## Known constraints (from research)
 
