@@ -4,7 +4,6 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 
-mod components;
 mod config;
 mod db;
 mod epub;

@@ -4,7 +4,7 @@ use dioxus_primitives::popover::{
 };
 use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
 
-#[css_module("/src/components/popover/style.css")]
+#[css_module("/src/ui/components/popover/style.css")]
 struct Styles;
 
 #[component]

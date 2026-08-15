@@ -2,12 +2,15 @@ use dioxus::prelude::*;
 use dioxus_primitives::ContentAlign;
 
 use crate::{
-    components::popover::{PopoverContent, PopoverRoot, PopoverTrigger},
     settings::{
         Settings, FONT_SIZE_MAX, FONT_SIZE_MIN, LINE_HEIGHT_MAX, LINE_HEIGHT_MIN,
         MAX_LINE_LENGTH_MAX, MAX_LINE_LENGTH_MIN, PAGE_MARGINS_MAX, PAGE_MARGINS_MIN,
     },
-    ui::{font::FontFamilyPicker, theme::ThemePicker},
+    ui::{
+        components::popover::{PopoverContent, PopoverRoot, PopoverTrigger},
+        font::FontFamilyPicker,
+        theme::ThemePicker,
+    },
 };
 
 #[css_module("/src/ui/settings.css")]
