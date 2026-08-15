@@ -9,13 +9,15 @@ mod settings;
 pub(crate) use books::{Book, NewBook};
 pub(crate) use positions::Locator;
 
+pub(crate) const DB_FILENAME: &str = "library.sqlite3";
+
 pub(crate) struct Db {
     conn: Connection,
 }
 
 impl Db {
-    pub(crate) fn open(path: impl AsRef<Path>) -> Result<Self, rusqlite::Error> {
-        let conn = Connection::open(path)?;
+    pub(crate) fn open(dir_path: impl AsRef<Path>) -> Result<Self, rusqlite::Error> {
+        let conn = Connection::open(dir_path.as_ref().join(DB_FILENAME))?;
         conn.pragma_update(None, "foreign_keys", true)?;
         let db = Db { conn };
         db.migrate()?;

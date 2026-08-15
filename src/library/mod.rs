@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, rc::Rc};
 
 use rbook::Epub;
 
@@ -28,39 +28,16 @@ pub(crate) enum Error {
 pub(crate) use crate::db::{Book, Locator};
 
 pub(crate) struct Library {
-    db: Db,
+    db: Rc<Db>,
     files: BookFiles,
 }
 
 impl Library {
-    pub(crate) fn open(
-        db_path: impl AsRef<std::path::Path>,
-        books_dir: impl AsRef<std::path::Path>,
-    ) -> Result<Self, Error> {
-        let db = Db::open(db_path)?;
-
-        Ok(Library {
+    pub(crate) fn new(db: Rc<Db>, books_dir: &Path) -> Self {
+        Self {
             db,
-            files: BookFiles::new(books_dir.as_ref().to_path_buf()),
-        })
-    }
-
-    pub(crate) fn open_default() -> Library {
-        let dirs = directories::ProjectDirs::from("com", "dimaportenko", "ook-reader")
-            .expect("a home directory should exist");
-        let data_dir = dirs.data_dir();
-        let books_dir = data_dir.join("books");
-
-        std::fs::create_dir_all(&books_dir).expect("app data dir should be creatable");
-        Library::open(data_dir.join("library.sqlite3"), books_dir).expect("library db should open")
-    }
-
-    pub(crate) fn books_dir(&self) -> &Path {
-        self.files.dir()
-    }
-
-    pub(crate) fn db(&self) -> &Db {
-        &self.db
+            files: BookFiles::new(books_dir.to_path_buf()),
+        }
     }
 
     pub(crate) fn add_from_path(&self, source_path: &Path, now: i64) -> Result<Book, Error> {
@@ -199,8 +176,8 @@ mod test {
         let first = library.add_from_path(&source, 1_000).expect("first import");
         drop(library);
 
-        let library = Library::open(dir.path().join("library.sqlite3"), &books_dir)
-            .expect("database reopens");
+        let db = Db::open(&dir).expect("open db");
+        let library = Library::new(Rc::new(db), &books_dir);
         let second = library
             .add_from_path(&source, 2_000)
             .expect("second import");
@@ -331,8 +308,8 @@ mod test {
     fn library_with_source(dir: &tempfile::TempDir) -> (Library, PathBuf, PathBuf) {
         let books_dir = dir.path().join("books");
         std::fs::create_dir_all(&books_dir).expect("books dir");
-        let library =
-            Library::open(dir.path().join("library.sqlite3"), &books_dir).expect("library opens");
+        let db = Db::open(dir).expect("open db");
+        let library = Library::new(Rc::new(db), &books_dir);
         let source = dir.path().join("holmes-source.epub");
         std::fs::copy(crate::TEST_BOOK, &source).expect("fixture source");
         (library, source, books_dir)
@@ -510,8 +487,8 @@ mod test {
         let dir = tempfile::tempdir().expect("temp dir");
         let books_dir = dir.path().join("books");
         std::fs::create_dir_all(&books_dir).expect("books dir");
-        let library =
-            Library::open(dir.path().join("library.sqlite3"), &books_dir).expect("library opens");
+        let db = Db::open(&dir).expect("open db");
+        let library = Library::new(Rc::new(db), &books_dir);
 
         let source = dir.path().join("not-a-book.epub");
         std::fs::write(&source, b"definitely not a zip archive").expect("write fixture");

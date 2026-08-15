@@ -51,7 +51,7 @@ mod test {
     #[test]
     fn saving_a_position_stamps_the_injected_clock() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let db = Db::open(dir.path().join("library.sqlite3")).expect("db opens");
+        let db = Db::open(dir.path()).expect("db opens");
         db.conn
             .execute(
                 "INSERT INTO books (id, path, source_path, title, added_at)

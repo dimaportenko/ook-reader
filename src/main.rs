@@ -5,6 +5,7 @@ use std::rc::Rc;
 use dioxus::prelude::*;
 
 mod components;
+mod config;
 mod db;
 mod epub;
 mod library;
@@ -15,10 +16,14 @@ mod window;
 
 use library::Library;
 
-use crate::ui::{
-    library::{ImportControl, LibraryBooks, OpenBook},
-    reader::Reader,
-    OrLog,
+use crate::{
+    config::Config,
+    db::Db,
+    ui::{
+        library::{ImportControl, LibraryBooks, OpenBook},
+        reader::Reader,
+        OrLog,
+    },
 };
 
 const FAVICON: Asset = asset!("/assets/favicon.ico");
@@ -37,12 +42,13 @@ fn main() {
 
 #[component]
 fn App() -> Element {
-    let library = use_hook(|| Rc::new(Library::open_default()));
+    // TODO: refactor expect to show some user error before app close (low priority)
+    let config = use_hook(|| Rc::new(Config::new().expect("a home directory should exist")));
+    let db = use_hook(|| Rc::new(Db::open(&config.app_dir).expect("Open database file")));
+    let library = use_hook(|| Rc::new(Library::new(db.clone(), &config.books_dir)));
     let settings = use_hook(|| {
         Signal::new(
-            library
-                .db()
-                .settings()
+            db.settings()
                 .or_log("read your settings")
                 .flatten()
                 .unwrap_or_default(),
@@ -67,16 +73,13 @@ fn App() -> Element {
     use_context_provider(|| settings);
 
     use_effect({
-        let library = library.clone();
+        let db = db.clone();
         move || {
-            _ = library
-                .db()
-                .save_settings(&settings())
-                .or_log("save your settings");
+            _ = db.save_settings(&settings()).or_log("save your settings");
         }
     });
 
-    epub::use_register_covers_handler(library.books_dir().to_path_buf());
+    epub::use_register_covers_handler(config.books_dir.clone());
 
     rsx! {
         document::Link {

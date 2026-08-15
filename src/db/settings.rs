@@ -57,7 +57,7 @@ mod test {
     #[test]
     fn settings_round_trip_and_the_latest_save_wins() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let db = Db::open(dir.path().join("test.sqlite3")).expect("open");
+        let db = Db::open(dir.path()).expect("open");
 
         assert_eq!(db.settings().expect("empty settings"), None);
 
@@ -103,9 +103,10 @@ mod test {
     #[test]
     fn an_unknown_stored_theme_slug_falls_back_to_the_default() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let db = Db::open(dir.path().join("test.sqlite3")).expect("open");
+        let db = Db::open(dir.path()).expect("open");
 
-        db.save_settings(&Settings::default()).expect("seed the row");
+        db.save_settings(&Settings::default())
+            .expect("seed the row");
         db.conn
             .execute("UPDATE settings SET theme = 'chartreuse' WHERE id = 1", [])
             .expect("corrupt the slug");
