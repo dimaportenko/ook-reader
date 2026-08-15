@@ -4772,3 +4772,154 @@ red, so the assertion is live and not merely green-by-construction.
 >
 > Filed into **8e**. Not fixed here: it is a behavior change, and a refactor step that also
 > changes behavior is two steps pretending to be one.
+
+
+---
+
+## Step 8e — the misfilings, the duplication pass, and the deferred questions
+
+> **Status:** done — committed in `cf96fb5` (the behavior fix) and `3954167` (the refactor
+> sweep), **105 tests green** (103 → 105). `cargo clippy --all-targets` clean.
+
+This step carries three different kinds of change, and they are kept apart deliberately — the
+behavior fix is a **separate commit** from the refactor sweep, because a refactor step that also
+changes behavior is two steps pretending to be one. That is why this step has two hashes.
+
+### Act 1 — the serve-path defect (behavior; its own commit)
+
+8c's finding, fixed test-first. The discriminating case was already inside the bundled fixture:
+
+| resource | manifest declares | extension implies |
+|---|---|---|
+| `toc.ncx` | `application/x-dtbncx+xml` | `application/octet-stream` |
+
+```rust
+#[test]
+fn the_manifest_declaration_beats_the_extension_guess() {
+    let epub = Epub::open(crate::TEST_BOOK).expect("open fixture book");
+
+    let served = serve_epub_resource(&epub, "/OEBPS/toc.ncx", Settings::default())
+        .expect("the fixture declares a toc.ncx");
+
+    assert_eq!(served.content_type, "application/x-dtbncx+xml");
+    assert_eq!(content_type_for("/OEBPS/toc.ncx"), "application/octet-stream");
+}
+```
+
+Watched red first, with exactly the predicted values:
+
+```
+  left: "application/octet-stream"
+ right: "application/x-dtbncx+xml"
+```
+
+The fix is the trim that was never right — rbook's manifest hrefs are absolute zip paths, so
+stripping the leading `/` guaranteed a miss:
+
+```diff
+-        .by_href(path.trim_start_matches('/'))
++        .by_href(path)
+```
+
+The second assertion is the one that keeps the test honest. Without it the test would still pass
+if someone later taught `content_type_for` about `.ncx`, and it would no longer be testing that
+the *manifest* won.
+
+### Act 2 — the two misfilings
+
+Both are 8b's finding at a smaller scale: **a type filed under its first consumer rather than
+under what it is.**
+
+- **`Locator` → `epub.rs`**, next to `LinkTarget`, which is structurally the same idea (a place in
+  a book). It was in `db/positions.rs` because persistence is what first needed it. The
+  alternative home was `nav.rs`, where it is consumed for restore — rejected on **dependency
+  direction**: `db` needs the type, and pointing a store at a module full of Dioxus hooks is worse
+  than pointing it at a domain module. `library`'s re-export goes with it; `Book`'s stays, because
+  `Book` really is the store's row.
+- **`now_secs` → `src/clock.rs`.** A wall clock filed under `library` because importing a book was
+  the first thing that needed a timestamp — but all three call sites are in `ui/`, and none of
+  them is library work. A six-line module looks thin until you notice the repo already keeps
+  `config.rs` and `window.rs` at exactly that size; one idea per module is the shape here.
+
+### Act 3 — the duplication pass
+
+**The two `<select>` pickers now share one.** `ui/components/picker.rs` holds a `SlugPicker` that
+knows how to render a list of slugs and report the chosen one; `ui/theme.rs` and `ui/font.rs`
+shrink to the part that differs — which field of `Settings` to write.
+
+```rust
+SlugPicker {
+    options: Theme::ALL.iter().map(|opt| opt.slug()).collect::<Vec<_>>(),
+    selected: settings().theme.slug(),
+    on_pick: move |slug: String| settings.write().theme = Theme::from_slug(&slug),
+}
+```
+
+Two things worth naming:
+
+- **This is what 8d bought.** A picker that does not know what a `Settings` is belongs in
+  `ui/components/`; the wrappers that do belong in `ui/`. The layer 8d created immediately had
+  something to hold.
+- **A generic `Picker<T: Choice>` was considered and dropped.** It would need a trait carrying
+  `ALL`/`slug`/`from_slug`, and `Theme` and `FontFamily` already have those as inherent methods —
+  so the trait would either duplicate them or force churn at every existing call site. Passing
+  slugs is less clever and costs one `collect` per render of a six-item list. `Theme` gained an
+  `ALL` const to match `FontFamily`, which also moved "what are the options" out of the component
+  and into the model where it belongs.
+
+**The `{}.{:02}` formatters were two, not three** — the sketch said three. Now one `hundredths`
+helper. Small, but the duplication was of a *format contract*: both call sites have to agree that
+the stored integer is hundredths, and that agreement now exists in one place.
+
+**The forty-pixel circle was not duplication — it was dead code**, which is a better finding than
+the one the interlude recorded. `PopoverTrigger` stopped using `Styles::dx_popover_trigger` and
+switched to the global `.icon-button` at some point; the module sheet's rules were left behind.
+The proof is in the built stylesheet, because `css_module` hashes every selector:
+
+```
+.dx-popover-trigger-a5c94996 { … }     ← emitted
+Styles::dx_popover_trigger             ← never referenced in Rust
+```
+
+Nothing can render that class, so the 26 lines were unreachable. Deleted, provably without visual
+effect — which is the only reason it was safe to do without a `dx serve` check.
+
+**The gear's raw `"view-box"` was already fixed.** Both SVGs write `view_box:`. Recorded so the
+list does not keep carrying a resolved item.
+
+### The deferred questions, answered
+
+- **Should `positions` live in `db/books.rs`?** No — leave it. The argument for merging was that
+  it is FK-cascaded and meaningless without a book. But after Act 2 `db/positions.rs` is
+  twelve lines of SQL over a type it no longer owns; merging it into `books.rs` would mix two
+  tables' statements in one file to save a file. The module boundary is doing its job.
+- **Should `Settings` be converted at the db boundary?** No, and 8b already dissolved most of it.
+  What is left: the row and the struct have identical shape, so a conversion would be an identity
+  function with a name. Revisit only if they ever want to differ.
+- **Do the `mod test` blocks belong where they now sit?** The file-store tests are still in
+  `library/mod.rs` rather than `library/files.rs`. Still true, still safe to move, and still not
+  done — it is a pure test move with no production change, so it is the cheapest thing left in the
+  phase. **Left standing deliberately**; this step was already carrying three kinds of change.
+- **Does `Error` want splitting per store?** Answered in 8c by shrinking it instead. Every
+  remaining variant has a raiser inside `library/`.
+- **5h's `--USER__fontFamily` double route.** Still declared both in the served `:root` block and
+  in the bootstrap's inline style. **Weighed here, not changed:** collapsing every variable into
+  the bootstrap would make the two injection routes one mechanism and delete `vars()` — but it
+  would also make *all* theming depend on JavaScript running, where today a chapter is born
+  correctly themed in its own bytes. That is a resilience property worth more than the
+  deduplication. The double declaration is the price, and it is the right trade.
+
+### Scope note
+
+- **103 → 105.** One test for the behavior change, and one for an invariant the picker rewrite
+  quietly introduced: `selected` used to be enum equality and is now slug equality, so a theme
+  slug that failed to round-trip — or collided with another — would tick the wrong row.
+  `FontFamily` already had that test; `Theme` did not, and `Theme::ALL` is new here. The rest of
+  the sweep is compiler-verified moves with the existing suite as their safety net.
+- **No `dx serve` check was performed**, and two items in Act 3 are visual: the rewritten pickers
+  and the deleted CSS. The CSS deletion is proved safe by the hash argument above. The pickers are
+  **not** proved — no test renders them, so "the Day/Sepia/Night dropdown still selects and still
+  shows the current value" needs an eyeball before this is really done.
+- **`ui/theme.rs` and `ui/font.rs` stayed separate files.** The sketch floated merging them once
+  the pickers collapsed; they cannot fully merge, since each writes a different field, and two
+  nineteen-line files match the repo's one-component-per-file idiom.

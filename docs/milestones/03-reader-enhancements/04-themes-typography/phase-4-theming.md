@@ -235,15 +235,19 @@ implementation → why. Smallest-first:
           The only edited line in the moved tree is the `css_module` path, which resolves at
           compile time (`error: Asset at … doesn't exist` when pointed at a missing file), so
           the build is what proves the stylesheet travelled with the module.
-    - [ ] **8e — the small misfilings, then the duplication pass.** Now also carries 8c's finding:
-          `serve_epub_resource`'s `by_href` lookup misses on every resource, because rbook's
-          manifest hrefs keep the leading `/` that `spine_hrefs` trims — so the content type always
-          comes from the extension fallback. A behavior fix, not a refactor. Then: `Locator` (a place in a book,
-          filed under the thing that persists it) and `now_secs` (a wall clock, filed under the
-          thing that first called it) — 8b's finding at a smaller scale, each needing its own
-          judgement about where it lands. Then the phase-ending sweep the sketch lists: the two
-          near-identical `<select>` pickers, the three `{}.{:02}` formatters, the two chrome nits,
-          and writing up whatever of Step 6's deferred questions the module moves left standing.
+    - [x] **8e — the small misfilings, then the duplication pass.** Committed in `cf96fb5` (the
+          behavior fix) and `3954167` (the refactor sweep), **105 tests green**. Two hashes because
+          8c's finding was a *behavior* change — `serve_epub_resource`'s `by_href` missed on every
+          resource, since rbook's manifest hrefs keep the leading `/` that `spine_hrefs` trims — and
+          folding it into a refactor would make one step two. Then `Locator` (to `epub.rs`, beside
+          `LinkTarget`) and `now_secs` (to `src/clock.rs`), the two `<select>` pickers folded into
+          one `SlugPicker` under the `ui/components/` layer 8d had just created, and the two
+          `{}.{:02}` formatters — two, not the three the sketch claimed — into one helper. The
+          "forty-pixel circle declared twice" turned out to be **dead CSS** rather than
+          duplication, provable from the hashed selector. All five deferred questions are answered
+          in the build log; two of them as *leave it alone*, with the reasoning recorded.
+          **Outstanding:** no `dx serve` eyeball on the rewritten pickers, and the `library/`
+          test-module relocation is still open.
 
 ## Known constraints (from research)
 
