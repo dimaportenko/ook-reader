@@ -20,9 +20,6 @@ pub(crate) enum Error {
 
     #[error("could not read the EPUB: {0}")]
     Ebook(#[from] rbook::ebook::errors::EbookError),
-
-    #[error("could not read the EPUB's spine: {0}")]
-    Spine(#[from] epub::Error),
 }
 
 pub(crate) use crate::db::{Book, Locator};

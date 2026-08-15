@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use dioxus::desktop::{use_asset_handler, wry::http::Response};
@@ -31,6 +31,15 @@ const PATH: &AsciiSet = &CONTROLS
 pub(crate) enum Error {
     #[error("spine entry with a dangling idref")]
     DanglingIdref,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum OpenError {
+    #[error("could not read the EPUB: {0}")]
+    Ebook(#[from] rbook::ebook::errors::EbookError),
+
+    #[error("could not read the EPUB's spine: {0}")]
+    Spine(#[from] Error),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -268,7 +277,7 @@ pub(crate) fn read_metadata(epub: &Epub) -> BookMeta {
     }
 }
 
-pub(crate) fn spine_hrefs(epub: &Epub) -> Result<Vec<String>, Error> {
+fn spine_hrefs(epub: &Epub) -> Result<Vec<String>, Error> {
     epub.spine()
         .into_iter()
         .map(|entry| {
@@ -280,6 +289,12 @@ pub(crate) fn spine_hrefs(epub: &Epub) -> Result<Vec<String>, Error> {
                 .to_string())
         })
         .collect()
+}
+
+pub(crate) fn open_with_spine(path: &Path) -> Result<(Epub, Vec<String>), OpenError> {
+    let epub = Epub::open(path)?;
+    let docs = spine_hrefs(&epub)?;
+    Ok((epub, docs))
 }
 
 #[cfg(test)]
@@ -658,6 +673,19 @@ mod test {
         assert_eq!(hrefs.len(), 15); // same count load_spine produced
         assert!(hrefs[2].ends_with(".xhtml"));
         assert!(hrefs.iter().all(|h| !h.starts_with('/'))); // relative to the zip root, as before
+    }
+
+    #[test]
+    fn open_with_spine_pairs_the_book_with_its_own_reading_order() {
+        let (epub, docs) =
+            open_with_spine(Path::new(crate::TEST_BOOK)).expect("the bundled fixture opens");
+
+        assert_eq!(docs, spine_hrefs(&epub).expect("fixture spine"));
+        assert!(
+            docs.iter()
+                .all(|href| epub.read_resource_bytes(format!("/{href}")).is_ok()),
+            "every returned href must be readable from the epub it was returned with",
+        );
     }
 
     #[test]

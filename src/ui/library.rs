@@ -50,7 +50,7 @@ pub(crate) fn LibraryBooks() -> Element {
                                 let path = book.path;
 
                                 move |_| {
-                                    match open_epub(std::path::Path::new(&path))
+                                    match epub::open_with_spine(std::path::Path::new(&path))
                                     {
                                         Ok((epub, docs)) => {
                                             status.set(None);
@@ -212,10 +212,4 @@ fn refresh_books(
         }
         Err(error) => status.set(Some(format!("Could not refresh your library: {error}"))),
     }
-}
-
-fn open_epub(path: &std::path::Path) -> Result<(Epub, Vec<String>), library::Error> {
-    let epub = Epub::open(path)?;
-    let docs = epub::spine_hrefs(&epub)?;
-    Ok((epub, docs))
 }
