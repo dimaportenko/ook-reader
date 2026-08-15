@@ -4114,9 +4114,18 @@ error types, and the fix is to stop naming a concrete error at all.
 
 ### The headline item: `library.db().settings()` reads wrong, and it is not the accessor's fault
 
-> **Half of this landed as [Step 8a](#step-8a--hoist-db-to-app) (`66472df`).** The ownership
-> hoist and the accessor's removal are done; the four pass-throughs, the `library::Error`
-> shrink and `ui/reader.rs`'s switch to `Db` are not. The sketch below is left as written.
+> **Half of this landed as [Step 8a](#step-8a--hoist-db-to-app) (`66472df`)** — the ownership hoist
+> and the accessor's removal. **The other half was withdrawn, not deferred.** The four
+> pass-throughs stay; `ui/reader.rs` keeps using `Library::position`. Only the `library::Error`
+> shrink survived, as [8c](#step-8c--shrink-libraryerror), and it survived on its own evidence
+> rather than on this section's.
+>
+> The sketch below is left as written, because the way it goes wrong is the useful part. Read it
+> knowing that everything from "What that buys" onward is a list of **consequences of the hoist**,
+> and that the sketch then argues for them as if they were its **purpose**. They are not: the
+> purpose was decoupling `Library` from `Settings`, and 8a served it completely.
+> [Step 8b](#step-8b--move-the-settings-model-out-of-web) opens with why the difference matters and
+> what the sketch's real finding turned out to be.
 
 Raised while reading 7b back: getting the *settings* by asking the *library* is nonsense on the
 face of it — a font size has nothing to do with a shelf of books. 7b's "why" defended
@@ -4333,3 +4342,291 @@ bare `Config` deep-copies two `PathBuf`s each time it re-renders — which `db` 
 avoid by being `Rc`. Startup-only paths are not worth optimising, but this one is not
 startup-only. `Rc<Config>` if it ever matters.
 </content>
+
+---
+
+## Step 8b — move the settings model out of `web/`
+
+> **Status:** done — committed in `09692db` (**102 tests green**, unchanged; `cargo clippy
+> --all-targets` clean). **Replaces an earlier 8b** ("delete the four pass-throughs"), which was
+> withdrawn before any code was written — see the note below. Was 8e in the first pass at Step 8's
+> sequence; promoted, because it is the only remaining item on the thread 8a was actually pulling.
+
+### Why the first 8b was withdrawn
+
+Worth recording, because the mistake is easy to repeat. 8a's *purpose* was to decouple `Library`
+from `Settings`: reaching the reader's font size by asking a shelf of books was nonsense, and the
+cause was `Library` being the sole owner of `Db`. That purpose was fully served by 8a — `App` owns
+`Rc<Db>`, `db.settings()` is called directly, `Library::db()` is gone.
+
+The sketch above then listed four *consequences* under "what that buys," the first of which was
+that `list`, `touch_opened`, `save_position` and `position` become deletable pass-throughs. That
+list was an observation, not a plan, and promoting its first item to a step gave the step no
+motivation beyond "these methods are short." Held up against the actual purpose it did not
+survive one round of questioning:
+
+- `Library` is a **facade**, and the pass-throughs are what a facade is made of. Deleting them
+  makes `ui/` hold two contexts and learn which store owns which operation — a split that means
+  "does this also touch the filesystem," i.e. exactly the implementation detail Step 6 created
+  `Library` to hide.
+- It is not stable. The first time `list` wants to skip books whose managed file has gone missing
+  it needs `BookFiles` and moves back onto `Library`, taking every call site with it.
+- The one honest complaint — `list` returns a `library::Error` carrying `Io` and `Ebook` variants
+  it cannot raise — costs nothing, because a facade's error type is the union of what the facade
+  does and no caller matches on it.
+
+**The four pass-throughs stay.** So does `ui/reader.rs`'s use of `Library::position`.
+
+### The finding that survives
+
+8a fixed one instance of a specific defect: **a type filed under its first consumer rather than
+under what it is.** `Db` lived inside `Library` because `Library` was the first thing to need a
+database. Three more instances are live:
+
+| type | filed under | because | creates |
+|---|---|---|---|
+| `Settings`, `Theme`, `FontFamily` | `web/` | rendering `--USER__*` was the first thing done with them | **`db` → `web`** |
+| `Locator` | `db/positions.rs` | `db` persists it | `nav` → `library` |
+| `now_secs` | `library/mod.rs` | `Library` called it first | `ui/reader` → `library` |
+
+The first **is the Settings thread continuing.** `src/db/settings.rs:4` reads:
+
+```rust
+use crate::web::{font::FontFamily, settings::Settings, theme::Theme};
+```
+
+A store importing the webview-payload module — the same mistake 8a fixed, one layer down, and the
+last place `Settings` is coupled to something it has nothing to do with. The other two are the same
+finding against different module pairs and are held back to 8e.
+
+### Runnable check first (`cargo test`) — the safety net, not a target
+
+```
+cargo test                 # 102 passing, before and after
+cargo clippy --all-targets
+```
+
+A pure move: no signature changes, no new type, no assertion touched. Seven import lines and a
+`mod` declaration.
+
+### The move
+
+```
+src/settings/mod.rs    Settings, Default, the 8 steppers, the 12 MIN/MAX/STEP constants
+src/settings/theme.rs  Theme
+src/settings/font.rs   FontFamily
+```
+
+`main.rs` gains `mod settings;`; `web/mod.rs` drops to just `pub mod assets;`. The seven import
+lines, all confirmed by grep:
+
+| file | now |
+|---|---|
+| `db/settings.rs:4` | `use crate::settings::{font::FontFamily, theme::Theme, Settings};` |
+| `epub.rs:10` | `use crate::settings::Settings;` |
+| `epub.rs:287` *(test)* | `use crate::settings::theme::Theme;` |
+| `ui/font.rs:3` | `use crate::settings::{font::FontFamily, Settings};` |
+| `ui/theme.rs:3` | `use crate::settings::{theme::Theme, Settings};` |
+| `ui/reader.rs:11` | `settings::Settings,` |
+| `ui/settings.rs:7` | `settings::{…}` |
+
+### Take the CSS rendering with it
+
+The sketch left this open — should `css_vars`, `vars`, `user_layer`, `inline_styles` and
+`bootstrap_js` travel to `settings/`, or stay in `web/` as `impl Settings` blocks in a child
+module, the idiom Step 6 established with `db/positions.rs`? A fact settles it cheaply:
+
+**Those methods depend on nothing in `web/`.** The file's one `web` import — `INJECTED_ASSETS` —
+is already written `#[cfg(test)] use crate::web::assets::INJECTED_ASSETS;`, so `settings/` compiles
+with **zero** `web` imports outside tests whichever way it is split.
+
+> **Correction.** An earlier draft of this step said the import was a bare top-level `use` reached
+> only through the test module's `use super::*`, and proposed moving it inside the test block to
+> make that visible. It was already `#[cfg(test)]`-gated when the step was written. The conclusion
+> stands — the dependency is test-only — but there was nothing to tidy, and the step shipped
+> without that edit.
+
+No forcing function, so take the whole file and decide the split later with it on screen. What to
+look at when you do: `src/settings/mod.rs` lands at 745 lines, ~170 of them real code. That is a
+chunky `mod.rs`, and the natural seam is a `settings/css.rs` holding the eight rendering methods —
+but that is a *size* argument, not a layering one, and it is a different step.
+
+### Why it works
+
+- **It dissolves `db` → `web`.** `db/settings.rs` importing the module that builds the webview
+  payload is what read backwards; `db` importing `crate::settings::Settings` is a store depending
+  on a domain type, which is unremarkable. Same fix as 8a, one layer down. It also finishes off
+  Step 6's deferred *"should `Settings` be converted at the db boundary?"* — once the type is
+  `crate::settings::Settings` the offensive half of the dependency is gone, and a `db`-owned row
+  struct is only worth it if the row and the struct ever want to differ in shape.
+- **The one surviving `web` edge is a test, and it should be.**
+  `the_pushed_vars_and_the_injected_layer_name_the_same_variables` asserts that what `Settings`
+  pushes and what `pagination.css` reads name the same variables — a genuine cross-module contract,
+  and after the move the `#[cfg(test)]` import states that in the file's first lines.
+- **`web/` becomes exactly one idea:** the bytes that go into the frame.
+- **Keep `web/` rather than collapsing to `src/assets.rs`.** A `src/assets/` directory next to the
+  project-root `/assets/` that the `asset!` macro reads from is two directories with one name
+  meaning different things — a worse problem than a thin module.
+
+### What landed
+
+Eleven files, **13 insertions and 12 deletions**, and git recorded all three moves as renames:
+
+```
+src/{web => settings}/font.rs            | 0     ← byte-identical
+src/{web => settings}/theme.rs           | 0     ← byte-identical
+src/{web/settings.rs => settings/mod.rs} | 5 ++++-
+```
+
+The only edit inside a moved file is `settings/mod.rs` gaining `pub mod font; pub mod theme;` and
+its sibling-import becoming a child-import. Everything else is eight single-line `use` changes and
+`web/mod.rs` collapsing to one line.
+
+Two things worth recording:
+
+- **The prediction about the split held.** `settings/` needed no `web` import in production code,
+  so taking the CSS rendering along cost nothing and forced no decision. `src/settings/mod.rs` is
+  now 748 lines, which makes the size question real — see the scope note.
+- **The evidence the move actually happened is in the test names.** 27 tests moved from
+  `web::settings::test::*` to `settings::test::*`, and none were left behind at the old path. For
+  a refactor whose test count is unchanged by design, that rename is the only thing in the run that
+  distinguishes "moved" from "did nothing."
+
+`settings/` inherited `web/`'s module shape (`pub mod font; pub mod theme;` with callers writing
+`crate::settings::theme::Theme`) rather than `db/`'s (private `mod` plus `pub(crate) use`
+re-exports, so callers write the flat `crate::db::Locator`). Both idioms are already in the repo;
+preserving the one the code arrived with is what keeps this a move. Flattening to
+`crate::settings::{FontFamily, Settings, Theme}` is a five-file, six-line change if it ever reads
+better — it is not a defect, and it was deliberately not bundled in here.
+
+### Scope note
+
+- **`Locator` and `now_secs` are the same finding, different instances** — deliberately not here.
+  Each is a different module pair and a separate judgement about where it lands (`nav.rs`?
+  `crate::clock`? `ui/mod.rs` next to `OrLog`?). They are 8e.
+- **`ui/reader.rs` still imports `Library`** for `position`/`save_position`. Under the facade
+  reading that is fine, and this step does not relitigate it.
+- **`src/components/` is untouched** — that is 8d.
+- **Sequencing note carried from the sketch:** if `ThemePicker` and `FontFamilyPicker` later
+  collapse into one generic control, `ui/theme.rs` and `ui/font.rs` may merge with them. That work
+  is in 8e, *after* these moves, so the merge happens once in the final location.
+
+---
+
+## Step 8c — shrink `library::Error`
+
+> **Status:** planned. Independent of 8b — it survived the reframe untouched because it is not a
+> pass-through argument: `Spine` is a variant of `library::Error` that nothing in `library/` can
+> raise.
+
+### The crux
+
+Walk what actually raises each variant:
+
+| variant | raised by |
+|---|---|
+| `Io` | `canonicalize()?`, `files.import()?` — both in `add_from_path` |
+| `Sqlite` | `managed_paths_for_source`, `upsert_book`, `delete_book`, and the four pass-throughs |
+| `Ebook` | `Epub::open(&managed_path)?` in `add_from_path` |
+| `Spine` | **nothing in `library/`** |
+
+`Spine`'s only source is `open_epub` (`ui/library.rs:217`) — not a `Library` method, not in
+`library/`, and it borrowed the enum because the enum happened to be in scope:
+
+```rust
+fn open_epub(path: &std::path::Path) -> Result<(Epub, Vec<String>), library::Error> {
+    let epub = Epub::open(path)?;
+    let docs = epub::spine_hrefs(&epub)?;
+    Ok((epub, docs))
+}
+```
+
+So the shrink is one variant out. The interesting half is *where the function goes*, because that
+choice changes what `epub` has to expose.
+
+### Runnable check first (`cargo test`) — the safety net, not a target
+
+```
+cargo test                 # 102 passing, before and after
+cargo clippy --all-targets
+```
+
+Plus one check the compiler makes directly: narrowing `spine_hrefs` to a private `fn` either builds
+or it does not. That is not a test, it is the proof of act 1.
+
+**Discipline that matters here:** copy the `#[error("…")]` strings verbatim. The call site does
+`format!("Open failed: {error}")`, so identical strings mean the user-visible message is
+byte-identical and this stays a refactor. Rewording is a separate change.
+
+### Act 1 — `open_epub` moves to `epub.rs`
+
+Three homes were on the table:
+
+- **Add `Ebook` to the existing `epub::Error`.** Rejected — `spine_hrefs` returns that enum and can
+  never raise `Ebook`. That trades one dishonest enum for another.
+- **A local enum in `ui/library.rs`.** Works, and honest. But it leaves an epub-parsing function in
+  the presentation layer.
+- **Its own error, in `epub.rs`.** Chosen — see the payoff below.
+
+```rust
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum OpenError {
+    #[error("could not read the EPUB: {0}")]
+    Ebook(#[from] rbook::ebook::errors::EbookError),
+
+    #[error("could not read the EPUB's spine: {0}")]
+    Spine(#[from] Error),
+}
+
+pub(crate) fn open_with_spine(path: &Path) -> Result<(Epub, Vec<String>), OpenError> {
+    let epub = Epub::open(path)?;
+    let docs = spine_hrefs(&epub)?;
+    Ok((epub, docs))
+}
+```
+
+**The payoff: `spine_hrefs` becomes private.** Its only caller outside `epub.rs` was `open_epub`;
+move the function in and the only callers left are `open_with_spine` and `epub.rs`'s own tests.
+Drop the `pub(crate)`:
+
+```rust
+fn spine_hrefs(epub: &Epub) -> Result<Vec<String>, Error> {
+```
+
+And `epub::Error` follows it down — after this, nothing outside the module names that enum either,
+so `DanglingIdref` stops being crate-visible vocabulary and goes back to being an implementation
+detail of "how do I list a spine."
+
+Neither narrowing is something clippy will suggest. A `pub(crate)` item used *anywhere* in the
+crate produces no warning, so over-exposure is invisible to tooling — you only find it by asking
+"who actually calls this?", which is what the review step is for.
+
+### Act 2 — drop `Spine` from `library::Error`
+
+```rust
+pub(crate) enum Error {
+    Sqlite(#[from] rusqlite::Error),
+    Io(#[from] std::io::Error),
+    Ebook(#[from] rbook::ebook::errors::EbookError),
+}
+```
+
+The `use crate::epub` in `library/mod.rs` stays; `read_metadata` and `extension_for` still need it.
+
+This is also what makes Step 6's deferred *"does `Error` want splitting per store?"* dissolve rather
+than get answered. The enum was never too broad because it mixed stores — it was too broad because
+it carried a variant for a function in a different module. What is left is a facade error whose
+`Sqlite` and `Io` variants are only ever converted and never matched, which is normal for a facade
+and worth a line in the enum's docs rather than a change.
+
+### Scope note
+
+- **No test moves and none is added: 102 → 102.** One is tempting — `open_with_spine` has zero
+  coverage today and lands in a module whose test block already opens `TEST_BOOK` in three places,
+  so "the bundled book yields a non-empty spine" is about four lines. It would lock down behavior
+  that is currently implicit, which is the one case a refactor step may add a test. Optional; if
+  taken, the count is 103 and the commit message should say so.
+- **`library::Locator`'s re-export stays.** `Library::position` still returns a `Locator`, so the
+  re-export is doing real work. Where `Locator` should *live* is 8e.
+- **`ui/library.rs` keeps its `Rc<Library>`** and all four pass-throughs. This step touches the
+  error type and one function's address, nothing else.

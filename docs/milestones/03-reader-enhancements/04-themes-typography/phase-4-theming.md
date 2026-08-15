@@ -185,19 +185,53 @@ implementation → why. Smallest-first:
         `a521d54`, **93 tests green**, `dx serve` confirmed.
 - [ ] **Step 8 — Review & refactor** (per the repo's phase-ending convention). **Heavier on module
       organization than planned, not lighter.** Step 6 was expected to have spent that budget, and
-      it did — for the *data* layer. Three findings since say otherwise elsewhere: `Library` owning
-      `Db` is what forces `library.db().settings()` and hides four dead pass-throughs behind it;
-      `src/components/` is a `dx`-generated top-level module with one consumer; and `settings`,
-      `theme` and `font` sit in `web/`, which exists for the webview payload, not the reader's
-      model. The first deletes code from three files, so it goes first. Plus the four questions
-      Step 6 deferred — one of which the module move largely answers.
+      it did — for the *data* layer. The findings since are all one defect wearing different
+      clothes: **a type filed under its first consumer rather than under what it is.** `Db` lived
+      inside `Library` because `Library` first needed a database (8a); `Settings`, `Theme` and
+      `FontFamily` live in `web/` because rendering `--USER__*` was the first thing done with them,
+      which points `db` at `web`; `Locator` and `now_secs` are the same, smaller. Plus
+      `src/components/`, a `dx`-generated top-level module with one consumer, and the four questions
+      Step 6 deferred — two of which the module moves answer outright.
+
+      > **One withdrawn step, recorded on purpose.** The first 8b was "delete the four
+      > pass-throughs `list`/`touch_opened`/`save_position`/`position`," taken from the *consequences*
+      > 8a's sketch listed rather than from 8a's purpose. It was dropped before any code was written:
+      > `Library` is a facade and pass-throughs are what a facade is made of, so deleting them buys
+      > two contexts in `ui/` and a split that means "does this also touch the filesystem" — the very
+      > detail Step 6 built `Library` to hide. See the build log for the full reasoning.
     - [x] **8a — hoist `Db` to `App`.** The ownership move only. `App` holds `Rc<Db>` and hands a
           clone to `Library::new`; `Library::db()` is gone. Deleting `Library::open_default` took
           the `create_dir_all` with it, which is what created the data dir *and* the books dir —
           so a new `Config` type now owns both paths and creates them, and a fresh install no
           longer panics before the first frame. Committed in `66472df`, **102 tests green**.
-    - [ ] **8b — the deletions 8a unlocks.** The four pass-throughs, the `library::Error` shrink,
-          and `ui/reader.rs`'s positions moving to `Db`.
+    - [x] **8b — move the settings model out of `web/`.** The Settings thread 8a was pulling, one
+          layer down and finally at its end: `src/db/settings.rs:4` imports
+          `crate::web::{font::FontFamily, settings::Settings, theme::Theme}` — a store reaching into
+          the module that builds the webview payload. `Settings`, `Theme` and `FontFamily` become
+          `src/settings/`, seven import lines change, and `web/` collapses to the one idea it was
+          created for. The CSS rendering travels with them, because it turns out to depend on
+          nothing in `web/`: the `INJECTED_ASSETS` import is used only inside `#[cfg(test)]`. A pure
+          move — the same **102 tests**, no signature changed. Also answers Step 6's *"should
+          `Settings` be converted at the db boundary?"*: once the type is `crate::settings::Settings`
+          there is nothing offensive left to convert. Committed in `09692db`, **102 tests green** —
+          13 insertions against 12 deletions, with `font.rs` and `theme.rs` moving byte-identical.
+          The only evidence in the run is 27 tests renaming themselves from `web::settings::test::`
+          to `settings::test::`, which is what a refactor's proof looks like when the count is
+          unchanged by design.
+    - [ ] **8c — shrink `library::Error`.** Independent of 8b, and it survived the reframe untouched
+          because it is not a pass-through argument: `Spine` is a variant nothing in `library/` can
+          raise. Its only source is `open_epub`, which is not a `Library` method and lives in
+          `ui/library.rs`. Moving that function to `epub.rs` as `open_with_spine` (with its own
+          `OpenError`) is what pays: `spine_hrefs` loses its last external caller and goes private,
+          taking `epub::Error` out of the crate's vocabulary with it — a narrowing no lint can find,
+          since a `pub(crate)` item used anywhere never warns. Still **102 tests**.
+    - [ ] **8d — `src/components/` under `src/ui/`.** Sketched above.
+    - [ ] **8e — the small misfilings, then the duplication pass.** `Locator` (a place in a book,
+          filed under the thing that persists it) and `now_secs` (a wall clock, filed under the
+          thing that first called it) — 8b's finding at a smaller scale, each needing its own
+          judgement about where it lands. Then the phase-ending sweep the sketch lists: the two
+          near-identical `<select>` pickers, the three `{}.{:02}` formatters, the two chrome nits,
+          and writing up whatever of Step 6's deferred questions the module moves left standing.
 
 ## Known constraints (from research)
 
