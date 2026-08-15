@@ -218,15 +218,23 @@ implementation → why. Smallest-first:
           The only evidence in the run is 27 tests renaming themselves from `web::settings::test::`
           to `settings::test::`, which is what a refactor's proof looks like when the count is
           unchanged by design.
-    - [ ] **8c — shrink `library::Error`.** Independent of 8b, and it survived the reframe untouched
+    - [x] **8c — shrink `library::Error`.** Independent of 8b, and it survived the reframe untouched
           because it is not a pass-through argument: `Spine` is a variant nothing in `library/` can
           raise. Its only source is `open_epub`, which is not a `Library` method and lives in
           `ui/library.rs`. Moving that function to `epub.rs` as `open_with_spine` (with its own
-          `OpenError`) is what pays: `spine_hrefs` loses its last external caller and goes private,
-          taking `epub::Error` out of the crate's vocabulary with it — a narrowing no lint can find,
-          since a `pub(crate)` item used anywhere never warns. Still **102 tests**.
+          `OpenError`) is what pays: `spine_hrefs` loses its last external caller and goes private
+          — a narrowing no lint can find, since a `pub(crate)` item used anywhere never warns.
+          Committed in `5797c36`, **103 tests green**. Two corrections to the plan, both recorded in
+          the steps doc: `epub::Error` could *not* follow `spine_hrefs` down (a `pub(crate)` enum's
+          variant fields carry the enum's visibility, so `OpenError::Spine` keeps the type
+          crate-nameable — rustc's `private_interfaces` said so), and the optional test was taken,
+          making this 102 → 103 rather than 102 → 102. Writing it turned up an unrelated latent
+          defect in `serve_epub_resource`, filed into 8e.
     - [ ] **8d — `src/components/` under `src/ui/`.** Sketched above.
-    - [ ] **8e — the small misfilings, then the duplication pass.** `Locator` (a place in a book,
+    - [ ] **8e — the small misfilings, then the duplication pass.** Now also carries 8c's finding:
+          `serve_epub_resource`'s `by_href` lookup misses on every resource, because rbook's
+          manifest hrefs keep the leading `/` that `spine_hrefs` trims — so the content type always
+          comes from the extension fallback. A behavior fix, not a refactor. Then: `Locator` (a place in a book,
           filed under the thing that persists it) and `now_secs` (a wall clock, filed under the
           thing that first called it) — 8b's finding at a smaller scale, each needing its own
           judgement about where it lands. Then the phase-ending sweep the sketch lists: the two

@@ -4515,9 +4515,10 @@ better — it is not a defect, and it was deliberately not bundled in here.
 
 ## Step 8c — shrink `library::Error`
 
-> **Status:** planned. Independent of 8b — it survived the reframe untouched because it is not a
+> **Status:** done — committed in `5797c36`, **103 tests green** (102 → 103; the optional test below
+> was taken). Independent of 8b — it survived the reframe untouched because it is not a
 > pass-through argument: `Spine` is a variant of `library::Error` that nothing in `library/` can
-> raise.
+> raise. See [What landed](#what-landed-8c) for the two places the plan was wrong.
 
 ### The crux
 
@@ -4597,6 +4598,29 @@ And `epub::Error` follows it down — after this, nothing outside the module nam
 so `DanglingIdref` stops being crate-visible vocabulary and goes back to being an implementation
 detail of "how do I list a spine."
 
+> **Correction — the second narrowing does not compile.** `epub::Error` cannot go private while
+> `OpenError` wraps it. A variant's fields carry the *enum's* visibility, so `OpenError::Spine::0`
+> is reachable at `pub(crate)` and the compiler refuses to let its type be less visible:
+>
+> ```
+> warning: type `epub::Error` is more private than the item `epub::OpenError::Spine::0`
+>          field `epub::OpenError::Spine::0` is reachable at visibility `pub(crate)`
+>          but type `epub::Error` is only usable at visibility `pub(self)`
+>          `#[warn(private_interfaces)]` on by default
+> ```
+>
+> That is not a technicality — any crate caller can `match … OpenError::Spine(e)` and bind an
+> `epub::Error`, so the type genuinely is still crate vocabulary. `Error` stays `pub(crate)`.
+>
+> The narrowing that *did* land is the one that was actually load-bearing: nothing outside
+> `epub.rs` can **call** `spine_hrefs` or **construct** a `DanglingIdref`. Visibility here
+> restricts the capability, not the name — and it is the capability that was over-exposed.
+>
+> Worth noting what caught this. Clippy is silent on over-exposure (the paragraph below), but
+> `private_interfaces` is a rustc lint that fires the moment you *under*-expose. The tooling
+> will tell you when a boundary is too tight and never when it is too loose, which is exactly
+> backwards from where the design mistakes are.
+
 Neither narrowing is something clippy will suggest. A `pub(crate)` item used *anywhere* in the
 crate produces no warning, so over-exposure is invisible to tooling — you only find it by asking
 "who actually calls this?", which is what the review step is for.
@@ -4630,3 +4654,65 @@ and worth a line in the enum's docs rather than a change.
   re-export is doing real work. Where `Locator` should *live* is 8e.
 - **`ui/library.rs` keeps its `Rc<Library>`** and all four pass-throughs. This step touches the
   error type and one function's address, nothing else.
+
+<a id="what-landed-8c"></a>
+
+### What landed
+
+Three files, +18/−12 before the test. `library::Error` is down to three variants and every one of
+them now has a raiser inside `library/`. Step 6's deferred *"does `Error` want splitting per
+store?"* dissolved rather than got answered: the enum was never too broad for mixing stores, it was
+too broad for carrying a variant belonging to a different module.
+
+The `#[error("…")]` strings were copied verbatim, so the string a user sees on a dangling-idref
+book — `format!("Open failed: {error}")` at the call site — is byte-identical. That is what keeps
+this a refactor rather than a silent behavior change wearing a move's clothes.
+
+**The optional test was taken, so 102 → 103.** Without it nothing in the suite named the symbol
+this step created:
+
+```rust
+#[test]
+fn open_with_spine_pairs_the_book_with_its_own_reading_order() {
+    let (epub, docs) =
+        open_with_spine(Path::new(crate::TEST_BOOK)).expect("the bundled fixture opens");
+
+    assert_eq!(docs, spine_hrefs(&epub).expect("fixture spine"));
+    assert!(
+        docs.iter()
+            .all(|href| epub.read_resource_bytes(format!("/{href}")).is_ok()),
+        "every returned href must be readable from the epub it was returned with",
+    );
+}
+```
+
+The property worth pinning is the *pairing*. `ui/library.rs` stores both halves in one `OpenBook`
+and later indexes `docs[spine_index]` against `epub`; a version of `open_with_spine` that returned
+a spine belonging to some other book would satisfy every type in the signature. The second
+assertion is what makes that a lie the test can catch.
+
+It was verified by mutation — swapping `format!("/{href}")` for `format!("/nope/{href}")` turns it
+red, so the assertion is live and not merely green-by-construction.
+
+> **Finding, out of scope — `serve_epub_resource`'s manifest lookup never hits.** The first draft
+> of that assertion used `epub.manifest().by_href(href)` and failed. The cause is not in this
+> step's diff:
+>
+> ```
+> spine href    = "OEBPS/wrap0000.xhtml"     -> by_href false
+> manifest href = "/OEBPS/374963762688302552_cover.jpg"
+> ```
+>
+> rbook stores manifest hrefs **with a leading `/`**; `spine_hrefs` trims it. So
+> `serve_epub_resource`'s `by_href(path.trim_start_matches('/'))` misses on every resource in the
+> book, and the content type *always* comes from the `content_type_for(path)` extension fallback.
+>
+> It is invisible today because the fallback covers the extensions this fixture uses, and the
+> existing `serves_an_image_resource_as_raw_bytes` test asserts `starts_with("image/")` — which the
+> fallback satisfies. It would surface on a resource whose type the extension cannot imply: an
+> embedded `.woff2` served as `application/octet-stream` rather than `font/woff2`, or a manifest
+> declaring a type at odds with the file's suffix. The `unwrap_or_else` is doing all the work and
+> the `Option` it is guarding is always `None` — a fallback that has quietly become the only path.
+>
+> Filed into **8e**. Not fixed here: it is a behavior change, and a refactor step that also
+> changes behavior is two steps pretending to be one.
