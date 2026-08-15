@@ -110,7 +110,8 @@ pub(crate) fn chapter_url(href: &str) -> String {
 }
 
 pub(crate) fn extension_for(media_type: &str) -> Option<&'static str> {
-    match media_type {
+    let media_type = media_type.to_ascii_lowercase();
+    match media_type.as_str() {
         "image/jpeg" => Some("jpg"),
         "image/png" => Some("png"),
         "image/gif" => Some("gif"),
@@ -120,8 +121,8 @@ pub(crate) fn extension_for(media_type: &str) -> Option<&'static str> {
 }
 
 pub(crate) fn content_type_for(path: &str) -> &'static str {
-    let ext = path.rsplit('.').next().unwrap_or("");
-    match ext {
+    let ext = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    match ext.as_str() {
         "css" => "text/css",
         "jpg" | "jpeg" => "image/jpeg",
         "png" => "image/png",
@@ -553,6 +554,22 @@ mod test {
 
         assert_eq!(served.content_type, "application/x-dtbncx+xml");
         assert_eq!(content_type_for("/OEBPS/toc.ncx"), "application/octet-stream");
+    }
+
+    #[test]
+    fn extension_lookup_ignores_media_type_case() {
+        assert_eq!(extension_for("image/jpeg"), Some("jpg"));
+        assert_eq!(extension_for("IMAGE/JPEG"), Some("jpg"));
+        assert_eq!(extension_for("Image/SVG+XML"), Some("svg"));
+        assert_eq!(extension_for("application/pdf"), None);
+    }
+
+    #[test]
+    fn content_type_ignores_extension_case() {
+        assert_eq!(content_type_for("OEBPS/cover.jpg"), "image/jpeg");
+        assert_eq!(content_type_for("OEBPS/COVER.JPG"), "image/jpeg");
+        assert_eq!(content_type_for("OEBPS/Styles/Main.CSS"), "text/css");
+        assert_eq!(content_type_for("OEBPS/ch01.XHTML"), XHTML);
     }
 
     #[test]
