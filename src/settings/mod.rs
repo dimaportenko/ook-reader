@@ -705,6 +705,23 @@ mod test {
     }
 
     #[test]
+    fn a_theme_survives_a_slug_round_trip_and_the_slugs_are_distinct() {
+        for theme in Theme::ALL {
+            assert_eq!(Theme::from_slug(theme.slug()), theme);
+        }
+
+        assert_eq!(Theme::from_slug("solarized"), Theme::default());
+
+        let slugs: std::collections::HashSet<&str> =
+            Theme::ALL.iter().map(|theme| theme.slug()).collect();
+        assert_eq!(
+            slugs.len(),
+            Theme::ALL.len(),
+            "the picker marks the selected option by slug, so a shared slug would tick the wrong row",
+        );
+    }
+
+    #[test]
     fn the_measure_steps_and_clamps() {
         let mut settings = Settings {
             max_line_length: 70,
