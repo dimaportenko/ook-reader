@@ -79,6 +79,13 @@ impl BridgeMsg {
     }
 }
 
+fn page_label(page: usize, count: usize) -> String {
+    match count {
+        0 => "Page …".to_string(),
+        count => format!("Page {} of {}", page + 1, count),
+    }
+}
+
 #[component]
 pub(crate) fn Reader(book: OpenBook) -> Element {
     let settings = use_context::<Signal<Settings>>();
@@ -100,7 +107,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
     let hidden = nav::chapter_is_hidden(state.data.phase()(), &pending());
     let docs_for_iframe = docs.clone();
 
-    let page_label = format!("Page {} of {}", page() + 1, page_count());
+    let page_label = page_label(page(), page_count());
     let chapter_label = format!("Chapter {} of {}", chapter() + 1, state.chapter_count);
 
     use_effect(move || {
@@ -326,6 +333,15 @@ mod test {
         // unknown prefixes and malformed numbers decode to None, never panic
         assert_eq!(BridgeMsg::parse("scroll:notanumber"), None);
         assert_eq!(BridgeMsg::parse("bogus:1"), None);
+    }
+
+    #[test]
+    fn the_page_label_waits_for_a_real_count() {
+        assert_eq!(page_label(0, 0), "Page …");
+        assert_eq!(page_label(3, 0), "Page …");
+
+        assert_eq!(page_label(0, 12), "Page 1 of 12");
+        assert_eq!(page_label(11, 12), "Page 12 of 12");
     }
 
     #[test]
