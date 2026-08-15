@@ -48,6 +48,12 @@ pub(crate) struct LinkTarget {
     pub(crate) fragment: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Locator {
+    pub(crate) spine_index: usize,
+    pub(crate) selector: String,
+}
+
 pub(crate) struct Served {
     pub(crate) content_type: String,
     pub(crate) body: Vec<u8>,
@@ -56,7 +62,7 @@ pub(crate) struct Served {
 pub(crate) fn serve_epub_resource(epub: &Epub, path: &str, settings: Settings) -> Option<Served> {
     let content_type = epub
         .manifest()
-        .by_href(path.trim_start_matches('/'))
+        .by_href(path)
         .map(|entry| entry.media_type().to_owned())
         .unwrap_or_else(|| content_type_for(path).to_owned());
 
@@ -536,6 +542,17 @@ mod test {
             served.body.starts_with(&[0xFF, 0xD8, 0xFF])
                 || served.body.starts_with(&[0x89, 0x50, 0x4E, 0x47])
         );
+    }
+
+    #[test]
+    fn the_manifest_declaration_beats_the_extension_guess() {
+        let epub = Epub::open(crate::TEST_BOOK).expect("open fixture book");
+
+        let served = serve_epub_resource(&epub, "/OEBPS/toc.ncx", Settings::default())
+            .expect("the fixture declares a toc.ncx");
+
+        assert_eq!(served.content_type, "application/x-dtbncx+xml");
+        assert_eq!(content_type_for("/OEBPS/toc.ncx"), "application/octet-stream");
     }
 
     #[test]

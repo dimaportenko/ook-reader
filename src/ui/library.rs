@@ -4,6 +4,7 @@ use dioxus::prelude::*;
 use rbook::Epub;
 
 use crate::{
+    clock::now_secs,
     epub,
     library::{self, Book, Library},
     ui::OrLog,
@@ -55,7 +56,7 @@ pub(crate) fn LibraryBooks() -> Element {
                                         Ok((epub, docs)) => {
                                             status.set(None);
                                             library
-                                                .touch_opened(id, library::now_secs())
+                                                .touch_opened(id, now_secs())
                                                 .or_log("update the last-opened time");
                                             refresh_books(&library, books, status);
                                             open_book
@@ -169,7 +170,7 @@ pub(crate) fn ImportControl() -> Element {
 
                         let mut imported = 0usize;
                         let mut failed = 0usize;
-                        let added_at = library::now_secs();
+                        let added_at = now_secs();
 
                         for file in files {
                             match library.add_from_path(&file.path(), added_at) {

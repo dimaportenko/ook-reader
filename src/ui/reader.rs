@@ -4,8 +4,9 @@ use dioxus::core::use_hook_with_cleanup; // not re-exported through the prelude
 use dioxus::prelude::*;
 
 use crate::{
-    epub,
-    library::{self, Library},
+    clock::now_secs,
+    epub::{self, Locator},
+    library::Library,
     nav::{self, ReaderDataStoreExt, ReaderState},
     settings::Settings,
     ui::{library::OpenBook, settings::SettingsPopover, OrLog},
@@ -291,12 +292,12 @@ fn use_bridge(state: ReaderState, docs: Rc<Vec<String>>, library: Rc<Library>, b
                         if state.data.pending().peek().is_settling() {
                             continue;
                         }
-                        let locator = library::Locator {
+                        let locator = Locator {
                             spine_index: *state.data.chapter().peek(),
                             selector,
                         };
                         library
-                            .save_position(book_id, &locator, library::now_secs())
+                            .save_position(book_id, &locator, now_secs())
                             .or_log("save the reading position");
                     }
                     Some(BridgeMsg::Reflow(page)) => state.on_reflow(page),

@@ -1,12 +1,6 @@
 use rusqlite::{params, OptionalExtension};
 
-use crate::db::Db;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Locator {
-    pub(crate) spine_index: usize,
-    pub(crate) selector: String,
-}
+use crate::{db::Db, epub::Locator};
 
 impl Db {
     pub(crate) fn save_position(

@@ -7,6 +7,8 @@ pub(crate) enum Theme {
 }
 
 impl Theme {
+    pub(crate) const ALL: [Theme; 3] = [Theme::Day, Theme::Sepia, Theme::Night];
+
     pub(crate) fn colors(self) -> (&'static str, &'static str) {
         match self {
             Theme::Day => ("#ffffff", "#121212"),

@@ -7,7 +7,6 @@ mod positions;
 mod settings;
 
 pub(crate) use books::{Book, NewBook};
-pub(crate) use positions::Locator;
 
 pub(crate) const DB_FILENAME: &str = "library.sqlite3";
 

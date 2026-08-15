@@ -22,6 +22,10 @@ pub(crate) const MAX_LINE_LENGTH_MIN: u16 = 45;
 pub(crate) const MAX_LINE_LENGTH_MAX: u16 = 100;
 pub(crate) const MAX_LINE_LENGTH_STEP: u16 = 5;
 
+fn hundredths(value: u16) -> String {
+    format!("{}.{:02}", value / 100, value % 100)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Settings {
     pub(crate) theme: Theme,
@@ -122,11 +126,11 @@ impl Settings {
     }
 
     pub(crate) fn line_height_css(self) -> String {
-        format!("{}.{:02}", self.line_height / 100, self.line_height % 100)
+        hundredths(self.line_height)
     }
 
     pub(crate) fn page_margins_css(self) -> String {
-        format!("{}.{:02}", self.page_margins / 100, self.page_margins % 100)
+        hundredths(self.page_margins)
     }
 
     fn declarations(self) -> String {

@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 
-use crate::{epub, library::Locator};
+use crate::epub::{self, Locator};
 
 #[derive(Debug, PartialEq)]
 enum Seek {

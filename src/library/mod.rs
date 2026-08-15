@@ -4,7 +4,7 @@ use rbook::Epub;
 
 use crate::{
     db::{Db, NewBook},
-    epub,
+    epub::{self, Locator},
     library::files::BookFiles,
 };
 
@@ -22,7 +22,7 @@ pub(crate) enum Error {
     Ebook(#[from] rbook::ebook::errors::EbookError),
 }
 
-pub(crate) use crate::db::{Book, Locator};
+pub(crate) use crate::db::Book;
 
 pub(crate) struct Library {
     db: Rc<Db>,
@@ -123,13 +123,6 @@ impl Library {
     pub(crate) fn position(&self, book_id: i64) -> Result<Option<Locator>, Error> {
         Ok(self.db.position(book_id)?)
     }
-}
-
-pub(crate) fn now_secs() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_secs() as i64)
-        .unwrap_or(0)
 }
 
 #[cfg(test)]
