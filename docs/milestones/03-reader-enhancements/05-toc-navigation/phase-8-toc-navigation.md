@@ -74,9 +74,10 @@ Detail for each lives in
       href }`, `toc_entries(&Epub)`. Crosses the borrow; asserts DFS order and nesting.
       `#[test]`. Committed in `7a70db5`, **109 tests green**; the assertion was verified by
       mutating the test rather than watched red first.
-- [ ] **2. Resolve each entry to a spine index and a fragment** — split the href, look the
+- [x] **2. Resolve each entry to a spine index and a fragment** — split the href, look the
       path up in the spine, drop what does not resolve. Pins the many-to-many facts of the
-      fixture. `#[test]`.
+      fixture. `#[test]`. Committed in `cdd91bf`, **111 tests green**; all three assertions
+      verified by mutation.
 - [ ] **3. Name the current chapter** — `entry_for_spine(&entries, spine_index)`, the
       reverse lookup, with the first-match/fall-back-to-preceding rule. `#[test]`.
 - [ ] **4. Show the name in the nav bar** — the label with "Chapter N of M" as the fallback.
