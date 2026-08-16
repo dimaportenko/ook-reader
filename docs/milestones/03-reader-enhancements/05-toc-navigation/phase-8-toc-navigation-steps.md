@@ -199,3 +199,21 @@ navigate with. Carrying the raw href for one step is not wasted work: it is what
 test assert that the *right string* crossed the boundary, before any interpretation of it can
 go wrong. Nothing renders yet, and `toc_entries` is not called from anywhere outside its test
 until Step 4.
+
+> **Status:** done — committed in `7a70db5`, **109 tests green** (108 → 109).
+>
+> The test was written *with* the implementation rather than watched red first, so it was
+> verified by mutation instead: flipping `entries[3].depth` from `1` to `0` — the nesting
+> assertion, the one carrying the depth-first claim — produced
+> `assertion left == right failed / left: 1 / right: 0` at `src/toc.rs:48`, and the file was
+> then diffed byte-for-byte against a pre-mutation copy. The mutation was applied to the test
+> only; the implementation was never touched to produce a red run.
+>
+> `cargo clippy --all-targets` is clean apart from two `dead_code` warnings naming `TocEntry`
+> and `toc_entries`. They are correct — `#[cfg(test)]` does not count as a use for the binary
+> target, and there is no caller until Step 4 — and were left un-silenced, because an
+> `#[allow(dead_code)]` added to cover three steps is the kind that never comes back off.
+>
+> One correction to the step as written: it prescribed `cargo test --lib the_toc_flattens`,
+> which fails with *"no library targets found in package `ook-reader`"*. `ook-reader` is a
+> binary crate; the filter alone is the whole command.

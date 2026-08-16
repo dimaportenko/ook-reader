@@ -70,9 +70,10 @@ feature step is wiring, not new machinery.
 Detail for each lives in
 [`phase-8-toc-navigation-steps.md`](phase-8-toc-navigation-steps.md).
 
-- [ ] **1. Flatten the ToC into owned entries** — `src/toc.rs`, `TocEntry { label, depth,
+- [x] **1. Flatten the ToC into owned entries** — `src/toc.rs`, `TocEntry { label, depth,
       href }`, `toc_entries(&Epub)`. Crosses the borrow; asserts DFS order and nesting.
-      `#[test]`.
+      `#[test]`. Committed in `7a70db5`, **109 tests green**; the assertion was verified by
+      mutating the test rather than watched red first.
 - [ ] **2. Resolve each entry to a spine index and a fragment** — split the href, look the
       path up in the spine, drop what does not resolve. Pins the many-to-many facts of the
       fixture. `#[test]`.
