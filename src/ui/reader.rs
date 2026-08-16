@@ -115,6 +115,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
     let (page, page_count) = (state.data.page(), state.data.page_count());
     let hidden = nav::chapter_is_hidden(state.data.phase()(), &pending());
     let docs_for_iframe = docs.clone();
+    let on_pick = use_callback(move |target| state.follow_link(target));
 
     let page_label = page_label(page(), page_count());
     let chapter_label = chapter_label(&entries, chapter(), state.chapter_count);
@@ -215,6 +216,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                     ContentsPopover {
                         entries: entries.clone(),
                         chapter: chapter(),
+                        on_pick,
                     }
                     SettingsPopover {}
                 }

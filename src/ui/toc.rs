@@ -4,6 +4,7 @@ use dioxus::prelude::*;
 use dioxus_primitives::ContentAlign;
 
 use crate::{
+    epub::LinkTarget,
     toc::{self, TocEntry},
     ui::components::popover::{PopoverContent, PopoverRoot, PopoverTrigger},
 };
@@ -12,7 +13,13 @@ use crate::{
 struct Styles;
 
 #[component]
-pub(crate) fn ContentsPopover(entries: Rc<Vec<TocEntry>>, chapter: usize) -> Element {
+pub(crate) fn ContentsPopover(
+    entries: Rc<Vec<TocEntry>>,
+    chapter: usize,
+    on_pick: EventHandler<LinkTarget>,
+) -> Element {
+    let mut open = use_signal(|| false);
+
     if entries.is_empty() {
         return rsx! {};
     }
@@ -21,6 +28,8 @@ pub(crate) fn ContentsPopover(entries: Rc<Vec<TocEntry>>, chapter: usize) -> Ele
 
     rsx! {
         PopoverRoot {
+            open: open(),
+            on_open_change: move |v| open.set(v),
             PopoverTrigger {
                 svg {
                     xmlns: "http://www.w3.org/2000/svg",
@@ -64,11 +73,20 @@ pub(crate) fn ContentsPopover(entries: Rc<Vec<TocEntry>>, chapter: usize) -> Ele
                 nav {
                     class: "{Styles::contents_popover__list}",
                     onkeydown: move |e| e.stop_propagation(),
-                    for (index , entry) in entries.iter().enumerate() {
+                    for (index, entry) in entries.iter().enumerate() {
                         button {
                             class: "{Styles::contents_popover__entry}",
                             aria_current: if Some(index) == current { "page" },
                             style: "--toc-depth: {entry.depth};",
+                            onclick: {
+                                let target = LinkTarget::from(entry);
+
+                                move |e| {
+                                    e.stop_propagation();
+                                    open.set(false);
+                                    on_pick.call(target.clone());
+                                }
+                            },
                             "{entry.label}"
                         }
                     }

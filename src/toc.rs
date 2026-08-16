@@ -1,11 +1,22 @@
 use rbook::Epub;
 
+use crate::epub::LinkTarget;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TocEntry {
     pub(crate) label: String,
     pub(crate) depth: usize,
     pub(crate) spine_index: usize,
     pub(crate) fragment: Option<String>,
+}
+
+impl From<&TocEntry> for LinkTarget {
+    fn from(entry: &TocEntry) -> Self {
+        LinkTarget {
+            spine_index: entry.spine_index,
+            fragment: entry.fragment.clone(),
+        }
+    }
 }
 
 pub(crate) fn toc_entries(epub: &Epub, docs: &[String]) -> Vec<TocEntry> {
@@ -142,6 +153,33 @@ mod test {
         assert_eq!(label(5), Some("Two"));
 
         assert_eq!(label(0), None);
+    }
+
+    #[test]
+    fn an_entry_becomes_the_link_target_its_href_would_have() {
+        let (epub, docs) =
+            epub::open_with_spine(Path::new(crate::TEST_BOOK)).expect("open fixture book");
+
+        let entries = toc_entries(&epub, &docs);
+        let target = epub::LinkTarget::from(&entries[2]);
+
+        assert_eq!(target.spine_index, 2);
+        assert_eq!(target.fragment.as_deref(), Some("pgepubid00002"));
+
+        let href = format!("{}#pgepubid00002", epub::chapter_url(&docs[2]));
+        assert_eq!(
+            epub::resolve_internal_link(&docs, 0, &href),
+            Some(target),
+            "a picked entry and a followed link reach `follow_link` the same way"
+        );
+
+        let coverless = TocEntry {
+            label: "Cover".to_string(),
+            depth: 0,
+            spine_index: 0,
+            fragment: None,
+        };
+        assert_eq!(epub::LinkTarget::from(&coverless).fragment, None);
     }
 
     #[test]
