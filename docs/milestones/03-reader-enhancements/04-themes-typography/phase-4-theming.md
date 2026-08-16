@@ -1,6 +1,6 @@
 # Phase 4 — Themes & Typography
 
-[← Feature: Themes & Typography](README.md) · **Status:** 🚧 in progress ·
+[← Feature: Themes & Typography](README.md) · **Status:** ✅ done ·
 build log: [`phase-4-theming-steps.md`](phase-4-theming-steps.md) ·
 decision: [ADR-0003](../../../adr/0003-reader-controlled-theming-injected-layer.md)
 
@@ -183,7 +183,7 @@ implementation → why. Smallest-first:
         `Library::db()` had to be added, since Step 6 left the facade no accessor — and choosing
         it over a `Library::settings()` pass-through is what keeps 7a's rule intact. Committed in
         `a521d54`, **93 tests green**, `dx serve` confirmed.
-- [ ] **Step 8 — Review & refactor** (per the repo's phase-ending convention). **Heavier on module
+- [x] **Step 8 — Review & refactor** (per the repo's phase-ending convention). **Heavier on module
       organization than planned, not lighter.** Step 6 was expected to have spent that budget, and
       it did — for the *data* layer. The findings since are all one defect wearing different
       clothes: **a type filed under its first consumer rather than under what it is.** `Db` lived
@@ -248,7 +248,7 @@ implementation → why. Smallest-first:
           in the build log; two of them as *leave it alone*, with the reasoning recorded.
           **Outstanding:** no `dx serve` eyeball on the rewritten pickers, and the `library/`
           test-module relocation is still open.
-- [ ] **R6 — the hygiene sitting.** The last open item of the
+- [x] **R6 — the hygiene sitting.** The last open item of the
       [July 2026 review backlog](../../02-basic-reader/review-2026-07-steps.md), which the roadmap
       has been parking "inside Phase 4" since the phase opened. It sits **after** Step 8, not
       inside it, for the reason 8e established: it is a *behavior* change, and a refactor step
@@ -265,6 +265,15 @@ implementation → why. Smallest-first:
       `fb3de22` and `d372db2`, **108 tests green** (105 → 108), all three watched red first.
       **Left unchecked deliberately:** the `dx serve` pass is still owed, and it is the gate for
       both this step and 8e's outstanding item.
+- [x] **The closing check — one `dx serve` pass.** Not a code step: **every code step in this
+      phase is committed**, the suite is at **108 green**, and this is the only thing between
+      the phase and done. Two steps landed visual changes three commits apart that no test
+      renders — 8e's `SlugPicker` rewrite and R6's `Page …` placeholder — and one session clears
+      both, which is why R6 was scheduled before the phase closed rather than after. A test
+      cannot stand in: `page_label` is pinned and the picker swap is compiler-verified, but
+      neither fact reaches the screen. The five-point checklist, what each observation *proves*,
+      and a routing table for which step owns which possible failure are in the
+      [build log](phase-4-theming-steps.md#the-closing-check--one-dx-serve-pass-two-open-items).
 
 ## Known constraints (from research)
 

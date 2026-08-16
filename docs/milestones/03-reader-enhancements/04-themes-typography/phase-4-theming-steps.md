@@ -5149,3 +5149,132 @@ because `add_from_path` canonicalizes the source path first and fails earlier.
 
 That is a real gap, and a two-line test closes it. It is also not a relocation, so it is not the
 deferred question — it is a new, optional finding. Decide it when Phase 4 closes, not here.
+
+---
+
+## The closing check — one `dx serve` pass, two open items
+
+> **Status:** done — **confirmed by the user** under `dx serve`, with the suite at **108 green**
+> and `cargo clippy --all-targets` clean at `18c08b3`. This closes Step 8 and R6 together, and
+> with them Phase 4. Recorded as the learner's observation, not a machine-checked result: an
+> eyeball is the only instrument that reaches the rendered webview, which is precisely why the
+> repo's convention treats it as a first-class check.
+
+Two steps landed visual changes that no test renders, three commits apart, and neither was
+eyeballed. They are collected here rather than repeated in each step, because one session
+clears both — which is the whole reason R6 was scheduled before the phase closed rather than
+after.
+
+**Why a test cannot stand in for this.** `page_label` is pinned by `cargo test`, and the
+`SlugPicker` swap is compiler-verified — but neither fact reaches the screen. What is unproven
+is the *rendering*: whether the label the component computes actually appears in the nav row,
+and whether a `<select>` that receives the right `selected` slug actually shows it highlighted.
+That gap is exactly what `dx serve` is for, and it is the reason the repo's convention treats an
+eyeball as a first-class check rather than a nicety.
+
+### The checklist
+
+Run `dx serve`, open a book, and read down. Each line says what to do, what to see, and — the
+part worth holding onto — **what seeing it proves.**
+
+1. **Open a chapter, watch the nav row as it loads.** The label reads `Page …` for a beat, then
+   snaps to a real count. *Proves:* R6 Act 2's placeholder reaches the DOM, and the sentinel
+   arm fires only while the probe is outstanding. **A failure here looks like** the old
+   `Page 1 of 0` (the call site was not switched over) or a label stuck on `Page …` forever
+   (`page-count.js` never reported — a *different* bug, in 5c's territory, not this one).
+2. **Open the gear popover.** Theme and Font both show the value currently in effect — not the
+   first option in the list. *Proves:* `SlugPicker`'s `selected` comparison survived 8e's rewrite
+   from enum equality to slug equality. **A failure here looks like** both dropdowns reading
+   `Day` / the first font regardless of what the page is actually showing, which would mean a
+   slug is not round-tripping — and the two `*_slug_round_trips` tests would then be asserting
+   something narrower than the picker needs.
+3. **Change the theme, then the font.** The page repaints, and the dropdown keeps showing the
+   new value after the popover is reopened. *Proves:* `on_pick` writes the field it was wired to
+   — the one thing the collapse into a shared component could plausibly have crossed, since the
+   two wrappers now differ *only* in which field they write.
+4. **Change the font size while the popover is open.** The count re-reports and the label goes
+   from one real number to another. *Proves:* R6 Act 2 did not introduce a flash — the
+   placeholder is for the *first* measurement, and 5c's re-anchor path replaces a count without
+   ever passing back through zero. **A failure here looks like** `Page …` blinking mid-reflow,
+   which would mean the reflow path clears the count instead of overwriting it.
+5. **Quit and reopen the book.** Your settings and your position both come back. *Proves:*
+   nothing in the R6 diff disturbed Step 7's persistence — a free regression check, since the
+   session is already open.
+
+Then `cargo clippy --all-targets` (clean as of `18c08b3`) and the phase closes.
+
+### If something fails
+
+Route the finding to the step that owns it, don't fold it in here:
+
+| symptom | owner |
+|---|---|
+| `Page 1 of 0` still appears, or the placeholder sticks | R6 Act 2 |
+| a dropdown shows the wrong current value | Step 8e (the `SlugPicker` rewrite) |
+| picking Theme changes the font, or vice versa | Step 8e |
+| the count blinks to `Page …` on a size change | Step 5c (the re-anchor), **not** R6 |
+
+The last row is the one worth pre-committing to. It would be easy to see a placeholder flash and
+"fix" it in `page_label`, but the label is only reporting what it was given — a zero arriving
+mid-reflow is the reflow path's bug, and suppressing the symptom in the formatter would hide it.
+
+---
+
+## Optional — a direct test for `BookFiles`
+
+> **Status:** proposed, take it or drop it. Not a step the phase owes; it is the finding that
+> replaced 8e's mis-stated "relocate the file-store tests," recorded above.
+
+`BookFiles` has no test that names it, and one of its arms is **unreachable through the facade**:
+
+```rust
+pub(crate) fn import(&self, source: &Path) -> Result<PathBuf, std::io::Error> {
+    let managed = self.dir().join(format!("{}.epub", Uuid::new_v4()));
+
+    if let Err(error) = fs::copy(source, &managed) {
+        self.remove(&managed);          // ← nothing reaches this
+        return Err(error);
+    }
+```
+
+`Library::add_from_path` calls `source_path.canonicalize()?` first, which fails on a missing
+source *before* `import` is ever called. So no test going through `Library` can enter that
+cleanup branch — the extraction 6a performed is what makes it reachable at all.
+
+**The check** — a `#[cfg(test)] mod test` in `src/library/files.rs`, which currently has none:
+
+```rust
+#[test]
+fn a_failed_import_leaves_nothing_behind() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let files = BookFiles::new(dir.path().to_path_buf());
+
+    let error = files
+        .import(&dir.path().join("no-such-book.epub"))
+        .expect_err("copying a source that does not exist must fail");
+
+    assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+    assert_eq!(
+        std::fs::read_dir(dir.path()).expect("dir readable").count(),
+        0,
+        "a failed import must not leave a managed copy behind",
+    );
+}
+```
+
+**Why it is worth two lines.** The `error.kind()` assertion pins that the error is *propagated*
+rather than swallowed — `remove` deliberately eats a `NotFound`, and the risk in that shape is a
+cleanup path that also eats the error it was cleaning up after. The directory count pins the
+other half: the cleanup ran and left nothing. Together they say "failed loudly, left nothing,"
+which is the whole contract of a two-resource import.
+
+**Scope note.** It cannot reach the case the cleanup was *written* for — a copy that fails
+partway and leaves a truncated file — because provoking that needs a full disk or a fault-
+injecting filesystem. What it does prove is that the arm executes, propagates, and does not
+panic on a file that was never created, which is the failure mode a hand-written cleanup
+actually has.
+
+**Why it inverts the usual split.** There is no implementation to write here — the code exists
+and is correct; only the test is missing. So this one is the learner's to write if it is taken,
+which is the opposite of every other step in this log. That is also a fair reason to drop it:
+`108 → 109` for an arm that is already right.

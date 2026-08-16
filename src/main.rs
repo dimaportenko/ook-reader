@@ -11,6 +11,7 @@ mod epub;
 mod library;
 mod nav;
 mod settings;
+mod toc;
 mod ui;
 mod web;
 mod window;

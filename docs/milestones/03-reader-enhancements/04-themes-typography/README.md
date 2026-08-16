@@ -4,7 +4,9 @@
 
 **Outcome:** the reader (the human) controls how the book looks — day / sepia / night, then
 font size, line height, line length, and margins — without the publisher's CSS getting in
-the way, and without throwing that CSS away. **Status:** 🚧 in progress.
+the way, and without throwing that CSS away. **Status:** ✅ done — all six settings ship
+(theme, font size, line height, page margins, max line length, font family), persist across
+restarts, and re-anchor the reading position after every reflow.
 
 ## Why this, why now
 
@@ -39,7 +41,7 @@ fork `rbook`**, is [ADR-0003](../../../adr/0003-reader-controlled-theming-inject
 
 | # | Phase | Outcome | Status |
 |---|-------|---------|--------|
-| 4 | [Themes & Typography](phase-4-theming.md) | Readium-style injected override layer: day/sepia/night first, typography next | 🚧 |
+| 4 | [Themes & Typography](phase-4-theming.md) | Readium-style injected override layer: day/sepia/night first, typography next | ✅ |
 
 ## Reference
 
