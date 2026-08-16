@@ -49,19 +49,23 @@ reader can use (open a book, see text, turn a page, resume). The MVP slice seque
 
 ## Current focus
 
-**Milestone 3 → Themes & Typography →
-[Phase 4](milestones/03-reader-enhancements/04-themes-typography/phase-4-theming.md)** — the
-MVP reader is done: import a book, page through it, quit, reopen, land where you stopped.
-What it can't do is let *you* decide how the page looks — the publisher's CSS still dictates
-colour and type. Phase 4 injects a reader-controlled override layer around the book's own
-CSS (day / sepia / night first, typography after), and its plan has been written since
-[ADR-0003](adr/0003-reader-controlled-theming-injected-layer.md).
+**Milestone 3 → [Phase 8 — ToC & Navigation](milestones/03-reader-enhancements/05-toc-navigation/phase-8-toc-navigation.md), Step 1.**
+Nothing in `src/` reads a ToC today: the reader navigates the **spine** alone, so
+"Chapter 7 of 15" is a spine index with no title behind it and there is no way to jump to a
+named chapter. The interesting part is not parsing — `rbook` hands over the tree — it is that
+ToC and spine are a **many-to-many** mapping (see [`glossary.md`](glossary.md)). The bundled
+fixture makes that concrete: 15 spine items, 18 ToC entries, a cover with no entry, one
+document carrying four. So "which chapter am I in?" is a real question with a chosen answer
+rather than an array lookup.
 
-Riding alongside: one open item in the
-[July 2026 review backlog](milestones/02-basic-reader/review-2026-07-steps.md) — **R6**
-hygiene (case-insensitive content types, the "Page 1 of 0" label). It is a behavior fix, so
-Phase 7's refactor step deliberately did not absorb it; it lands as a sitting inside Phase 4.
-**R3** (a real error type) was pulled into Phase 7 as Step 6a and is done.
+[Phase 4 — Themes & Typography](milestones/03-reader-enhancements/04-themes-typography/phase-4-theming.md)
+**closed** before it: six settings (theme, font size, line height, page margins, max line
+length, font family) layer over the publisher's CSS without replacing it, persist across
+restarts, and re-anchor the reading position after every reflow. 108 tests green.
+
+The **July 2026 review backlog is now empty** — **R6** (case-insensitive matching, the
+"Page 1 of 0" label) landed as a sitting inside Phase 4, and **R3** (a real error type) went
+into Phase 7 as Step 6a.
 
 > **Milestone 1's board is stale.** It reads ⬜ while the toolchain it describes has plainly
 > been in daily use for three milestones. Its phases need reconciling against reality — the
