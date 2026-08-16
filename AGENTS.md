@@ -87,5 +87,5 @@ Important project skills:
   `.agents/skills/lbb`. In Pi, their slash-command names come from the original skill
   frontmatter: `/skill:next`, `/skill:refine`, `/skill:commit`, and
   `/skill:next-implement`. `lbb:next-implement` is `lbb:next` **plus the implementation** —
-  it derives the step the same way, then writes the code and tests for the user to review,
-  and still leaves the commit to `lbb:commit`.
+  it derives the step the same way, then writes the code and tests, runs a `simplify` cleanup
+  pass over the diff for the user to review, and still leaves the commit to `lbb:commit`.

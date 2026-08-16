@@ -4,7 +4,8 @@ description: >-
   Do everything lbb:next does — locate the current phase, derive the next small
   test-first step, write the runnable check, explain the crux and the why, and
   record the step in the steps doc — and then ALSO write the implementation in
-  src/ so the learner reviews a working diff instead of typing it themselves.
+  src/, run the checks, and clean the diff with the simplify skill, so the
+  learner reviews a working, tidy diff instead of typing it themselves.
   The one skill in the lbb family that is allowed to touch the implementation,
   and only because the user explicitly invoked it. Use when the user says
   "lbb:next-implement", "next step but write it", "do the next step for me",
@@ -19,7 +20,8 @@ description: >-
 This is the `next-implement` variant of the **`lbb` (learning-by-building)** skill set. It is
 [[next]] (`lbb:next`) plus the implementation: same phase-locating discipline, same crux, same
 test-first anatomy, same steps-doc entry — and then you actually write the code into `src/`,
-run the checks, and hand the learner a **finished, green diff to review**.
+run the checks, clean the diff with `simplify`, and hand the learner a **finished, green diff
+to review**.
 
 Its companions: [[next]] proposes a step for the learner to write, [[refine]] (`lbb:refine`)
 revises the step in flight, [[commit]] (`lbb:commit`) validates and ships it. This skill
@@ -47,6 +49,8 @@ Unlike every other skill in this family, you may edit `src/`. Specifically:
 
 - ✅ The step's implementation, in the source files the step names.
 - ✅ The step's tests, in the repo's existing test idiom.
+- ✅ Quality cleanups to that implementation via the `simplify` pass (step 5) — bounded to
+  the code this step touched.
 - ✅ The steps doc entry (including the provenance note — see below).
 - ❌ **Commits.** Still `lbb:commit`'s job. Leave the tree dirty for review.
 - ❌ **Scope beyond the step.** Write the one step you derived and nothing more — no
@@ -109,7 +113,34 @@ in the handoff.** That fork is often the most valuable thing in the step.
 and confirm the *new* test ran green, not just the suite. Any failure you can't resolve
 within the step's scope: stop, report it, don't paper over it.
 
-### 5. Record the step in the steps doc — with provenance
+### 5. Clean the diff with `/simplify`
+
+Once the step is green, run the **`simplify`** skill over the working tree. It reviews the
+changed code for reuse, simplification, efficiency, and altitude, and applies the fixes.
+Quality only — it doesn't hunt for bugs, and it is not a substitute for the checks above.
+
+This exists because a diff the learner didn't write has to earn its readability some other
+way. First-draft code that merely passes is the wrong thing to hand someone for review: the
+duplicated branch, the intermediate `let` that says nothing, the hand-rolled loop where the
+iterator adaptor reads better. `lbb:next` gets that pass for free — the learner writes it,
+you review it. Here you are both halves, so the cleanup has to be a deliberate step.
+
+Constraints that override anything the simplify pass proposes:
+
+- **Stay inside the step.** Simplify the code *this step* touched. Cleanups it spots in
+  neighboring code are handoff material for a later step, not edits.
+- **No comments**, still. If a simplification would need one to be legible, it isn't a
+  simplification — keep the plainer version.
+- **Don't out-clever the explanation.** The diff has to match the sketch you'd have given in
+  `lbb:next`. Reject a change that's terser but harder for the learner to reason about, and
+  say in the handoff that you rejected it and why.
+
+Then **re-run `cargo test` and `cargo clippy`** and report the counts again — the numbers
+that matter are the ones from after the last edit. If the simplify pass changed anything
+non-trivial, name it in the handoff's file-by-file walkthrough; the learner is reviewing the
+final shape and shouldn't have to reverse-engineer which parts came from where.
+
+### 6. Record the step in the steps doc — with provenance
 
 Same steps-doc mechanics as `lbb:next`: find or create
 `docs/milestones/<NN-milestone>/<NN-feature>/phase-N-<topic>-steps.md`, append the entry
@@ -125,7 +156,7 @@ honest about how each step was built:
 
 Do not mark the step done — that's `lbb:commit`'s marker, written after it validates.
 
-### 6. The review handoff — the part that carries the learning
+### 7. The review handoff — the part that carries the learning
 
 End with a handoff built for *critique*, not for applause. Include:
 
@@ -167,7 +198,10 @@ One sentence each. They asked; if they reaffirm, build it in full.
 
 - The step was derived with the same rigor as `lbb:next` — right phase, one idea, test
   first — so the diff is small enough to actually review.
-- The test was written first and **watched fail**, and the reported pass counts are real.
+- The test was written first and **watched fail**, and the reported pass counts are real —
+  re-run after the `simplify` pass, not before it.
+- The diff went through `simplify` and came back cleaner without getting cleverer, and the
+  checks are green *after* that pass.
 - The learner can explain, after reading the handoff, *why* each part of the diff works —
   the forks, the trade-offs, and the parts you were unsure about.
 - The diff contains no comments, no scope creep, and no cleverness the handoff didn't
