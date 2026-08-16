@@ -49,13 +49,16 @@ pub fn PopoverContent(props: PopoverContentProps) -> Element {
         Styles::dx_popover_content.to_string()
     };
 
+    let base = attributes!(div { tabindex: "-1" });
+    let merged = merge_attributes(vec![base, props.attributes]);
+
     rsx! {
         popover::PopoverContent {
             class,
             id: props.id,
             side: props.side,
             align: props.align,
-            attributes: props.attributes,
+            attributes: merged,
             {props.children}
         }
     }
