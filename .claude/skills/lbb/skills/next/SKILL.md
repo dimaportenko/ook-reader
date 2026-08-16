@@ -32,6 +32,11 @@ This is the `next` step of the **`lbb` (learning-by-building)** skill set. Its c
 diverge, and [[commit]] (`lbb:commit`), which validates a finished step and commits it.
 `lbb:next` proposes work; `lbb:refine` adjusts it mid-flight; `lbb:commit` closes it out.
 
+There is also [[next-implement]] (`lbb:next-implement`): the same step derivation, but it
+writes the implementation for the learner to review instead of leaving it to them. It runs
+**only when the user names it** — never route there from "what's next." If you think a step
+would be better handed over written, *offer* it and let them choose.
+
 ## This project (ook-reader)
 
 `ook-reader` is a cross-platform **EPUB reader in Rust + Dioxus 0.7**, built by hand in

@@ -17,6 +17,10 @@ Docs are the exception: writing/updating `docs/`, `README.md`, and this file is 
 without asking — the planning and learning docs are a deliverable here, not the
 implementation.
 
+The only other exception is an explicit opt-in: invoking `lbb:next-implement` *is* the
+"yes, write it" for that one step — the user is choosing to learn by reviewing the diff
+instead of typing it. It never triggers from "what's next"; only from being named.
+
 ## Rule: suggest in small, test-first steps
 
 Don't dump a whole module. Break suggestions into small steps (one idea each); for each,
@@ -78,7 +82,10 @@ through symlinks in `.claude/skills/`.
 Important project skills:
 
 - `dioxus-07`: Dioxus 0.7 API reference.
-- `lbb:next`, `lbb:refine`, `lbb:commit`: learn-by-building workflow skills from the
-  Claude Code LBB skill set, made available to Pi through `.agents/skills/lbb`. In Pi,
-  their slash-command names come from the original skill frontmatter: `/skill:next`,
-  `/skill:refine`, and `/skill:commit`.
+- `lbb:next`, `lbb:refine`, `lbb:commit`, `lbb:next-implement`: learn-by-building workflow
+  skills from the Claude Code LBB skill set, made available to Pi through
+  `.agents/skills/lbb`. In Pi, their slash-command names come from the original skill
+  frontmatter: `/skill:next`, `/skill:refine`, `/skill:commit`, and
+  `/skill:next-implement`. `lbb:next-implement` is `lbb:next` **plus the implementation** —
+  it derives the step the same way, then writes the code and tests for the user to review,
+  and still leaves the commit to `lbb:commit`.
