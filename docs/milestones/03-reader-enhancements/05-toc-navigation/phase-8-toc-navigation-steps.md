@@ -801,3 +801,287 @@ fallback. Two of the three sites are test-local, so it goes on **Step 7**'s list
 > The visual half is the learner's, and the layout above is theirs: the step proposed the
 > chapter `NavRow`'s label slot and the header is where it actually landed. The doubled label
 > was reviewed and kept deliberately.
+
+---
+
+## Step 5 — Render the contents panel
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+Step 4 showed you *one* label — the chapter you are in. This step shows you **all eighteen**,
+nested the way the book nests them, with your own row marked. It is the first step in the
+phase whose deliverable is pixels rather than a value, and the first to read
+`TocEntry::depth`, which has sat unused since Step 1.
+
+Nothing here jumps. A row is a `<button>` that hovers, focuses, and does nothing when
+clicked; Step 6 adds the `onclick` and nothing else. That split is deliberate — rendering the
+list and navigating from it fail in completely different ways, and debugging them together is
+how you end up unsure which half is broken.
+
+### The check — `dx serve`
+
+**There is no `cargo test` for this step, and no red to watch.** The step's whole claim is
+about layout in a webview: that eighteen rows appear, that three of them sit indented under
+their parent, that one is bold. None of that is reachable from a unit test — Dioxus renders
+into a real webview here, and asserting on an rsx tree would test the macro rather than the
+panel.
+
+Two things stand in for a test, and both are real:
+
+- **`cargo clippy --all-targets`**, which is the phase doc's stated gate for this step.
+- **The `css_module` macro**, which is stronger than a test would have been. Every class in
+  `src/ui/toc.rs` is written as `Styles::contents_popover__entry`, not as a string, and the
+  constant is generated from `src/ui/toc.css` at compile time. A class that the stylesheet
+  does not define **fails the build**:
+
+  ```
+  error[E0599]: no associated function or constant named `contents_popover__bogus`
+                found for struct `ui::toc::Styles` in the current scope
+  ```
+
+  That was verified by mutation rather than assumed — renaming one class in the `.rs` file
+  produced exactly that error, and the file was restored afterwards. This is the class of bug
+  the repo's "two files agree on a string" tests exist to catch (`ook-set-theme`,
+  `__ookBlobUrl`), and here the compiler catches it for free.
+
+So the gate is your eyes. Open the Sherlock fixture and check, in this order:
+
+1. A **list icon** appears in the top-right of the header, left of the settings gear, the same
+   round 40px `icon-button` shape.
+2. Clicking it opens a panel with **18 rows**, top row "The Adventures of Sherlock Holmes",
+   bottom row "THE FULL PROJECT GUTENBERG™ LICENSE".
+3. **"I.", "II." and "III." sit one step to the right**, directly under "I. A SCANDAL IN
+   BOHEMIA". That is `depth` reaching the screen — and it is the assertion the Step 1 test
+   made about *order* now made visible as *shape*.
+4. On the cover (spine 0) **no row is bold**. Turn one chapter: the top row goes bold. Turn
+   again: "I. A SCANDAL IN BOHEMIA" goes bold and the three sub-entries under it do **not**.
+   That is Step 3's first-match rule, seen rather than asserted.
+5. **Arrow keys with the panel open do not turn the page.** This is the one behaviour here
+   that is a bug if absent rather than merely ugly — see the `stop_propagation` note below.
+6. Escape and a click outside both close the panel.
+
+### The code
+
+A new component file, `src/ui/toc.rs`, plus its stylesheet `src/ui/toc.css`, plus
+`pub mod toc;` in `src/ui/mod.rs`.
+
+```rust
+#[css_module("/src/ui/toc.css")]
+struct Styles;
+
+#[component]
+pub(crate) fn ContentsPopover(entries: Rc<Vec<TocEntry>>, chapter: usize) -> Element {
+    if entries.is_empty() {
+        return rsx! {};
+    }
+
+    let current = toc::entry_index_for_spine(&entries, chapter);
+
+    rsx! {
+        PopoverRoot {
+            PopoverTrigger { svg { /* tabler list icon */ } }
+            PopoverContent {
+                class: Styles::contents_popover__content.to_string(),
+                align: ContentAlign::End,
+                nav {
+                    class: "{Styles::contents_popover__list}",
+                    onkeydown: move |e| e.stop_propagation(),
+                    for (index , entry) in entries.iter().enumerate() {
+                        button {
+                            class: "{Styles::contents_popover__entry}",
+                            aria_current: if Some(index) == current { "page" },
+                            style: "--toc-depth: {entry.depth};",
+                            "{entry.label}"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+and in `Reader`'s header, into the flex row that already holds the gear:
+
+```rust
+ContentsPopover {
+    entries: entries.clone(),
+    chapter: chapter(),
+}
+SettingsPopover {}
+```
+
+### Why it works
+
+**`src/ui/toc.rs` beside `src/toc.rs`, and the name collision is not one.** The repo already
+runs this exact split twice: `src/settings/` holds the model and `src/ui/settings.rs` holds
+`SettingsPopover`; `src/library/` and `src/ui/library.rs` likewise. A module's own name is not
+in its own scope — only the `self` keyword refers to it — so inside `src/ui/toc.rs` the line
+`use crate::toc::{self, TocEntry}` binds `toc` to the *model*, and `toc::entry_index_for_spine`
+means the model's function with no ambiguity to resolve. In `reader.rs` only `ContentsPopover`
+is imported from `ui::toc`, so bare `toc::` there still means `crate::toc`.
+
+**The component computes `current` itself rather than taking it as a prop.** `current` is
+*derivable* from `entries` and `chapter`, both already props. Passing it as a third prop would
+create a second source of truth that a caller could hand over stale next to fresh entries, and
+nothing would catch it. That `chapter_label` in `reader.rs` resolves the same index is not
+duplication of the *rule* — the rule lives in exactly one place, `toc::entry_index_for_spine`,
+and both call sites follow it if it changes.
+
+**`Rc<Vec<TocEntry>>` as a prop, and why `TocEntry` grew `Eq` this step.** Dioxus decides
+whether to re-render a child by comparing its props with `PartialEq`, on **every** render of
+the parent — every page turn, every scroll message from the frame. `Rc`'s `PartialEq` has a
+`ptr_eq` fast path, but the standard library only enables it when `T: Eq`, because a
+`PartialEq` impl is allowed to be deliberately irreflexive and a pointer shortcut would lie
+about it. `Vec<TocEntry>: Eq` needs `TocEntry: Eq` — so without it, every `Reader` render
+deep-compared 18 entries, `String` by `String`, to answer a question one pointer comparison
+settles. Both `Rc`s are clones of the same allocation, so the fast path is always the right
+answer. One word on the derive in `src/toc.rs`; the cost it removes is micro on this fixture
+and linear in ToC size on a real technical book.
+
+**`PopoverRoot` with no `open` signal.** `SettingsPopover` threads a
+`use_signal(|| false)` through `open` / `on_open_change`, and this component pointedly does
+not. `dioxus_primitives`' `PopoverRoot` calls `use_controlled(props.open, …)`, which keeps its
+**own** internal signal and uses it whenever the `open` prop is absent — and `open` is
+auto-optional because of its `ReadSignal<Option<bool>>` shape. The trigger, the escape
+listener and the outside-dismiss all write through the same context either way. So the signal
+in this component would have been state that is read by nothing. Step 6 will most likely bring
+it back, because closing the panel after a jump is a thing only the caller can decide — and
+then it will be earning its place.
+
+**The empty guard is safe because there are no hooks left.** `if entries.is_empty() { return
+rsx! {}; }` before any hook call would be a rules-of-hooks bug in the general case: Dioxus
+identifies hook state positionally, so a render that skips a hook desynchronises every later
+one. With the `open` signal gone the component has **zero** hooks and the early return is
+unconditionally safe. It stayed inside the component rather than moving to `Reader`'s rsx
+because "a book with no ToC has no contents button" is a fact about the contents feature —
+the phase doc's own framing — and `Reader` should not have to know the shape of `entries`.
+
+**`aria_current` instead of a modifier class.** "You are here" gets stated **once**, in the
+accessibility layer, and the stylesheet selects on it with
+`.contents-popover__entry[aria-current="page"]`. A `--current` modifier class would state the
+same fact twice and let the two drift. The token is `"page"` rather than `"true"` because
+inside a `<nav>` of chapter links that is the ARIA value meaning "the current page in a set",
+and a screen reader announces it as such. `aria_current` is a real typed attribute in
+`dioxus-html`, so the name is compiler-checked; and `if … { … }` with no `else` omits the
+attribute entirely, which is what the cover's `None` needs.
+
+**`--toc-depth` carries the datum, the stylesheet carries the look.** The row's padding is one
+rule in `toc.css`:
+
+```css
+padding: 0.35rem 0.75rem 0.35rem calc(0.75rem + var(--toc-depth, 0) * 1rem);
+```
+
+and the inline style is only `--toc-depth: {entry.depth};`. Putting the whole `padding`
+inline would have duplicated `0.75rem` across a Rust string and a CSS file — and the `0.75rem`
+inside the `calc` is *the same* `0.75rem` as the base, which is only visible when they sit on
+one line. `var(--toc-depth, 0)` defaults to 0 so the rule is still valid for anything that
+renders the class without the property.
+
+**`stop_propagation` on the list is load-bearing.** `reader.rs` puts an `onkeydown` on
+`.reader-root` that turns pages on the arrow keys, and the popover content is still a
+descendant of it in the DOM however it is positioned. Without this line, arrowing through an
+open contents panel would silently turn pages behind it. It does **not** break Escape-to-close:
+`dioxus_primitives` handles Escape through a document-level listener installed by
+`use_global_escape_listener`, entirely outside Dioxus's synthetic event bubbling. `settings.rs`
+carries the identical line for the identical reason — see the scope note.
+
+**No `key` on the rows.** `key` buys Dioxus identity across reorders; an *index* key is
+exactly the positional diff it already does unkeyed, so it would have been 18 `String`
+allocations per render buying nothing. Contrast `library.rs`'s `key: "{book.id}"` and
+`picker.rs`'s `key: "{slug}"`, which are real identities on lists that change. This list is
+fixed for the life of the mounted book, and the labels are not unique anyway — the fixture has
+four rows whose text repeats across chapters.
+
+### Scope note
+
+**No jumping.** The rows are buttons with no `onclick`, so the panel advertises with
+`cursor: pointer` and a hover background something it cannot yet do. Step 6 converts a
+`TocEntry` into `epub::LinkTarget` and hands it to the existing `nav::ReaderState::follow_link`.
+The shape here is built for that to be a pure addition: `index` already comes off
+`.enumerate()` as a `Copy` scalar, so the click closure will capture nothing borrowed from
+`entries`. The likely signature is a third prop, `on_pick: EventHandler<usize>` — matching
+`picker.rs` — because `ReaderState` derives `Clone, Copy` but **not** `PartialEq` and so
+cannot be a component prop, while `EventHandler` props are exempt from the props comparison.
+
+**The chapter `NavRow` still duplicates the header's chapter label.** Step 4 parked that
+decision here on the theory that this step would give the chapter row a contents button. It
+did not — the button went in the header next to the gear, where the popover machinery and the
+`icon-button` shape already live and where "what am I reading" was put in Step 4. So the
+duplicate label is still there and is still the learner's call.
+
+**Deferred to Step 7, all of it found by the `simplify` pass and left deliberately:**
+
+- **The tabler SVG preamble is now on its third copy.** Ten identical attributes plus a
+  `d: "M0 0h24v24H0z"` path that renders nothing (`stroke: none` *and* `fill: none`) plus an
+  `icon-tabler` class list that matches no stylesheet in the repo, repeated across
+  `reader.rs`, `settings.rs` and now `toc.rs` — about twelve lines each. This diff is what
+  makes it the third occurrence and therefore worth an `Icon { children }` wrapper. Not done
+  here because collapsing it edits two files outside the step.
+- **The `stop_propagation` line belongs to the shared popover, not to each caller.** Two
+  identical occurrences is where that becomes true. It was left alone because
+  `PopoverContent` forwards `attributes` verbatim and an event handler is not an `Attribute` —
+  hoisting it needs either `merge_attributes` or an extra wrapper `div` between
+  `.dx-popover-content`'s flex column and its children, which would disturb the `gap` the
+  settings panel relies on. A shared-component change with a layout blast radius is Step 7's
+  business.
+- **The panel does not scroll the current row into view.** `.contents-popover__list` is
+  `max-height: 80vh; overflow-y: auto`, so on the 18-entry fixture nothing scrolls and this is
+  invisible. On a book with a long ToC, opening the panel shows the top while `aria-current`
+  marks a row off-screen.
+- **The rows are loose `<button>`s inside a `<nav>` with no list semantics**, so assistive
+  tech gets no "list, 18 items" orientation. `library.rs` uses `ul`/`li` for its book grid and
+  is the precedent if this is worth fixing; it was left flat here because it costs two
+  elements and two more CSS rules for a decision better made once, alongside the scroll-into-view
+  one.
+
+Also parked here since Step 2: the overlap between `toc_entries`' href resolution and
+`epub::resolve_internal_link`, and since Step 4: a possible `toc::label_for_spine` collapsing
+the three `entry_index_for_spine(…).map(|i| entries[i].label)` sites.
+
+> **Status:** done — committed in `20535be`, **114 tests green** (unchanged). `cargo clippy
+> --all-targets` clean, and the touched files are rustfmt-clean.
+>
+> **This is the first step in the phase that added no test, and the count staying at 114 is
+> the honest record of that.** The step's claim is about layout in a webview and there was no
+> red to watch. The gate was a clean build plus the learner's own `dx serve` pass — evidenced
+> here by the stylesheet arriving tuned (`min-width` 16rem → 24rem, `max-height` 60vh → 80vh,
+> list padding 0.25rem → 1rem), which are not values anyone picks without having looked at the
+> panel. The agent did not and cannot eyeball the webview.
+>
+> What the compiler covers instead of a test: every class name is a `css_module` constant
+> generated from `toc.css`, so a class the stylesheet does not define fails the build. That
+> was verified by mutation rather than assumed — renaming one class in `src/ui/toc.rs`
+> produced `error[E0599]: no associated function or constant named
+> 'contents_popover__bogus'`, and the file was restored afterwards.
+>
+> **One gap found at commit time and deliberately left, because closing it needs an
+> implementation edit:** `--toc-depth` is spelled in two files with no compiler between them —
+> `src/ui/toc.rs` writes it inline, `src/ui/toc.css` reads it as `var(--toc-depth, 0)`. Rename
+> it on one side and the indent silently goes flat; nothing errors, the nesting just
+> disappears. This is exactly the hazard the repo's `ook-set-theme` / `__ookBlobUrl` tripwire
+> tests exist for, and the class names next to it are already immune by construction. The test
+> cannot be written honestly against the current shape: the Rust half of the pair is a literal
+> inside an `rsx!` string, so nothing can read it back at runtime, and a test asserting only
+> the CSS half pins one direction of a two-way rename. Hoisting the name to a
+> `const DEPTH_VAR: &str = "--toc-depth";` used as `style: "{DEPTH_VAR}: {entry.depth};"` would
+> make one spelling authoritative and let a one-line `assert!(TOC_CSS.contains(DEPTH_VAR))`
+> pin the other — a change to the implementation, so it is the learner's to make. Carried to
+> **Step 7** with the other deferrals.
+>
+> The `simplify` pass ran four ways over the diff before the commit. It applied four findings:
+> the `Eq` derive above (the only one with a runtime cost behind it), splitting the row padding
+> into `--toc-depth` plus a stylesheet rule, dropping an index `key` that restated Dioxus's
+> default, and moving the `aria-current` token from `"true"` to `"page"`. It deliberately left
+> four for Step 7 — the tabler SVG preamble now on its third copy, hoisting the
+> `stop_propagation` line into the shared `PopoverContent`, scroll-into-view for the current
+> row, and `ul`/`li` list semantics — each because the fix reaches outside this step's files.
+>
+> Two forks worth knowing were decided rather than defaulted, and both are cheap to reverse.
+> The `open` signal was **removed**, which makes this popover differ from `SettingsPopover`'s
+> identical-but-unused triple; Step 6 will likely restore it, because closing the panel after a
+> jump is a decision only the caller can make. And the trigger went in the **header** beside
+> the settings gear rather than in the chapter `NavRow`, which is where Step 4 predicted it —
+> so the duplicated chapter label in that row survives another step, still unresolved.

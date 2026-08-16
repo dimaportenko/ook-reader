@@ -88,8 +88,12 @@ Detail for each lives in
       the toc arm, the two fallback assertions verified by mutation. It landed in the header
       under the book title rather than in the chapter nav row — better home for "what am I
       reading", and the row keeps the label too for now.
-- [ ] **5. Render the contents panel** — the entries as a list indented by depth, in the
-      existing popover. `dx serve` + `cargo clippy`.
+- [x] **5. Render the contents panel** — the entries as a list indented by depth, in the
+      existing popover. `dx serve` + `cargo clippy`. Committed in `20535be`, **114 tests
+      green** (unchanged — the phase's first step with no test, gated on a clean build plus
+      the `dx serve` pass). Written by `lbb:next-implement`. The trigger landed in the header
+      beside the settings gear rather than in the chapter `NavRow`, so Step 4's question about
+      that row's duplicate label is still open.
 - [ ] **6. Jump to an entry** — convert a `TocEntry` into `epub::LinkTarget` and hand it to
       the existing `follow_link`. `#[test]` for the conversion, eyeball for the jump.
 - [ ] **7. Review and refactor** — the phase-closing pass.
