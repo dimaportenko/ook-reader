@@ -96,7 +96,25 @@ Detail for each lives in
       that row's duplicate label is still open.
 - [x] **6. Jump to an entry** — convert a `TocEntry` into `epub::LinkTarget` and hand it to
       the existing `follow_link`. `#[test]` for the conversion, eyeball for the jump.
-- [ ] **7. Review and refactor** — the phase-closing pass.
+- [ ] **7. Review and refactor** — the phase-closing pass. Nine carried items, too many for one
+      diff, so it is **sketched as a triage and landing as lettered sittings** the way Phase 4's
+      Step 8 did. One item is already closed: Step 4's duplicated chapter label in the `NavRow`
+      went in `c5e6d37`.
+  - [x] **7a. One resolver, one target** — `epub::link_target` becomes the single path→spine
+        resolver both a ToC entry and an in-book `<a href>` go through, and `TocEntry` carries a
+        `LinkTarget` instead of a loose `spine_index`/`fragment` pair. `#[test]`. Committed in
+        `54e8ea7`, **115 tests green**; written by `lbb:next-implement`, the red was a compile
+        error and both halves of the new assertion were verified by mutation — dropping the trim
+        takes the fixture's ToC from 18 entries to 0.
+  - [ ] **7b. Pin `--toc-depth` across the Rust/CSS gap** — the repo's `assert!(…contains…)`
+        idiom for a name two files share with no compiler between them.
+  - [ ] **7c. The UI-chrome sitting** — the tabler SVG preamble on its third copy, the
+        duplicated `stop_propagation`, `ul`/`li` list semantics, and the controlled-open triple
+        (which is probably three dead lines in `settings.rs`, not a duplication).
+  - [ ] **7d. `toc::label_for_spine`** — Step 4's item; deletes the index-then-index dance from
+        three call sites.
+  - [ ] **7e. Scroll the current row into view** — carried from Step 5. A *behaviour* change,
+        so it gets its own commit at the end or moves to the next phase.
 
 ## Out of scope
 

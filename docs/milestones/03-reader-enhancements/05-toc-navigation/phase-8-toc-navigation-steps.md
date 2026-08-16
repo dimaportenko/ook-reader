@@ -1379,3 +1379,335 @@ relative to the popover was ever wrong.
 > the learner opening the panel under `dx serve`, clicking a top-level chapter (the document
 > changes, the spinner shows, the panel closes), then a nested sub-entry such as "II." inside
 > the chapter already open (no spinner, the frame scrolls to the fragment, the panel closes).
+
+---
+
+## Step 7 — review & refactor (sketched)
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+The phase-closing pass. Steps 5 and 6 each ended by parking something for this step rather than
+doing it mid-feature, and the list is now nine items long — too long for one diff. Phase 4's
+Step 8 hit the same wall and answered it by **sketching the triage first and landing the items
+as lettered sittings** (`8a`…`8e`); this step follows that shape. What follows is the triage:
+every carried item, what it actually costs, and whether it is worth doing.
+
+**One item is already closed.** Step 4's duplicated chapter label in the `NavRow` went in
+`c5e6d37` — the row was showing the chapter name a second time under the header that already
+showed it. It is struck from the list below.
+
+### The triage
+
+**A. The two link resolvers overlap** *(Step 2's item — do it first)*. `toc_entries` and
+`epub::resolve_internal_link` both turn "a path plus an optional fragment" into a
+`LinkTarget`, and both spell the percent-decode by hand. Step 6 wrote a test asserting the two
+agree *because nothing structural made them*. This is the layering item and Phase 4's rule
+applies: do it first, because every remaining item is easier to judge once the module boundary
+is honest. **Landed as [7a](#step-7a--one-resolver-one-target).**
+
+**B. The tabler SVG preamble, third copy.** `reader.rs` (close), `settings.rs` (gear) and
+`toc.rs` (list) each carry the same ten attributes — `xmlns`, `width`, `height`, `view_box`,
+`fill`, `stroke`, `stroke_width`, `stroke_linecap`, `stroke_linejoin`, plus the `path` that
+blanks the 24×24 box — and differ only in the icon's own `d` strings and class suffix. Thirty
+lines of noise around three lines of signal. Wants an `ui/components/icon.rs` that takes the
+paths; the layer already exists, because 8d built it. **Worth doing** — visual gate only.
+
+**C. `--toc-depth` is spelled in two files with no compiler between them.** `ui/toc.rs:80`
+writes it, `ui/toc.css:14` reads it. Rename one and the indentation silently flattens — no
+error, no warning. The repo already has the answer for this hazard: the `assert!(JS.contains(…))`
+tests in `ui/reader.rs` that pin `ook-reflow`, `ook-key`, `ook-warn` and `__ookBlobUrl` across
+exactly this kind of gap. **Worth doing**, and it is the only item on the list that is genuinely
+test-first.
+
+**D. `stop_propagation` belongs in the shared `PopoverContent`.** Both popovers hang
+`onkeydown: move |e| e.stop_propagation()` on their own inner wrapper, for the same reason —
+`reader-root`'s arrow-key handler is an ancestor and would turn the page while you are typing
+in the panel. Two copies of one defence against one specific ancestor. **Worth doing**, but it
+edits the shared component, so pair it with F.
+
+**E. `ul`/`li` list semantics for the panel.** The contents list is a `nav` full of bare
+`button`s. A screen reader announces eighteen buttons with no sense that they are one list, and
+no count. **Worth doing**, cheap, visual gate.
+
+**F. The controlled-open triple, now in two files.** `settings.rs` and `toc.rs` both write
+`use_signal` → `open:` → `on_open_change:`. Step 6 called this "a real candidate rather than a
+speculative one" at two occurrences. **But look again before hoisting:** only `toc.rs` ever
+calls `open.set(false)`. `settings.rs`'s copy never closes the panel from inside, so its triple
+reproduces exactly what `PopoverRoot` does uncontrolled — and `open` is an optional prop
+(`ReadSignal<Option<bool>>`, the same shape as `id`, which no caller passes). If that holds, the
+finding is not "hoist the duplication" but **"delete three dead lines from `settings.rs`"**, and
+what is left is one occurrence, which does not earn a shared abstraction. **Verify first, then
+probably just delete.**
+
+**G. Scroll the current row into view.** Carried from Step 5, made more visible by Step 6 —
+jumping is how you move a long way through a long ToC, and the panel still opens at the top
+every time. **This is a feature, not a refactor**, and a refactor step that also changes
+behavior is two steps pretending to be one (Phase 4's 8e made that its opening rule). Either
+give it its own commit at the end of this step, or push it to the feature's next phase. It also
+needs a `use_effect` + `scrollIntoView` over an element the panel only just mounted, which is
+the most machinery on this list.
+
+**H. `toc::label_for_spine`.** Step 4's item. `entry_index_for_spine` returns an *index*, and
+`ui/reader.rs`'s `chapter_label` immediately does `entries[index].label.clone()` — as do both
+test closures in `toc.rs`, spelled identically. The panel is the only caller that genuinely
+wants the index (for `aria-current`). A `label_for_spine(&entries, spine_index) -> Option<&str>`
+built on top would delete the indexing dance from three places. **Small, worth doing, no rush.**
+
+**I. `TocEntry` should carry a `LinkTarget`.** Not on the carried list — it fell out of A while
+writing it, and is folded into 7a. See there.
+
+### The ordering
+
+A first (layering), then C (the one real test), then B + E + D + F as one UI-chrome sitting
+(they touch the same three files), then H. G last and on its own commit, or deferred.
+
+---
+
+## Step 7a — one resolver, one target
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+Item **A** from the triage, plus **I**, which is the same idea seen from the other end.
+
+**The crux: Step 6 shipped a test where it should have shipped a function.** Its convergence
+assertion — that the `LinkTarget` built from a ToC entry is byte-identical to the one
+`resolve_internal_link` builds from the equivalent `<a href>` — was the right *claim*, and the
+handoff defended it well: if the two paths ever drifted (one decodes `%20`, the other doesn't;
+one strips a leading `/`, the other doesn't) the panel would jump somewhere subtly different
+from the link, and only a test building both sides could see it.
+
+But a test that watches two code paths agree is a **weaker instrument than one code path**. The
+test can only catch the drift after someone writes it; a shared function makes the drift
+unwriteable. And the drift was not hypothetical — the two resolvers were *already* asymmetric:
+`toc_entries` trimmed a leading `/` from its path and `resolve_internal_link` did not, and each
+spelled the percent-decode as its own three-line `percent_decode_str(…).decode_utf8_lossy()
+.into_owned()` chain.
+
+The second half falls out of the first. Once `toc_entries` calls the shared resolver, it gets a
+whole `LinkTarget` back and immediately takes it apart into two `TocEntry` fields — which
+`ui/toc.rs` then puts back together through the `From` impl Step 6 wrote. A value built,
+destructured and rebuilt across three files is the type asking to be stored whole:
+
+```rust
+pub(crate) struct TocEntry {
+    pub(crate) label: String,
+    pub(crate) depth: usize,
+    pub(crate) target: LinkTarget,
+}
+```
+
+A ToC entry **is** a labelled, indented link target. Saying so deletes the `From` impl one step
+after it was written, which is exactly what a review pass is for.
+
+### The check — `cargo test`
+
+`src/epub.rs`, next to the two tests that already own the URL side of link resolution:
+
+```rust
+#[test]
+fn a_link_target_decodes_and_trims_before_matching_the_spine() {
+    let hrefs = vec!["OEBPS/Chapter 1.xhtml".to_string()];
+
+    assert_eq!(
+        link_target(&hrefs, "/OEBPS/Chapter%201.xhtml", Some("s%20a")),
+        Some(LinkTarget {
+            spine_index: 0,
+            fragment: Some("s a".to_string()),
+        })
+    );
+
+    assert_eq!(link_target(&hrefs, "OEBPS/missing.xhtml", None), None);
+}
+```
+
+**The red was a compile error**, the same shape as Step 6's:
+
+```
+error[E0425]: cannot find function `link_target` in this scope
+```
+
+A refactor cannot show a behavioural red — that is the point of a refactor — so the honest
+report is: **the red is that the shared function does not exist yet**, and the safety net is the
+114 tests that already described the old behaviour. What makes this test worth writing rather
+than trivially green is that it pins the *new* contract in one line: `link_target` takes text
+**exactly as a book wrote it** — percent-encoded, possibly with a leading `/` — and does the
+normalizing itself.
+
+**Both halves were then proved live by mutation**, which matters more here than usual because a
+refactor's test is the only thing standing between "green" and "green but wrong":
+
+| mutation | result |
+|---|---|
+| drop `.trim_start_matches('/')` | **7 tests fail**, `18` entries → `0` |
+| drop `percent_decode(path)` | **2 tests fail**, this one and `resolves_a_percent_encoded_href_to_a_decoded_target` |
+
+The first number is the interesting one. The fixture's ToC hrefs **do** carry a leading `/` while
+its spine hrefs do not, so the trim is not defensive tidiness — it is the only reason the panel
+has ever had eighteen rows instead of zero. Step 2 wrote that trim in `toc.rs` and nothing said
+why; it now sits next to the comparison it exists to make succeed.
+
+### The code
+
+`src/epub.rs` — one decoder, one resolver:
+
+```rust
+fn percent_decode(raw: &str) -> String {
+    percent_encoding::percent_decode_str(raw)
+        .decode_utf8_lossy()
+        .into_owned()
+}
+
+pub(crate) fn link_target(
+    hrefs: &[String],
+    path: &str,
+    fragment: Option<&str>,
+) -> Option<LinkTarget> {
+    let path = percent_decode(path);
+
+    Some(LinkTarget {
+        spine_index: hrefs
+            .iter()
+            .position(|href| href == path.trim_start_matches('/'))?,
+        fragment: fragment.map(percent_decode),
+    })
+}
+
+pub(crate) fn resolve_internal_link(
+    hrefs: &[String],
+    current_index: usize,
+    href: &str,
+) -> Option<LinkTarget> {
+    let (path, fragment) = match href.split_once('#') {
+        Some((path, fragment)) => (path, Some(fragment)),
+        None => (href, None),
+    };
+
+    if path.is_empty() {
+        return Some(LinkTarget {
+            spine_index: current_index,
+            fragment: fragment.map(percent_decode),
+        });
+    }
+
+    link_target(hrefs, path.strip_prefix(EPUB_URL_PREFIX)?, fragment)
+}
+```
+
+`src/toc.rs` — the whole per-entry body, after:
+
+```rust
+let href = entry.href()?;
+
+Some(TocEntry {
+    label: entry.label().to_string(),
+    depth: entry.depth().saturating_sub(1),
+    target: epub::link_target(docs, href.path().as_str(), href.fragment())?,
+})
+```
+
+`src/ui/toc.rs` — the `From` call becomes what it always was:
+
+```rust
+let target = entry.target.clone();
+```
+
+### Why it works
+
+**`toc.rs` stopped knowing three things it had no business knowing.** Before, it knew that spine
+hrefs carry no leading slash, that rbook's fragments arrive percent-encoded, and how this repo
+spells a lossy percent-decode. All three are facts about `epub.rs`'s data — and the first one is
+established inside `spine_hrefs`, which is **private**, so `toc.rs` was hand-satisfying a
+precondition of a function it cannot even see. Now it knows one thing: that `epub` will resolve
+an href against the spine. `use percent_encoding` is gone from the file entirely.
+
+**The direction of the decode was the real design decision, and the first draft got it
+backwards.** A shared resolver can take *decoded* text (callers decode, helper compares) or
+*raw* text (helper decodes). The draft took decoded text because that is the shape the two
+callers happened to have lying around — and that produced a signature with a decoded `path` and
+a raw `fragment`, an asymmetric precondition that nothing enforces and whose violation is
+**silent**: hand `link_target` a raw path and you get `None`, which reads as "not in this book".
+Taking raw text on both sides gives one rule — *hand me exactly what the book wrote* — and it is
+the rule that cannot be violated by accident, because raw text is what every caller already has
+before it does anything.
+
+**`href.path().as_str()` versus `href.path().decode()`.** rbook's `Href<'a>` is a newtype over
+`&'a str`; `path()` returns another `Href` narrowed to the path segment, `as_str()` hands back
+the borrowed original, and `decode()` is the opt-in that allocates a `Cow`. Passing `as_str()`
+means the ToC path is decoded in exactly one place — inside `link_target` — instead of once by
+rbook and then compared against a spine that `spine_hrefs` decoded separately. Note the returned
+lifetime is `'a`, not tied to `&self`, so `href.path().as_str()` on a temporary `Href` is fine:
+the `&str` outlives the temporary it came from.
+
+**Why the bare-fragment branch does not go through `link_target`.** `#note` with no path means
+"this document", and `link_target` resolves by `position()` — which would find the *first* href
+equal to the current one, not `current_index` itself. In a book where two spine entries share an
+href (legal; the spine is a list of idrefs, not a set) that silently jumps you backwards. So the
+branch keeps its own `LinkTarget`, and `fragment.map(percent_decode)` is spelled twice in the
+file on purpose.
+
+**The convergence test survives and still earns its place.** With one resolver, "a picked entry
+and a followed link agree" is nearly true by construction — but only *nearly*: the two still
+arrive by different routes (`/OEBPS/…` from rbook's nav document, `dioxus://index.html/epub/…`
+from the webview) and the test pins that both routes normalize to the same key. The trim mutation
+above breaks it, so it is not a tautology.
+
+**`TocEntry` nesting a `LinkTarget` does not cost the memoization Step 5 bought.** `LinkTarget`
+derives `Eq`, so `TocEntry` keeps its `Eq` derive, so `Vec<TocEntry>: Eq` — and `PartialEq for
+Rc<T>` short-circuits on `Rc::ptr_eq` when `T: Eq`. The panel's prop diff stays a single pointer
+comparison and never walks the eighteen entries or the new nested field. That chain is
+load-bearing rather than incidental: had `LinkTarget` derived only `PartialEq`, `TocEntry`'s
+`#[derive(Eq)]` would have failed to compile rather than silently degrading to an
+element-by-element compare.
+
+### Scope note
+
+**This step is A and I from the triage only.** B (the icon preamble), C (`--toc-depth`),
+D (`stop_propagation`), E (list semantics), F (the controlled-open triple) and H
+(`label_for_spine`) are untouched, and G (scroll-into-view) is still a behaviour change that
+wants its own commit. The ordering stands: C next, then B + D + E + F as one UI sitting, then H.
+
+**`link_target`'s name does not carry its altitude.** `resolve_internal_link` takes a webview URL
+and `link_target` takes a book-relative path, and nothing in the names says which is which — the
+review flagged `spine_target` / `target_for_spine_path` as alternatives. Left alone: the pair
+sits four lines apart in one file, and the signature now makes the input shape unambiguous
+anyway. Reconsider if a third caller appears.
+
+### What the `simplify` pass changed, and what it did not
+
+The pass ran four ways and **reversed the step's central decision twice**, which is the useful
+part of the record.
+
+- **The draft had callers decode and `link_target` compare.** The simplification reviewer flagged
+  the mixed contract (decoded path, raw fragment) and proposed making both arguments *decoded*;
+  the altitude reviewer flagged the same asymmetry and proposed making both *raw*. Same defect,
+  opposite fixes. The altitude direction won on the argument above — one enforceable rule beats
+  one uniform-but-unenforceable one — and it is strictly smaller: `toc.rs` lost its `path`
+  binding, its trim and its decode, and `percent_decode` went back to private because nothing
+  outside `epub.rs` calls it any more.
+- **The trim moved into `link_target`** on the altitude reviewer's argument that `toc.rs` was
+  satisfying a private function's precondition. The mutation table above is what proved the
+  point worth acting on.
+- **`zip_path_for` was still hand-rolling the decode** a hundred lines below the new helper — the
+  reuse reviewer caught the extraction being two-thirds done. One-line fix, and it means
+  `percent_decode_str` now appears exactly once in the crate.
+- **The first test triplicated an existing fixture.** The draft asserted the decoding rule that
+  `resolves_a_percent_encoded_href_to_a_decoded_target` already owns; it was cut back to what
+  `link_target` alone decides — the trim, and the miss returning `None`.
+- **A leftover `use crate::epub;` in `toc.rs`'s test module** became dead when line 3 changed to
+  `epub::{self, LinkTarget}`. No warning, because an explicit import shadows a glob. Deleted.
+
+**One finding was skipped:** a `TocEntry::spine_index()` accessor to flatten the `.target.`
+hop at the two `entry_index_for_spine` reads. Cosmetic, and most of the `.target.` noise is in
+tests, where being explicit about which coordinate is being compared is a feature.
+
+> **Status:** done — committed in `54e8ea7`, **115 tests green** (114 → 115), `cargo clippy
+> --all-targets` clean, and the three touched files are rustfmt-clean. The pre-existing rustfmt
+> drift in `epub.rs`, `web/assets.rs` and `components/popover/mod.rs` is untouched by this step.
+>
+> **No eyeball needed.** This is the phase's first step with no UI surface at all: the panel, the
+> header label and the jump are behaviourally identical, and the fixture tests cover every path
+> through the new resolver. Worth one `dx serve` anyway to confirm the panel still shows eighteen
+> rows, since the mutation table shows how quiet the failure mode is if the normalization is
+> wrong.
