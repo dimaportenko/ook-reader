@@ -1085,3 +1085,297 @@ the three `entry_index_for_spine(…).map(|i| entries[i].label)` sites.
 > jump is a decision only the caller can make. And the trigger went in the **header** beside
 > the settings gear rather than in the chapter `NavRow`, which is where Step 4 predicted it —
 > so the duplicated chapter label in that row survives another step, still unresolved.
+
+---
+
+## Step 6 — Jump to an entry
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+The rows have been buttons since Step 5, hovering and focusing and doing nothing. This step
+gives them their `onclick`, and the phase's promise — *pick a chapter off a list and go there*
+— finally closes.
+
+**The crux is that there is almost nothing to build.** Phase 3 already shipped the whole jump
+machinery for the in-book `<a href>` bridge: `epub::LinkTarget { spine_index, fragment }` names
+a destination, and `nav::ReaderState::follow_link` goes there — setting `Phase::Loading` when
+the document changes, resetting the page, and parking the fragment in `Pending` for
+`chapter-loader.js` to scroll to. A ToC entry **is** an internal link wearing a label: it
+already carries a `spine_index` (Step 2 resolved it) and an already-percent-decoded `fragment`
+(Step 2 decoded it). So the step is a four-line `From` impl and a click handler. That the
+phase's headline feature costs four lines is the payoff for Step 2 having done the resolution
+eagerly instead of leaving hrefs lying around to be parsed at click time.
+
+### The check — `cargo test`
+
+```rust
+#[test]
+fn an_entry_becomes_the_link_target_its_href_would_have() {
+    let (epub, docs) =
+        epub::open_with_spine(Path::new(crate::TEST_BOOK)).expect("open fixture book");
+
+    let entries = toc_entries(&epub, &docs);
+    let target = epub::LinkTarget::from(&entries[2]);
+
+    assert_eq!(target.spine_index, 2);
+    assert_eq!(target.fragment.as_deref(), Some("pgepubid00002"));
+
+    let href = format!("{}#pgepubid00002", epub::chapter_url(&docs[2]));
+    assert_eq!(
+        epub::resolve_internal_link(&docs, 0, &href),
+        Some(target),
+        "a picked entry and a followed link reach `follow_link` the same way"
+    );
+
+    let coverless = TocEntry {
+        label: "Cover".to_string(),
+        depth: 0,
+        spine_index: 0,
+        fragment: None,
+    };
+    assert_eq!(epub::LinkTarget::from(&coverless).fragment, None);
+}
+```
+
+**The red was a compile error, and that is the honest report:**
+
+```
+error[E0308]: mismatched types
+   --> src/toc.rs:153:45
+    |
+153 |         let target = epub::LinkTarget::from(&entries[2]);
+    |                      ---------------------- ^^^^^^^^^^^ expected `LinkTarget`, found `&TocEntry`
+```
+
+`From` is a trait with a blanket `impl<T> From<T> for T`, so `LinkTarget::from` always resolves
+to *something* — the identity impl — and the failure is a type mismatch rather than "no such
+method". Worth knowing, because it means a `From` you forgot to write never fails as a missing
+name.
+
+**The middle assertion is the one that matters.** The first two only check that four fields
+were copied. The third pins the claim the step actually rests on: the `LinkTarget` built from a
+ToC entry is **byte-identical** to the one `resolve_internal_link` builds from the equivalent
+`<a href>`. Two independent paths — the reader clicking a panel row, and the reader clicking a
+link inside the book — converge on one value and one call to `follow_link`. If they ever
+diverged (one decodes `%20`, the other doesn't; one strips the leading `/`, the other doesn't)
+the panel would jump somewhere subtly different from the link, and only a test that builds both
+sides can see it. `epub::chapter_url` is used rather than a hand-written URL so the test
+percent-encodes the path exactly the way the frame does.
+
+**The `coverless` case earns its lines**, though the `simplify` pass argued otherwise — see the
+status note.
+
+### The code
+
+`src/toc.rs`:
+
+```rust
+use crate::epub::LinkTarget;
+
+impl From<&TocEntry> for LinkTarget {
+    fn from(entry: &TocEntry) -> Self {
+        LinkTarget {
+            spine_index: entry.spine_index,
+            fragment: entry.fragment.clone(),
+        }
+    }
+}
+```
+
+`src/ui/toc.rs` — a third prop, a controlled `open` signal, and the handler:
+
+```rust
+pub(crate) fn ContentsPopover(
+    entries: Rc<Vec<TocEntry>>,
+    chapter: usize,
+    on_pick: EventHandler<LinkTarget>,
+) -> Element {
+    let mut open = use_signal(|| false);
+    ...
+        PopoverRoot {
+            open: open(),
+            on_open_change: move |v| open.set(v),
+            ...
+                        button {
+                            ...
+                            onclick: {
+                                let target = LinkTarget::from(entry);
+                                move |_| {
+                                    open.set(false);
+                                    on_pick.call(target.clone());
+                                }
+                            },
+```
+
+`src/ui/reader.rs`:
+
+```rust
+let on_pick = use_callback(move |target| state.follow_link(target));
+...
+    ContentsPopover {
+        entries: entries.clone(),
+        chapter: chapter(),
+        on_pick,
+    }
+```
+
+### Why it works
+
+**`From<&TocEntry>` rather than `From<TocEntry>`.** The entries live in an
+`Rc<Vec<TocEntry>>` shared between `Reader` and the panel; nothing can hand over an owned
+`TocEntry` without cloning the label too, and the label is the one field a `LinkTarget` does not
+want. Taking `&TocEntry` clones exactly the `Option<String>` that has to be owned and leaves the
+`String` label where it is. Implementing `From` on the reference is the standard Rust move for
+"cheap projection out of a borrowed struct", and it gives `.into()` at every call site for free.
+
+**The impl lives in `src/toc.rs`, not `src/epub.rs`.** The orphan rules permit either — both
+types are local — so layering decides. `epub.rs` is the lower layer: it knows about zip
+resources, URLs and the spine, and nothing about tables of contents. `toc.rs` already imports
+`epub`. Putting the impl in `epub.rs` would make the bottom of the stack name a type from the
+top of it for no gain.
+
+**`use_signal` moved *above* the `entries.is_empty()` early return, and that is load-bearing.**
+Step 5's note explained that the early return was safe precisely because the component had zero
+hooks. This step reintroduces one, and Dioxus identifies hook state **positionally** — a render
+that returns before a hook call, followed by one that reaches it, desynchronises every hook
+after it. In practice `entries` never changes for a mounted book, so the bug would not fire
+today; the ordering is correct by construction instead of correct by luck.
+
+**Why the panel has to be *controlled* to close itself.** `dioxus_primitives` keeps the open
+state in a private `PopoverCtx` and exposes no imperative "close" handle. `use_controlled`
+prefers the `open` prop when one is present, so lifting the state into our own signal is the
+only way `onclick` can dismiss the panel. This restores the exact triple
+(`use_signal` → `open:` → `on_open_change:`) that Step 5 deliberately deleted as unused — Step
+5 predicted it would come back, and it did, now earning its place.
+
+**The `onclick` value is a block, and the block is why the payload can be a `LinkTarget`.** An
+event handler must be `'static`, but `entry` is borrowed out of `entries` for the duration of
+the loop. Writing
+
+```rust
+onclick: {
+    let target = LinkTarget::from(entry);
+    move |_| { ... on_pick.call(target.clone()); }
+},
+```
+
+resolves the borrow **at render time** into an owned `LinkTarget`, which the `move` closure then
+owns outright. `rsx!` parses an attribute value as a full `syn::Expr`, so a block expression
+introducing a binding is legal there — the one place in `rsx!` you can run a statement per
+iteration of a `for`. The inner `.clone()` is needed because the closure is `FnMut` and may fire
+more than once (`EventHandler` never consumes its captures).
+
+**`use_callback` in `Reader` is not decoration — it is what keeps the panel memoized.** Dioxus
+decides whether to re-render a child by comparing props, and the generated `PartialEq` for
+`ContentsPopoverProps` compares **all three** fields, `on_pick` included:
+
+```rust
+fn eq(&self, other: &Self) -> bool {
+    self.entries == other.entries && self.chapter == other.chapter && self.on_pick == other.on_pick
+}
+```
+
+`Callback`'s `PartialEq` is pointer identity, and an inline closure in `rsx!` becomes a **fresh**
+`Callback::new` on every render — so an inline `on_pick` would make that comparison false every
+single time, and `memoize` compares *before* it repoints the handler:
+
+```rust
+fn memoize(&mut self, new: &Self) -> bool {
+    let equal = self == new;
+    self.on_pick.__point_to(&new.on_pick);
+    ...
+}
+```
+
+`Reader` re-renders on every page turn, every scroll message and every reflow, so an inline
+closure would have thrown away exactly the fast path Step 5 bought by deriving `Eq` on
+`TocEntry` — the `Rc` pointer comparison that lets 18 entries compare in one instruction.
+`use_callback` allocates the `Callback` once in a hook and *replaces the boxed closure in place*
+on later renders, returning the same handle, so pointer identity holds and the panel goes back
+to re-rendering only when the chapter or the open state actually changes.
+
+**Nothing new happens after `follow_link`.** It sets `Phase::Loading` only when the document
+actually changes, so picking a sub-entry inside the chapter you are already reading does not
+flash the spinner; it resets the page to 0 and parks `Pending::Fragment`, and the existing
+`use_effect` on `chapter()`/`pending()` re-sends the URL and fragment to `chapter-loader.js`.
+The fragment path is the same one the in-book links have used since Phase 3.
+
+### Scope note
+
+**The panel does not follow you.** Jumping updates `aria-current` on the next open, but the list
+still does not scroll the current row into view — carried from Step 5 and still open, and now
+slightly more visible since jumping is how you move a long way through a long ToC.
+
+**Sub-entry precision is still out of scope**, as the phase doc says up front. Jumping *to*
+"II." works — it is a real fragment and the loader scrolls to it. Knowing you are *in* "II."
+rather than at the top of the chapter is the resolve-a-position-in-the-live-DOM problem the
+milestone defers.
+
+**Everything Step 5 parked is still parked**, and Step 7 is now the phase's last step and owns
+all of it: the tabler SVG preamble on its third copy, the `stop_propagation` line that belongs
+in the shared `PopoverContent`, `ul`/`li` list semantics, scroll-into-view, the `--toc-depth`
+string spelled in two files with no compiler between them, the `toc_entries` /
+`resolve_internal_link` overlap from Step 2, the possible `toc::label_for_spine` from Step 4,
+and the duplicated chapter label in the `NavRow`. Step 6 adds one more: the controlled-open
+triple is now verbatim in **two** files (`settings.rs` and `toc.rs`), which makes hoisting a
+close handle into the repo's own `PopoverRoot` wrapper a real candidate rather than a
+speculative one.
+
+### What the `simplify` pass changed, and what it did not
+
+The pass ran four ways over the diff and **rewrote the step's main interface**, which is worth
+recording because the first draft was worse and the reason is instructive.
+
+The draft had `on_pick: EventHandler<usize>` — the panel reported *which row* was clicked and
+`Reader` looked the entry back up through a second `Rc` clone, `picks.get(index)`. Three of the
+four reviewers independently flagged it: the row-order invariant spanned two files with nothing
+in the type saying so, the `if let Some(...)` guard was an unreachable branch dressed as error
+handling, and the component's real contract had become "take these entries *and* keep your own
+copy". The draft justified `usize` as "matching `picker.rs`" — which is backwards:
+`SlugPicker`'s `on_pick` is an `EventHandler<String>`, the picked *value*, not its position.
+Handing over the resolved `LinkTarget` deleted the second `Rc`, the guard, and the cross-file
+invariant together.
+
+The fourth reviewer caught the memoization regression described above, and `use_callback` came
+out of it.
+
+**Two findings were deliberately skipped:**
+
+- **"Delete the `coverless` fixture — the `From` impl is branchless, so it cannot fail on its
+  own."** True as far as it goes, but it misses what the case pins. If the conversion ever
+  became `unwrap_or_default()`, a fragment-less entry would produce `Some("")`, `follow_link`
+  would park `Pending::Fragment("")` instead of `Pending::Nothing`, and the chapter would stay
+  hidden behind the spinner waiting for a scroll report that never comes. That is a real
+  failure mode of the `Pending` enum, not a tautology, and the fixture is the only thing
+  watching it.
+- **"Hoist the controlled-open triple into the repo's own `PopoverRoot` wrapper."** Correct, and
+  now genuinely earned at two occurrences — but it edits a shared component with a layout blast
+  radius, which is Step 7's business. Recorded in the scope note.
+
+> **Status:** done — committed in `68dc393`, **115 tests green** (114 → 115), `cargo clippy
+> --all-targets` clean, and the three touched files are rustfmt-clean. The pre-existing
+> rustfmt drift in `epub.rs`, `web/assets.rs` and `components/popover/mod.rs` is untouched by
+> this step.
+
+The eyeball half of the check was blocked, and not by this step. Clicking a panel row did
+nothing and closed the panel, and so did every button in `SettingsPopover`. macOS WebKit does
+not focus a `<button>` on mousedown, so focus fell to the nearest focusable ancestor —
+`reader-root`, which has carried `tabindex="0"` since `57654d1` gave the arrow keys somewhere
+to land. That element is outside the popover root, so `use_outside_dismiss` read the `focusin`
+as a press on "outside" and unmounted the content mid-press; with no element left under the
+pointer, `mouseup` never completed a `click` and no handler ran.
+
+Two observations named it. The `<select>` pickers kept working while every button beside them
+was dead, because form controls *do* take focus on click; and Tab-then-Enter drove the whole
+jump correctly, because `FocusTrap` focuses the button directly and focus never leaves the
+root — which is also what proved this step's code was right before the bug was found. Fixed in
+`e67c428` by putting `tabindex="-1"` on the popover content, so the ancestor walk stops inside
+the panel. It sits on the wrapper rather than on each button, and leaves the arrow-key feature
+alone: `reader-root` being a focus sink is what makes that feature work, and only its position
+relative to the popover was ever wrong.
+>
+> **The jump itself has not been eyeballed** — the agent cannot see the webview. The gate is
+> the learner opening the panel under `dx serve`, clicking a top-level chapter (the document
+> changes, the spinner shows, the panel closes), then a nested sub-entry such as "II." inside
+> the chapter already open (no spinner, the frame scrolls to the fragment, the panel closes).

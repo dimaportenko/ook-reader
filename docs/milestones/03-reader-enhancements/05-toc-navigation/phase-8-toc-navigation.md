@@ -94,7 +94,7 @@ Detail for each lives in
       the `dx serve` pass). Written by `lbb:next-implement`. The trigger landed in the header
       beside the settings gear rather than in the chapter `NavRow`, so Step 4's question about
       that row's duplicate label is still open.
-- [ ] **6. Jump to an entry** — convert a `TocEntry` into `epub::LinkTarget` and hand it to
+- [x] **6. Jump to an entry** — convert a `TocEntry` into `epub::LinkTarget` and hand it to
       the existing `follow_link`. `#[test]` for the conversion, eyeball for the jump.
 - [ ] **7. Review and refactor** — the phase-closing pass.
 
