@@ -82,8 +82,12 @@ Detail for each lives in
       reverse lookup, with the first-match/fall-back-to-preceding rule. `#[test]`. Committed
       in `2249211`, **113 tests green**; written by `lbb:next-implement` and watched red,
       then re-verified by mutation after the `simplify` pass changed the return type.
-- [ ] **4. Show the name in the nav bar** — the label with "Chapter N of M" as the fallback.
-      Pure `chapter_label` gets a `#[test]`; the bar itself is a `dx serve` eyeball.
+- [x] **4. Show the name in the nav bar** — the label with "Chapter N of M" as the fallback.
+      The first step to *call* `toc_entries`, once per mounted book via `use_hook`. Committed
+      in `24ad8bd`, **114 tests green**; written by `lbb:next-implement` and watched red on
+      the toc arm, the two fallback assertions verified by mutation. It landed in the header
+      under the book title rather than in the chapter nav row — better home for "what am I
+      reading", and the row keeps the label too for now.
 - [ ] **5. Render the contents panel** — the entries as a list indented by depth, in the
       existing popover. `dx serve` + `cargo clippy`.
 - [ ] **6. Jump to an entry** — convert a `TocEntry` into `epub::LinkTarget` and hand it to

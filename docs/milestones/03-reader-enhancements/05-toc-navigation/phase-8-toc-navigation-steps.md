@@ -579,3 +579,225 @@ scope for the whole phase, per the phase doc.
 > first-vs-last claim — went red at `src/toc.rs:120`; `label(3)`'s swapped to `None` — the
 > fallback — went red at `src/toc.rs:140`. Both mutations touched the test only, and the file
 > was restored from a byte-identical copy each time.
+
+---
+
+## Step 4 — Show the name in the nav bar
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+Three steps of pure functions over a `Vec` and nothing on screen has changed. This step is
+the **first wire**: `toc_entries` and `entry_index_for_spine` acquire their first real
+callers, and the chapter nav row stops saying "Chapter 3 of 15" and starts saying
+"I. A SCANDAL IN BOHEMIA".
+
+Two pieces, and only one of them is testable:
+
+- **`chapter_label`** — a pure `(&[TocEntry], chapter, chapter_count) -> String`. Entirely a
+  `#[test]`.
+- **the flatten, once per book** — where in the component tree `toc_entries` actually gets
+  called, and what keeps its result alive. That one is a `dx serve` eyeball, because it is a
+  statement about Dioxus's hook lifecycle rather than about a value.
+
+### The check — `cargo test`
+
+In `src/ui/reader.rs`'s existing `mod test`, next to `the_page_label_waits_for_a_real_count` —
+this is the same kind of function, doing the same job, for the row above.
+
+```rust
+#[test]
+fn the_chapter_label_prefers_the_toc_entry_over_the_ordinal() {
+    let (epub, docs) =
+        epub::open_with_spine(Path::new(crate::TEST_BOOK)).expect("open fixture book");
+    let entries = toc::toc_entries(&epub, &docs);
+
+    assert_eq!(
+        chapter_label(&entries, 2, docs.len()),
+        "I. A SCANDAL IN BOHEMIA"
+    );
+
+    assert_eq!(chapter_label(&entries, 0, docs.len()), "Chapter 1 of 15");
+
+    assert_eq!(chapter_label(&[], 2, 15), "Chapter 3 of 15");
+}
+```
+
+Run it with `cargo test the_chapter_label`.
+
+Three assertions, and each reaches a place the other two cannot:
+
+- **spine 2 → the parent entry.** The chapter carrying four entries, so this is Step 3's rule
+  arriving intact at the UI rather than being re-decided here.
+- **spine 0 → "Chapter 1 of 15".** The fixture's cover, the one spine item the ToC genuinely
+  never names. The fallback is not a defensive branch for malformed books; the *bundled* book
+  reaches it on the page it opens to. This is also the assertion that would catch the tempting
+  wrong implementation — `if entries.is_empty() { ordinal } else { entries[index].label }`
+  panics here and passes the line below.
+- **`&[]` → "Chapter 3 of 15".** A book with no ToC at all, which the phase doc calls a normal
+  book. `&[]` is not a mock — it is exactly what `toc_entries` returns when `contents()` is
+  `None`, so the empty slice tests the real path, and it pins the `chapter + 1` offset at a
+  chapter where an off-by-one would show.
+
+Deliberately *not* asserted here: that spine 2 resolves to the *first* of its four entries
+rather than the last, and that spine 0 resolves to nothing at all. Those are claims about
+`entry_index_for_spine`, and `src/toc.rs` already pins them. Restating them in a UI module
+would mean fixing the same expectation twice the day the bundled fixture changes.
+
+### The eyeball — `dx serve`
+
+Open the Sherlock fixture. The label should read **"Chapter 1 of 15"** on the cover, and
+turning one chapter forward should switch it to **"The Adventures of Sherlock Holmes"**, then
+**"I. A SCANDAL IN BOHEMIA"**. Page-turning *within* a chapter must not change it — the label
+is a function of the spine index, and paging does not move the spine index.
+
+**Where it ended up differs from where this step proposed to put it.** The step said "the nav
+bar", meaning the chapter `NavRow`'s label slot. In the built version the label is a *second
+line in the centred header*, under the book title, and the chapter `NavRow` keeps it too — so
+it renders in both places from the same `chapter_label` string:
+
+```
+header:   The Adventures of Sherlock Holmes
+          I. A SCANDAL IN BOHEMIA
+
+  [Prev]  I. A SCANDAL IN BOHEMIA  [Next]
+  [Prev]        Page 4 of 22       [Next]
+```
+
+The header is the better home — "what am I reading" belongs with the title, not wedged
+between two buttons — and the absolutely-positioned title `p` had to become a `div` wrapping
+two `p`s to hold both lines, which is what the surrounding padding tweaks are for. The
+duplicate in the `NavRow` was kept knowingly for now; Step 5 gives the chapter row a contents
+button and is the natural moment to decide whether that row still wants a label at all.
+
+### The code
+
+```rust
+use crate::toc::{self, TocEntry};
+
+fn chapter_label(entries: &[TocEntry], chapter: usize, chapter_count: usize) -> String {
+    match toc::entry_index_for_spine(entries, chapter) {
+        Some(index) => entries[index].label.clone(),
+        None => format!("Chapter {} of {}", chapter + 1, chapter_count),
+    }
+}
+```
+
+and in `Reader`, two lines:
+
+```rust
+let docs = book.docs;
+let entries = use_hook(|| Rc::new(toc::toc_entries(&book.epub, &docs)));
+…
+let chapter_label = chapter_label(&entries, chapter(), state.chapter_count);
+```
+
+### Why it works
+
+**`use_hook`, not `use_memo`, and not a plain call.** A component body in Dioxus re-runs on
+every render — every page turn, every theme change. Calling `toc_entries` there would reparse
+and reallocate the whole ToC each time. `use_hook` runs its closure **once per mounted
+component** and returns a clone of the stored value on every subsequent render; the ToC is
+derived from the `Epub`, which cannot change while the book is open, so "once per mount" is
+exactly right. `use_memo` is the tool when the value depends on signals and must recompute
+when they change — this one depends on nothing reactive, so a memo would add a subscription
+and a `Signal` allocation to buy nothing. The precedent is one line down: `start` (the stored
+reading position) is a `use_hook` for the same reason.
+
+**Once per mount is once per book, because of the `key`.** `main.rs` mounts the reader as
+`Reader { key: "{book.id}", book }`. Without that key, opening a second book would hand the
+*same* component instance a new `book` prop, `use_hook` would not re-run, and you would read
+book two under book one's table of contents. The key makes a different id a different
+component, so the hook state is torn down and rebuilt. This is not a new guarantee this step
+introduces — `start` already depends on it — but it is the guarantee that makes `use_hook`
+legal here, and it lives in a different file from the code that relies on it.
+
+**`Rc::new` around the `Vec`, because `use_hook` clones.** `use_hook<T: Clone>` hands back
+`T::clone()` on every render. Cloning a `Vec<TocEntry>` is 18 `String` allocations per render
+— per page turn — for a value that is never mutated. `Rc` makes that clone a refcount bump.
+It is the same reasoning, and the same shape, as `OpenBook::docs: Rc<Vec<String>>` two files
+over. `&entries` then derefs through the `Rc` to the `Vec` and unsizes to `&[TocEntry]`
+without anything written down.
+
+**`&[TocEntry]` in the signature, not `&Rc<Vec<TocEntry>>` or `&Vec<TocEntry>`.** The slice is
+the weakest thing the function can ask for, which is why the test can pass it a literal `&[]`
+and never construct an `Rc` at all. A function that takes `&Vec` forces every caller to own a
+`Vec`; a function that takes `&[T]` accepts vectors, arrays, slices and empty literals alike.
+Same rule that let Step 2 test its drop branch with `&docs[..3]`.
+
+**`.clone()` on the label is the honest cost, and it is small.** The alternative is returning
+`&str` borrowed from `entries`, which would make `chapter_label` generic over a lifetime and
+push the borrow into the rsx block — where the string is interpolated into a `String` prop
+anyway. One short allocation per render, on a path that already formats `page_label` from
+scratch each time. Cloning where the data ends up owned regardless is not waste; it is the
+absence of a borrow that would have to be discharged one line later.
+
+**The fallback is not error handling.** `None` from `entry_index_for_spine` means "no entry
+names this document and none precedes it", which the fixture produces on page one. So both
+arms of the `match` are normal operation, and the ordinal is a *label*, not a diagnostic.
+That is also why the arm keeps `chapter_count` — "Chapter 1 of 15" tells you where you are in
+a way "Chapter 1" does not, and it is the only place `chapter_count` is still used.
+
+### Scope note
+
+The label is document-level, per Step 3's rule: deep inside sub-entry "III." the bar still
+reads "I. A SCANDAL IN BOHEMIA". Nothing here renders a list — Step 5 puts the entries in the
+popover, and it is the reason the entries are held in a shareable `Rc` rather than being
+computed inside `chapter_label` and dropped. `TocEntry::depth` and `TocEntry::fragment` still
+have no reader; Steps 5 and 6 respectively.
+
+`chapter_label` lives in `src/ui/reader.rs` next to `page_label` rather than in `src/toc.rs`,
+because the "…of 15" half is a fact about the nav bar and not about the table of contents;
+`toc.rs` stays a pure model with no opinion about how it is displayed. If Step 5's panel wants
+the same string, that is the moment to reconsider.
+
+One incidental: the three `dead_code` warnings carried since Step 1 are gone. `toc_entries`
+and `entry_index_for_spine` have real callers now, which is what those warnings were waiting
+for — and why they were never silenced with an `#[allow]`.
+
+Two calls the `simplify` pass looked at and left alone, both worth knowing were *decided*
+rather than defaulted:
+
+- **The entries are derived in `Reader`, not carried on `OpenBook` beside `docs`.** `docs`
+  earns its seat there because `open_with_spine` *returns* it — it is the boundary's own
+  output. `toc_entries` would be a call `library.rs` makes purely on the reader's behalf, and
+  the library screen never reads a ToC. Since the `key` makes `use_hook` fire exactly once per
+  book either way, the `OpenBook` version buys no timing and costs a wider struct shared by
+  three modules. Revisit if the library screen ever wants the ToC, or if the `key` goes away.
+- **`chapter_label` stays in `ui/reader.rs`.** It owns UI copy — the fallback *wording*, and
+  the policy of falling back to an ordinal at all — and its `chapter_count` argument is nav
+  state, not ToC data. A function in `toc.rs` taking a spine count it has no other use for is
+  the tell that it is in the wrong module.
+
+The one deferral: `entry_index_for_spine(…).map(|i| entries[i].label)` is now written three
+times, twice in `toc.rs`'s tests and once here. A `toc::label_for_spine(&[TocEntry], usize)
+-> Option<&str>` would collapse all three and leave `chapter_label` as nothing but its
+fallback. Two of the three sites are test-local, so it goes on **Step 7**'s list next to the
+`resolve_internal_link` overlap Step 2 parked there.
+
+> **Status:** done — committed in `24ad8bd`, **114 tests green** (113 → 114).
+> `cargo clippy --all-targets` is clean for the first time this phase, and `src/ui/reader.rs`
+> is rustfmt-clean.
+>
+> Watched red twice, both on the shape that shipped. First `cannot find function
+> 'chapter_label' in this scope` ×4. Then the ordinal arm was implemented **alone**, which
+> turned that into a real assertion failure — `left: "Chapter 3 of 15" / right: "I. A SCANDAL
+> IN BOHEMIA"` — so the toc arm was observed failing before it existed. Unlike Step 3 the
+> `simplify` pass did not reshape the implementation afterwards, so that red stands as
+> written.
+>
+> The two fallback assertions were green from the moment the ordinal-only stub existed and so
+> were never observed failing; both were verified by mutation at commit time instead.
+> `chapter_label(&entries, 0, …)`'s expectation swapped to `"The Adventures of Sherlock
+> Holmes"` went red at `src/ui/reader.rs:357`, and `chapter_label(&[], 2, 15)`'s swapped to
+> `"Chapter 2 of 15"` went red at `src/ui/reader.rs:359`. Both mutations touched the test
+> only, and the file was restored from a byte-identical copy each time.
+>
+> The `simplify` pass ran four ways over the diff. Reuse and altitude both returned "keep it
+> as is" — the two forks recorded above. Simplification found one real redundancy: an
+> assertion on spine 14 that reached the same `match` arm as the spine-2 one and duplicated a
+> claim `toc.rs` already pins. It was dropped, taking the test from four assertions to three.
+>
+> The visual half is the learner's, and the layout above is theirs: the step proposed the
+> chapter `NavRow`'s label slot and the header is where it actually landed. The doubled label
+> was reviewed and kept deliberately.
