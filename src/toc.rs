@@ -1,6 +1,6 @@
 use rbook::Epub;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TocEntry {
     pub(crate) label: String,
     pub(crate) depth: usize,

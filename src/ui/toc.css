@@ -1,0 +1,34 @@
+.contents-popover__content {
+  min-width: 24rem;
+}
+
+.contents-popover__list {
+  display: flex;
+  max-height: 80vh;
+  flex-direction: column;
+  padding: 1rem;
+  overflow-y: auto;
+}
+
+.contents-popover__entry {
+  padding: 0.35rem 0.75rem 0.35rem calc(0.75rem + var(--toc-depth, 0) * 1rem);
+  border: none;
+  border-radius: 0.25rem;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.contents-popover__entry:hover {
+  background-color: var(--primary-color-4);
+}
+
+.contents-popover__entry:focus-visible {
+  box-shadow: 0 0 0 2px var(--focused-border-color);
+}
+
+.contents-popover__entry[aria-current="page"] {
+  font-weight: 700;
+}

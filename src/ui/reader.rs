@@ -10,7 +10,7 @@ use crate::{
     nav::{self, ReaderDataStoreExt, ReaderState},
     settings::Settings,
     toc::{self, TocEntry},
-    ui::{library::OpenBook, settings::SettingsPopover, OrLog},
+    ui::{library::OpenBook, settings::SettingsPopover, toc::ContentsPopover, OrLog},
 };
 
 const BRIDGE_JS: &str = include_str!("../web/assets/ook-events-listener.js");
@@ -212,6 +212,10 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                 }
                 div {
                     style: "padding: 0.5rem 1rem; z-index: 1; display: flex; gap: 0.5rem;",
+                    ContentsPopover {
+                        entries: entries.clone(),
+                        chapter: chapter(),
+                    }
                     SettingsPopover {}
                 }
 

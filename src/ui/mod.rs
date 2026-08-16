@@ -4,6 +4,7 @@ pub mod library;
 pub mod reader;
 pub mod settings;
 pub mod theme;
+pub mod toc;
 
 pub(crate) trait OrLog<T> {
     fn or_log(self, action: &str) -> Option<T>;
