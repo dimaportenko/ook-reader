@@ -9,6 +9,7 @@ use crate::{
     library::Library,
     nav::{self, ReaderDataStoreExt, ReaderState},
     settings::Settings,
+    toc::{self, TocEntry},
     ui::{library::OpenBook, settings::SettingsPopover, OrLog},
 };
 
@@ -79,6 +80,13 @@ impl BridgeMsg {
     }
 }
 
+fn chapter_label(entries: &[TocEntry], chapter: usize, chapter_count: usize) -> String {
+    match toc::entry_index_for_spine(entries, chapter) {
+        Some(index) => entries[index].label.clone(),
+        None => format!("Chapter {} of {}", chapter + 1, chapter_count),
+    }
+}
+
 fn page_label(page: usize, count: usize) -> String {
     match count {
         0 => "Page …".to_string(),
@@ -94,6 +102,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
     let library = use_context::<Rc<Library>>();
     let mut open_book = use_context::<Signal<Option<OpenBook>>>();
     let docs = book.docs;
+    let entries = use_hook(|| Rc::new(toc::toc_entries(&book.epub, &docs)));
     let start = use_hook(|| {
         library
             .position(book.id)
@@ -108,7 +117,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
     let docs_for_iframe = docs.clone();
 
     let page_label = page_label(page(), page_count());
-    let chapter_label = format!("Chapter {} of {}", chapter() + 1, state.chapter_count);
+    let chapter_label = chapter_label(&entries, chapter(), state.chapter_count);
 
     use_effect(move || {
         let push = document::eval(THEME_PUSH_JS);
@@ -159,7 +168,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
             div {
                 style: "display: flex; justify-content: space-between;",
                 div {
-                    style: "padding: 0.5rem 1rem; z-index: 1;",
+                    style: "padding: 0.75rem 1rem; z-index: 1;",
 
                     button {
                         class: "icon-button",
@@ -189,9 +198,17 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                         }
                     }
                 }
-                p {
-                    style: "text-align: center; position: absolute; top: 0; left: 0; right: 0;",
-                    "{book.title}"
+                div {
+                    style: "position: absolute; top: 0; left: 0; right: 0; padding: 0.5rem 1rem",
+                    p {
+                        style: "text-align: center; margin: 0.5rem 0 0;",
+                        "{book.title}"
+                    }
+
+                    p {
+                        style: "text-align: center; margin: 0.5rem 0 0;",
+                        "{chapter_label}"
+                    }
                 }
                 div {
                     style: "padding: 0.5rem 1rem; z-index: 1; display: flex; gap: 0.5rem;",
@@ -213,7 +230,9 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                 if hidden {
                     div {
                         class: "reader-loading",
-                        div { class: "reader-loading__spinner" }
+                        div {
+                            class: "reader-loading__spinner",
+                        }
                     }
                 }
             }
@@ -320,7 +339,25 @@ fn use_bridge(state: ReaderState, docs: Rc<Vec<String>>, library: Rc<Library>, b
 
 #[cfg(test)]
 mod test {
+    use std::path::Path;
+
     use super::*;
+
+    #[test]
+    fn the_chapter_label_prefers_the_toc_entry_over_the_ordinal() {
+        let (epub, docs) =
+            epub::open_with_spine(Path::new(crate::TEST_BOOK)).expect("open fixture book");
+        let entries = toc::toc_entries(&epub, &docs);
+
+        assert_eq!(
+            chapter_label(&entries, 2, docs.len()),
+            "I. A SCANDAL IN BOHEMIA"
+        );
+
+        assert_eq!(chapter_label(&entries, 0, docs.len()), "Chapter 1 of 15");
+
+        assert_eq!(chapter_label(&[], 2, 15), "Chapter 3 of 15");
+    }
 
     #[test]
     fn bridge_parses_each_message_kind() {
