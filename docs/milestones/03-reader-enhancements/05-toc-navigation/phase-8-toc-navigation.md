@@ -78,8 +78,10 @@ Detail for each lives in
       path up in the spine, drop what does not resolve. Pins the many-to-many facts of the
       fixture. `#[test]`. Committed in `cdd91bf`, **111 tests green**; all three assertions
       verified by mutation.
-- [ ] **3. Name the current chapter** — `entry_for_spine(&entries, spine_index)`, the
-      reverse lookup, with the first-match/fall-back-to-preceding rule. `#[test]`.
+- [x] **3. Name the current chapter** — `entry_index_for_spine(&entries, spine_index)`, the
+      reverse lookup, with the first-match/fall-back-to-preceding rule. `#[test]`. Committed
+      in `2249211`, **113 tests green**; written by `lbb:next-implement` and watched red,
+      then re-verified by mutation after the `simplify` pass changed the return type.
 - [ ] **4. Show the name in the nav bar** — the label with "Chapter N of M" as the fallback.
       Pure `chapter_label` gets a `#[test]`; the bar itself is a `dx serve` eyeball.
 - [ ] **5. Render the contents panel** — the entries as a list indented by depth, in the

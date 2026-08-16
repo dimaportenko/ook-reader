@@ -52,7 +52,7 @@ in-book `<a href>` bridge; a ToC entry is an internal link wearing a label. Step
    `toc_entries(&Epub)`. The borrow-crossing step. `#[test]`.
 2. **Resolve to a spine index and a fragment** — split the href, look the path up in the
    spine `Vec<String>`, drop what does not resolve. `#[test]`.
-3. **Name the current chapter** — `entry_for_spine`, the reverse lookup, with its chosen
+3. **Name the current chapter** — `entry_index_for_spine`, the reverse lookup, with its chosen
    rule. `#[test]`.
 4. **Show the name in the nav bar** — pure `chapter_label` under `#[test]`, the bar itself an
    eyeball.
@@ -411,3 +411,171 @@ they need the spine alongside the `Epub` — the same call the reader makes at
 > `needless_range_loop` on `for i in 2..=5`. Rewritten as `for entry in &entries[2..=5]`, which
 > also lets the failure message name the entry rather than its index; the snippet above is the
 > corrected form. Clippy is back to the two expected `dead_code` warnings.
+
+---
+
+## Step 3 — Name the current chapter
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+Steps 1 and 2 built the map in the well-posed direction: an entry names exactly one spine
+index. This step runs it **backwards**, and backwards it is not a function — spine 2 has four
+entries, spine 0 has none. So this step is not a lookup, it is a **rule**, and the test's job
+is to pin the rule rather than to prove an algorithm.
+
+The rule, as the phase doc records it:
+
+1. **The first entry naming this document**, if any. Of the four entries on spine 2, the
+   reader is told "I. A SCANDAL IN BOHEMIA" — the parent — not "III.", the sub-entry that
+   happens to be last.
+2. Otherwise **the nearest preceding entry**. A document the ToC skips is not nameless; it is
+   still *inside* the chapter the last entry opened.
+3. Otherwise **nothing**. Before the first entry there is no chapter to be inside of — the
+   fixture's cover, spine 0, is exactly this.
+
+### The check — `cargo test`
+
+Two tests: one over the real fixture for rule 1 and rule 3, one over a hand-built `Vec` for
+rule 2, which the fixture cannot exercise (its ToC skips only spine 0, and spine 0 has no
+preceding entry).
+
+```rust
+#[test]
+fn the_current_chapter_is_the_first_entry_naming_its_document() {
+    let (epub, docs) =
+        epub::open_with_spine(Path::new(crate::TEST_BOOK)).expect("open fixture book");
+
+    let entries = toc_entries(&epub, &docs);
+    let label = |spine_index| {
+        entry_index_for_spine(&entries, spine_index).map(|index| entries[index].label.as_str())
+    };
+
+    assert_eq!(label(1), Some("The Adventures of Sherlock Holmes"));
+    assert_eq!(label(2), Some("I. A SCANDAL IN BOHEMIA"));
+    assert_eq!(label(14), Some("THE FULL PROJECT GUTENBERG™ LICENSE"));
+
+    assert_eq!(label(0), None);
+}
+
+#[test]
+fn a_document_the_toc_skips_keeps_the_preceding_entry() {
+    let entry = |label: &str, spine_index| TocEntry {
+        label: label.to_string(),
+        depth: 0,
+        spine_index,
+        fragment: None,
+    };
+    let entries = vec![entry("One", 1), entry("Two", 4)];
+    let label = |spine_index| {
+        entry_index_for_spine(&entries, spine_index).map(|index| entries[index].label.as_str())
+    };
+
+    assert_eq!(label(2), Some("One"));
+    assert_eq!(label(3), Some("One"));
+    assert_eq!(label(4), Some("Two"));
+    assert_eq!(label(5), Some("Two"));
+
+    assert_eq!(label(0), None);
+}
+```
+
+`label(1)` and `label(2)` are the two halves of rule 1 and they are not the same assertion:
+spine 1 carries **two** entries and spine 2 carries **four**, so both pin "first", but only
+`label(2)` distinguishes first-of-four from last-of-four. `label(0)` is rule 3 stated against
+the fixture's real cover — the spine item the ToC genuinely never names.
+
+The second test's synthetic list is deliberate. A fixture-driven test for rule 2 would have to
+mutate the real entries to manufacture a gap, and a test that edits its own input to reach the
+branch reads worse than two rows written by hand. `label(4)` and `label(5)` are in there so the
+fallback cannot be mistaken for "always the preceding entry": 4 is an exact hit, 5 falls back to
+the same row, and only the exact-first branch makes them agree for the right reason.
+
+### The code
+
+```rust
+pub(crate) fn entry_index_for_spine(entries: &[TocEntry], spine_index: usize) -> Option<usize> {
+    entries
+        .iter()
+        .position(|entry| entry.spine_index == spine_index)
+        .or_else(|| {
+            entries
+                .iter()
+                .rposition(|entry| entry.spine_index < spine_index)
+        })
+}
+```
+
+### Why it works
+
+**`position` / `rposition` is the rule spelled out in two words.** `position` takes the first
+match in iteration order — which is ToC order, which is reading order — so of the four entries
+on spine 2 it returns the parent. `rposition` walks from the back and takes the first match
+*there*, i.e. the **last** entry that precedes the target. The two halves want opposite ends of
+the list, and the standard library has a name for each; writing it any other way
+(`filter(...).last()`, `take_while(...).last()`, a manual fold) restates the same thing with
+more moving parts. `rposition` is available because `slice::Iter` is a `DoubleEndedIterator`
+*and* an `ExactSizeIterator` — it can be driven from either end and still know which index it
+landed on, both of which a `Vec`'s contiguous memory makes free.
+
+**`or_else`, not `or`.** `or(x)` evaluates `x` eagerly; `or_else(|| x)` only runs the closure
+when the first arm was `None`. Here that means the second scan does not happen at all on the
+common path — every chapter the ToC actually names, which is 14 of the fixture's 15. Reach for
+`or_else` whenever the fallback costs more than a constant.
+
+**Returning `Option<usize>` rather than `Option<&TocEntry>` — the index is the more
+informative answer.** Both avoid cloning, so neither allocates; the difference is what the
+caller can still do afterwards. Index → entry is `entries[index]`. Entry → index is *not*
+recoverable without a second scan or pointer identity, because two rows can compare equal:
+`TocEntry` derives `PartialEq`, and a book with two "Contents" rows at the same depth on the
+same document produces genuine duplicates. Step 5 renders `entries.iter().enumerate()` and
+wants to mark the current row, which is `Some(index) == current` — a comparison the reference
+form cannot make honestly.
+
+The second half is a Dioxus constraint. `usize` is `Copy` and `'static`, so the answer can sit
+in a `use_memo` or ride into a child component as a prop. `Option<&TocEntry>` can do neither:
+once the entries live in a signal, `read()` hands back a guard, and a reference borrowed from
+that guard cannot outlive it. The borrow does not propagate into the render tree the way it
+looks like it should.
+
+**No `usize` arithmetic anywhere.** The obvious alternative implementation — "binary-search the
+entries for `spine_index`, then walk back" — is faster on paper and wrong in practice: it
+assumes `entries` is sorted by `spine_index`, which is true of every well-formed ToC and is not
+guaranteed by anything. A ToC may point backwards (an appendix listed before the chapter that
+references it, a "return to contents" entry). Two linear scans over 18 rows cost nothing and
+have no precondition to violate.
+
+### Scope note
+
+`entry_index_for_spine` still has no caller — Step 4 puts the label in the nav bar, and
+the `dead_code` warnings are now three rather than two. The rule this step chose is
+**document-level only**: reading page 40 of chapter I, deep inside sub-entry "III.", still
+answers "I. A SCANDAL IN BOHEMIA". Fragment-level precision needs the live DOM and is out of
+scope for the whole phase, per the phase doc.
+
+> **Status:** done — committed in `2249211`, **113 tests green** (111 → 113).
+> `cargo clippy --all-targets` clean apart from the three expected `dead_code` warnings,
+> `src/toc.rs` rustfmt-clean.
+>
+> Unlike Steps 1 and 2, this one was **watched red**. First red was a compile error —
+> `cannot find function 'entry_for_spine' in this scope`, twice. Then the exact-match half was
+> implemented alone, which turned that into a real assertion failure in the fallback test:
+> `assertion left == right failed / left: None / right: Some("One")` at `src/toc.rs:132`.
+> Adding the `or_else` arm turned it green. Both branches of the rule were therefore observed
+> failing before either was implemented.
+>
+> **The return type changed after a `simplify` pass.** The step was first written as
+> `entry_for_spine -> Option<&TocEntry>`, with the signature flagged in the handoff as the
+> step's open question. The cleanup review argued the index is strictly the more informative
+> answer and that `Option<&TocEntry>` will not survive contact with a signal read guard in
+> Step 4; `find`/`rfind` became `position`/`rposition`, which mirror them exactly, so the rule
+> and its reasoning carried over unchanged. The tests kept every assertion — only the `label`
+> closure changed, from `.map(|entry| entry.label…)` to `.map(|index| entries[index].label…)`.
+> Reverting is a four-line edit if the reference form reads better to you.
+>
+> At commit time both assertions were re-verified by mutation, because the red above was
+> watched in the pre-`simplify` `find`/`rfind` shape and the shipped code is
+> `position`/`rposition`. `label(2)`'s expectation swapped to `Some("III.")` — the
+> first-vs-last claim — went red at `src/toc.rs:120`; `label(3)`'s swapped to `None` — the
+> fallback — went red at `src/toc.rs:140`. Both mutations touched the test only, and the file
+> was restored from a byte-identical copy each time.
