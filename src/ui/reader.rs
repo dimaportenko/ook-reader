@@ -244,12 +244,6 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
             }
 
             NavRow {
-                on_prev: move |_| state.chapter_prev(),
-                on_next: move |_| state.chapter_next(),
-                label: chapter_label,
-            }
-
-            NavRow {
                 on_prev: move |_| state.page_prev(),
                 on_next: move |_| state.page_next(),
                 label: page_label,
