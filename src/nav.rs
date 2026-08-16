@@ -121,16 +121,6 @@ impl ReaderState {
         }
     }
 
-    pub(crate) fn chapter_prev(self) {
-        let chapter = self.data.chapter();
-        self.apply(on_chapter_prev(chapter()));
-    }
-
-    pub(crate) fn chapter_next(self) {
-        let chapter = self.data.chapter();
-        self.apply(on_chapter_next(chapter(), self.chapter_count));
-    }
-
     pub(crate) fn follow_link(self, target: epub::LinkTarget) {
         if *self.data.chapter().peek() != target.spine_index {
             self.data.phase().set(Phase::Loading);
@@ -195,28 +185,6 @@ fn on_prev(page: usize, chapter: usize) -> Nav {
     }
 }
 
-fn on_chapter_next(index: usize, length: usize) -> Nav {
-    if index + 1 < length {
-        Nav::Chapter {
-            index: index + 1,
-            seek: Seek::First,
-        }
-    } else {
-        Nav::Stay
-    }
-}
-
-fn on_chapter_prev(index: usize) -> Nav {
-    if index > 0 {
-        Nav::Chapter {
-            index: index - 1,
-            seek: Seek::First,
-        }
-    } else {
-        Nav::Stay
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -248,41 +216,6 @@ mod test {
             on_next(0, 0, 0, 15),
             Nav::Chapter {
                 index: 1,
-                seek: Seek::First
-            }
-        );
-    }
-
-    #[test]
-    fn chapter_nav_steps_and_clamps() {
-        assert_eq!(
-            on_chapter_next(0, 15),
-            Nav::Chapter {
-                index: 1,
-                seek: Seek::First
-            }
-        );
-        assert_eq!(
-            on_chapter_prev(5),
-            Nav::Chapter {
-                index: 4,
-                seek: Seek::First
-            }
-        );
-        // At the edges nothing happens — including no page reset on the last chapter.
-        assert_eq!(on_chapter_next(14, 15), Nav::Stay);
-        assert_eq!(
-            on_chapter_next(13, 15),
-            Nav::Chapter {
-                index: 14,
-                seek: Seek::First
-            }
-        );
-        assert_eq!(on_chapter_prev(0), Nav::Stay);
-        assert_eq!(
-            on_chapter_prev(1),
-            Nav::Chapter {
-                index: 0,
                 seek: Seek::First
             }
         );
