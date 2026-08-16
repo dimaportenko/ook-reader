@@ -1,22 +1,12 @@
 use rbook::Epub;
 
-use crate::epub::LinkTarget;
+use crate::epub::{self, LinkTarget};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TocEntry {
     pub(crate) label: String,
     pub(crate) depth: usize,
-    pub(crate) spine_index: usize,
-    pub(crate) fragment: Option<String>,
-}
-
-impl From<&TocEntry> for LinkTarget {
-    fn from(entry: &TocEntry) -> Self {
-        LinkTarget {
-            spine_index: entry.spine_index,
-            fragment: entry.fragment.clone(),
-        }
-    }
+    pub(crate) target: LinkTarget,
 }
 
 pub(crate) fn toc_entries(epub: &Epub, docs: &[String]) -> Vec<TocEntry> {
@@ -27,18 +17,11 @@ pub(crate) fn toc_entries(epub: &Epub, docs: &[String]) -> Vec<TocEntry> {
     root.flatten()
         .filter_map(|entry| {
             let href = entry.href()?;
-            let path = href.path().decode();
-            let path = path.trim_start_matches('/');
 
             Some(TocEntry {
                 label: entry.label().to_string(),
                 depth: entry.depth().saturating_sub(1),
-                spine_index: docs.iter().position(|doc| doc == path)?,
-                fragment: href.fragment().map(|fragment| {
-                    percent_encoding::percent_decode_str(fragment)
-                        .decode_utf8_lossy()
-                        .into_owned()
-                }),
+                target: epub::link_target(docs, href.path().as_str(), href.fragment())?,
             })
         })
         .collect()
@@ -47,11 +30,11 @@ pub(crate) fn toc_entries(epub: &Epub, docs: &[String]) -> Vec<TocEntry> {
 pub(crate) fn entry_index_for_spine(entries: &[TocEntry], spine_index: usize) -> Option<usize> {
     entries
         .iter()
-        .position(|entry| entry.spine_index == spine_index)
+        .position(|entry| entry.target.spine_index == spine_index)
         .or_else(|| {
             entries
                 .iter()
-                .rposition(|entry| entry.spine_index < spine_index)
+                .rposition(|entry| entry.target.spine_index < spine_index)
         })
 }
 
@@ -60,7 +43,6 @@ mod test {
     use std::path::Path;
 
     use super::*;
-    use crate::epub;
 
     #[test]
     fn the_toc_flattens_to_a_depth_tagged_list_in_reading_order() {
@@ -96,25 +78,25 @@ mod test {
         assert_eq!(docs.len(), 15);
         assert_eq!(entries.len(), 18);
 
-        assert_eq!(entries[0].spine_index, 1);
-        assert_eq!(entries[0].fragment.as_deref(), Some("pgepubid00000"));
+        assert_eq!(entries[0].target.spine_index, 1);
+        assert_eq!(entries[0].target.fragment.as_deref(), Some("pgepubid00000"));
         assert_eq!(entries[1].label, "Contents");
-        assert_eq!(entries[1].spine_index, 1);
+        assert_eq!(entries[1].target.spine_index, 1);
 
         for entry in &entries[2..=5] {
             assert_eq!(
-                entry.spine_index, 2,
+                entry.target.spine_index, 2,
                 "{:?} is in the same document as its siblings",
                 entry.label
             );
         }
 
         assert!(
-            !entries.iter().any(|entry| entry.spine_index == 0),
+            !entries.iter().any(|entry| entry.target.spine_index == 0),
             "the cover is in the spine but in no toc entry"
         );
 
-        assert_eq!(entries[17].spine_index, 14);
+        assert_eq!(entries[17].target.spine_index, 14);
     }
 
     #[test]
@@ -139,8 +121,10 @@ mod test {
         let entry = |label: &str, spine_index| TocEntry {
             label: label.to_string(),
             depth: 0,
-            spine_index,
-            fragment: None,
+            target: LinkTarget {
+                spine_index,
+                fragment: None,
+            },
         };
         let entries = vec![entry("One", 1), entry("Two", 4)];
         let label = |spine_index| {
@@ -156,30 +140,22 @@ mod test {
     }
 
     #[test]
-    fn an_entry_becomes_the_link_target_its_href_would_have() {
+    fn an_entry_carries_the_link_target_its_href_would_have() {
         let (epub, docs) =
             epub::open_with_spine(Path::new(crate::TEST_BOOK)).expect("open fixture book");
 
         let entries = toc_entries(&epub, &docs);
-        let target = epub::LinkTarget::from(&entries[2]);
+        let target = &entries[2].target;
 
         assert_eq!(target.spine_index, 2);
         assert_eq!(target.fragment.as_deref(), Some("pgepubid00002"));
 
         let href = format!("{}#pgepubid00002", epub::chapter_url(&docs[2]));
         assert_eq!(
-            epub::resolve_internal_link(&docs, 0, &href),
+            epub::resolve_internal_link(&docs, 0, &href).as_ref(),
             Some(target),
             "a picked entry and a followed link reach `follow_link` the same way"
         );
-
-        let coverless = TocEntry {
-            label: "Cover".to_string(),
-            depth: 0,
-            spine_index: 0,
-            fragment: None,
-        };
-        assert_eq!(epub::LinkTarget::from(&coverless).fragment, None);
     }
 
     #[test]

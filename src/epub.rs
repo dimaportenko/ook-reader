@@ -133,41 +133,45 @@ pub(crate) fn content_type_for(path: &str) -> &'static str {
     }
 }
 
+fn percent_decode(raw: &str) -> String {
+    percent_encoding::percent_decode_str(raw)
+        .decode_utf8_lossy()
+        .into_owned()
+}
+
+pub(crate) fn link_target(
+    hrefs: &[String],
+    path: &str,
+    fragment: Option<&str>,
+) -> Option<LinkTarget> {
+    let path = percent_decode(path);
+
+    Some(LinkTarget {
+        spine_index: hrefs
+            .iter()
+            .position(|href| href == path.trim_start_matches('/'))?,
+        fragment: fragment.map(percent_decode),
+    })
+}
+
 pub(crate) fn resolve_internal_link(
     hrefs: &[String],
     current_index: usize,
     href: &str,
 ) -> Option<LinkTarget> {
     let (path, fragment) = match href.split_once('#') {
-        Some((path, frag)) => (
-            path,
-            Some(
-                percent_encoding::percent_decode_str(frag)
-                    .decode_utf8_lossy()
-                    .into_owned(),
-            ),
-        ),
+        Some((path, fragment)) => (path, Some(fragment)),
         None => (href, None),
     };
 
     if path.is_empty() {
         return Some(LinkTarget {
             spine_index: current_index,
-            fragment,
+            fragment: fragment.map(percent_decode),
         });
     }
 
-    let prefix = EPUB_URL_PREFIX;
-    let zip_path = path.strip_prefix(prefix)?;
-
-    let zip_path = percent_encoding::percent_decode_str(zip_path).decode_utf8_lossy();
-
-    let spine_index = hrefs.iter().position(|href| *href == zip_path)?;
-
-    Some(LinkTarget {
-        spine_index,
-        fragment,
-    })
+    link_target(hrefs, path.strip_prefix(EPUB_URL_PREFIX)?, fragment)
 }
 
 pub(crate) fn insert_before_head_close(xhtml: &str, snippet: &str) -> String {
@@ -233,9 +237,7 @@ fn zip_path_for(uri_path: &str) -> String {
         .strip_prefix(&format!("/{EPUB_ROUTE}"))
         .unwrap_or_default();
 
-    percent_encoding::percent_decode_str(path)
-        .decode_utf8_lossy()
-        .into_owned()
+    percent_decode(path)
 }
 
 pub(crate) fn use_register_asset_handler(epub: Rc<Epub>, settings: Settings) {
@@ -403,6 +405,21 @@ mod test {
 
         assert_eq!(target.spine_index, 2);
         assert_eq!(target.fragment.as_deref(), Some("chap01"));
+    }
+
+    #[test]
+    fn a_link_target_decodes_and_trims_before_matching_the_spine() {
+        let hrefs = vec!["OEBPS/Chapter 1.xhtml".to_string()];
+
+        assert_eq!(
+            link_target(&hrefs, "/OEBPS/Chapter%201.xhtml", Some("s%20a")),
+            Some(LinkTarget {
+                spine_index: 0,
+                fragment: Some("s a".to_string()),
+            })
+        );
+
+        assert_eq!(link_target(&hrefs, "OEBPS/missing.xhtml", None), None);
     }
 
     #[test]

@@ -79,7 +79,7 @@ pub(crate) fn ContentsPopover(
                             aria_current: if Some(index) == current { "page" },
                             style: "--toc-depth: {entry.depth};",
                             onclick: {
-                                let target = LinkTarget::from(entry);
+                                let target = entry.target.clone();
 
                                 move |e| {
                                     e.stop_propagation();
