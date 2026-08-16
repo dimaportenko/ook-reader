@@ -33,6 +33,17 @@ pub(crate) fn toc_entries(epub: &Epub, docs: &[String]) -> Vec<TocEntry> {
         .collect()
 }
 
+pub(crate) fn entry_index_for_spine(entries: &[TocEntry], spine_index: usize) -> Option<usize> {
+    entries
+        .iter()
+        .position(|entry| entry.spine_index == spine_index)
+        .or_else(|| {
+            entries
+                .iter()
+                .rposition(|entry| entry.spine_index < spine_index)
+        })
+}
+
 #[cfg(test)]
 mod test {
     use std::path::Path;
@@ -93,6 +104,44 @@ mod test {
         );
 
         assert_eq!(entries[17].spine_index, 14);
+    }
+
+    #[test]
+    fn the_current_chapter_is_the_first_entry_naming_its_document() {
+        let (epub, docs) =
+            epub::open_with_spine(Path::new(crate::TEST_BOOK)).expect("open fixture book");
+
+        let entries = toc_entries(&epub, &docs);
+        let label = |spine_index| {
+            entry_index_for_spine(&entries, spine_index).map(|index| entries[index].label.as_str())
+        };
+
+        assert_eq!(label(1), Some("The Adventures of Sherlock Holmes"));
+        assert_eq!(label(2), Some("I. A SCANDAL IN BOHEMIA"));
+        assert_eq!(label(14), Some("THE FULL PROJECT GUTENBERG™ LICENSE"));
+
+        assert_eq!(label(0), None);
+    }
+
+    #[test]
+    fn a_document_the_toc_skips_keeps_the_preceding_entry() {
+        let entry = |label: &str, spine_index| TocEntry {
+            label: label.to_string(),
+            depth: 0,
+            spine_index,
+            fragment: None,
+        };
+        let entries = vec![entry("One", 1), entry("Two", 4)];
+        let label = |spine_index| {
+            entry_index_for_spine(&entries, spine_index).map(|index| entries[index].label.as_str())
+        };
+
+        assert_eq!(label(2), Some("One"));
+        assert_eq!(label(3), Some("One"));
+        assert_eq!(label(4), Some("Two"));
+        assert_eq!(label(5), Some("Two"));
+
+        assert_eq!(label(0), None);
     }
 
     #[test]
