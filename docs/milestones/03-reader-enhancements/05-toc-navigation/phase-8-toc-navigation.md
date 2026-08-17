@@ -106,8 +106,11 @@ Detail for each lives in
         `54e8ea7`, **115 tests green**; written by `lbb:next-implement`, the red was a compile
         error and both halves of the new assertion were verified by mutation — dropping the trim
         takes the fixture's ToC from 18 entries to 0.
-  - [ ] **7b. Pin `--toc-depth` across the Rust/CSS gap** — the repo's `assert!(…contains…)`
-        idiom for a name two files share with no compiler between them.
+  - [x] **7b. Pin `--toc-depth` across the Rust/CSS gap** — the repo's `assert!(…contains…)`
+        idiom for a name two files share with no compiler between them. `#[test]`. Committed in
+        `fae2125`, **116 tests green**; written by `lbb:next-implement`, the red was a compile
+        error, and the assertion was proved live in both directions plus a control — renaming
+        either side fails, deleting the dead `, 0` fallback does not.
   - [ ] **7c. The UI-chrome sitting** — the tabler SVG preamble on its third copy, the
         duplicated `stop_propagation`, `ul`/`li` list semantics, and the controlled-open triple
         (which is probably three dead lines in `settings.rs`, not a duplication).

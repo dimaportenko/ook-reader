@@ -1890,3 +1890,16 @@ one fails **loudly** at compile time if it ever breaks, which is why it is a war
 `Settings::css_vars` and `Theme::css_vars` build the global `:root` push, a different mechanism for
 a different job — and the const costs one extra `Display::fmt` of an 11-byte `&'static str` per row
 on a line that was already allocating a `String` for `{entry.depth}`.
+
+> **Status:** done — committed in `fae2125`, **116 tests green** (115 → 116), `cargo clippy
+> --all-targets` clean, and `src/ui/toc.rs` is rustfmt-clean. The pre-existing rustfmt drift in
+> `epub.rs`, `web/assets.rs` and `components/popover/mod.rs` is untouched by this step.
+>
+> At commit time the assertion was re-proved live the sanctioned way — by inverting the test
+> itself (`assert!(!…)`) and watching it fail, then restoring it. That is a weaker instrument than
+> the mutation table above, which moves the *names*, but it is the one that never touches the
+> implementation, and it agrees with it.
+>
+> **No eyeball needed.** The rendered `style` attribute is byte-identical before and after: the
+> const holds the same eleven characters the literal did. Nothing about the panel changed, which is
+> the whole point — this step buys a compiler-adjacent guarantee, not a behaviour.
