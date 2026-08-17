@@ -49,7 +49,10 @@ pub fn PopoverContent(props: PopoverContentProps) -> Element {
         Styles::dx_popover_content.to_string()
     };
 
-    let base = attributes!(div { tabindex: "-1" });
+    let base = attributes!(div {
+        tabindex: "-1",
+        onkeydown: move |e| e.stop_propagation(),
+    });
     let merged = merge_attributes(vec![base, props.attributes]);
 
     rsx! {

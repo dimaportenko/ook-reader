@@ -118,18 +118,26 @@ Detail for each lives in
         extraction). Written by `lbb:next-implement`. Verified against `HEAD` instead of by test:
         identical preamble, identical paths, and each const matched to its origin file in order.
         **The `dx serve` eyeball is still outstanding.**
-  - [ ] **7d. The popover-chrome sitting** — the rest of what 7c originally bundled: the
-        duplicated `stop_propagation`, `ul`/`li` list semantics, and the controlled-open triple
-        (which is probably three dead lines in `settings.rs`, not a duplication).
-  - [ ] **7e. `toc::label_for_spine`** — Step 4's item; deletes the index-then-index dance from
+  - [ ] **7d. The popover owns its keyboard** — items D and F: the duplicated `onkeydown` guard
+        moves into the shared `PopoverContent`, and `settings.rs`'s controlled-open triple turns out
+        to be three dead lines re-implementing `use_controlled`'s internal signal by hand. No test —
+        `cargo clippy` plus a `dx serve` eyeball, with a mutation to watch the guard fail.
+  - [ ] **7e. `ul`/`li` list semantics for the contents panel** — item E, split out of 7d: eighteen
+        bare `button`s announce as eighteen buttons with no list and no count.
+  - [ ] **7f. `toc::label_for_spine`** — Step 4's item; deletes the index-then-index dance from
         three call sites.
-  - [ ] **7f. Scroll the current row into view** — carried from Step 5. A *behaviour* change,
+  - [ ] **7g. Scroll the current row into view** — carried from Step 5. A *behaviour* change,
         so it gets its own commit at the end or moves to the next phase.
 
   > **7c was split.** The triage bundled B + D + E + F as one "UI-chrome sitting" because they
   > touch the same three files, but that is four ideas and the icon extraction alone is a new
   > module plus three call sites. B became 7c; D + E + F became 7d; the two items after them
   > shifted a letter. Nothing was dropped.
+  >
+  > **Then 7d was split the same way.** D + F are one idea seen twice — which lines belong to the
+  > popover and which to its call sites — and both are gated on pressing keys in a running app. E
+  > rewrites the panel's DOM and CSS and is gated on reading markup. E became 7e; the two items
+  > after it shifted a letter again. Nothing was dropped.
 
 ## Out of scope
 

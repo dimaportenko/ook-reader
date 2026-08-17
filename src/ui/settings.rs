@@ -118,12 +118,8 @@ pub(crate) fn MaxLineLengthControl() -> Element {
 }
 
 pub(crate) fn SettingsPopover() -> Element {
-    let mut open = use_signal(|| false);
-
     rsx! {
         PopoverRoot {
-            open: open(),
-            on_open_change: move |v| open.set(v),
             PopoverTrigger {
                 Icon { icon: icon::SETTINGS }
             }
@@ -133,7 +129,6 @@ pub(crate) fn SettingsPopover() -> Element {
                 align: ContentAlign::End,
                 div {
                     style: "padding: 0.5rem; display: flex; gap: 0.5rem; flex-direction: column;",
-                    onkeydown: move |e| e.stop_propagation(),
                     LineHeightControl {}
                     FontSizeControl {}
                     PageMarginsControl {}

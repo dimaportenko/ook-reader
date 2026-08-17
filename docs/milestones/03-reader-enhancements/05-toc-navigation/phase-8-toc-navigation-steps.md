@@ -2139,3 +2139,214 @@ the call sites should not have to care.
 > confirming three 24×24 outline glyphs at unchanged weight: the ✕ top-left, the gear and the list
 > icon in the header. A dropped `stroke_width`, `stroke_linecap` or blanking path would show as
 > heavier strokes, squared-off ends, or a filled box behind a glyph.
+
+---
+
+## Step 7d — the popover owns its keyboard
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+Items **D** and **F** from the triage. **7d was split again**, on the same grounds 7c was: the
+leftover bundle was D + E + F, and `ul`/`li` list semantics (E) is a different idea with a different
+gate — it rewrites the panel's DOM *and* its CSS, and it is checked by reading markup rather than by
+pressing keys. E is now 7e, `label_for_spine` is 7f and scroll-into-view is 7g. Nothing was dropped.
+
+D and F belong together because they are the same question asked twice: **which of these lines is
+the call site's, and which belongs to the popover?** One answer was "shared". The other was
+"nobody's".
+
+### The crux
+
+Both popovers hung `onkeydown: move |e| e.stop_propagation()` on their own innermost wrapper, for a
+reason that belongs to neither of them. `reader.rs:168` puts an `onkeydown` on `.reader-root` that
+maps ArrowLeft/ArrowRight to page turns, and every popover renders inside it — so an arrow pressed
+while the settings panel's `<select>` has focus would move the selection *and* turn the page behind
+the panel. That is not a property of "the settings panel" or "the contents list", it is a property
+of **being a popover in this app**, which is exactly what the repo's own wrapper is for.
+
+The part worth reading the vendor source for is **what `stop_propagation` actually stops**, because
+three layers have to agree for the guard to work *and* for it not to break the popover's own
+keyboard:
+
+1. **Dioxus desktop registers one delegated `keydown` listener, on the mount root.**
+   `BaseInterpreter.createListener` puts every bubbling event on `this.root`
+   (`dioxus-interpreter-js-0.7.9/src/ts/core.ts:113-118`), i.e. `#main`. The native event has
+   therefore already bubbled past all of our nodes before Rust hears about it at all.
+2. **Rust then walks the *virtual* tree** from the event's target upward, calling each `onkeydown`
+   it finds. `e.stop_propagation()` sets `propagate = false`, which ends that walk. That is what
+   stops `reader-root`'s handler — and it is why the guard works from *any* ancestor position of the
+   focused element, which is what makes moving it from the inner `nav` up to the content div
+   behaviour-preserving rather than a rewrite.
+3. **It never touches the native event.** `native.js` calls `event.stopPropagation()` only if the
+   response carries a `stopPropagation` field, and desktop's `SynchronousEventResponse`
+   (`dioxus-desktop-0.7.9/src/webview.rs:628-632`) serializes `preventDefault` and nothing else. On
+   desktop that branch is dead.
+
+Point 3 is what makes a *blanket* keydown guard safe here instead of reckless. `dioxus-primitives`
+closes a popover on Escape with a plain `document.addEventListener('keydown', …)` in the bubble
+phase (`primitives/src/lib.rs:187-199`), and `document` sits above `#main`. If `stop_propagation`
+reached the native event, guarding keydown anywhere inside a popover would silently kill
+Escape-to-close — and it would already have been dead before this step, since the old guard was an
+ancestor of every element the focus trap can focus (`focus-trap.js` focuses the first focusable
+*descendant* on open). Because the flag never leaves Rust, the old position and the new one both
+leave Escape alone. Outside-click dismissal was never at risk either way: it listens for
+`pointerdown` in the **capture** phase (`lib.rs:210-225`), which nothing downstream can stop.
+
+**The second half is a triple that turned out to be nobody's.** `use_controlled`
+(`primitives/src/lib.rs:119-133`) keeps its own `internal_value` signal and defers to the `open`
+prop only when that prop is `Some`. `SettingsPopover` never called `open.set(false)` — nothing
+inside the settings panel closes it — so its `use_signal` → `open:` → `on_open_change:` triple
+re-implemented the primitive's internal signal by hand, one layer out, and added nothing but work.
+`ContentsPopover` keeps its copy, because `open.set(false)` after a pick is a real programmatic
+close and the primitives expose no `PopoverClose` to reuse instead.
+
+### The check — `dx serve` + `cargo clippy`
+
+**There is no red and no test**, and both halves of that deserve a reason. Nothing in the crate can
+see rendered markup (no `dioxus-ssr` dev-dependency), so no test can assert "the guard is on the
+content div now"; and the claim that actually matters is about a keypress travelling through a
+webview, which is not a claim `cargo test` can hold.
+
+**The compiler does check half of it.** F's claim is a claim about the props builder: that
+`SettingsPopover`'s triple is *removable*. `open: ReadSignal<Option<bool>>` is an optional prop by
+the same Option-typed-prop rule that already lets both call sites omit `id`, so the fact that the
+crate still builds with `open:` and `on_open_change:` deleted is the proof — had `open` been
+required, this would not have compiled at all.
+
+**What to look for under `dx serve`** — four things, and the last two are the ones that would catch
+a mistake:
+
+1. **The guard.** Open the settings panel, put focus in the theme or font `<select>`, press
+   ArrowLeft/ArrowRight several times. The selection moves; the page behind the panel must *not*
+   turn. Then the same in the contents panel with a row focused.
+2. **F under test.** The settings panel must still open **and close** from its own trigger, and
+   still dismiss on Escape and on an outside click. If the deleted triple had been load-bearing,
+   the symptom would be a panel that opens once and then refuses to close.
+3. **Mutation, to watch the assertion fail.** Comment out the `onkeydown` line in `PopoverContent`
+   and repeat (1): the page should turn under the open panel, in *both* popovers. That is the only
+   way this step's claim can be observed red, and doing it in both panels is what proves one shared
+   line replaced two.
+4. **7c's outstanding eyeball, while you are in there.** The ✕, gear and list icons at unchanged
+   24×24 weight.
+
+### The code
+
+`src/ui/components/popover/component.rs` — the guard joins the base attribute list that already
+carried `tabindex`:
+
+```rust
+let base = attributes!(div {
+    tabindex: "-1",
+    onkeydown: move |e| e.stop_propagation(),
+});
+let merged = merge_attributes(vec![base, props.attributes]);
+```
+
+`src/ui/settings.rs` — the triple and the call site's own guard go:
+
+```rust
+pub(crate) fn SettingsPopover() -> Element {
+    rsx! {
+        PopoverRoot {
+            PopoverTrigger { Icon { icon: icon::SETTINGS } }
+```
+
+`src/ui/toc.rs` — one line off the `nav`; the `open` signal stays.
+
+Net: **4 insertions, 7 deletions** across three files.
+
+### Why it works
+
+**`attributes!` takes event handlers, and takes them with inference intact.** The macro parses each
+entry with `dioxus_rsx`'s own attribute parser and sets the element name before calling
+`rendered_as_dynamic_attr`, so `onkeydown` resolves through `div`'s attribute definition exactly as
+it would inside `rsx!`. The closure therefore needs no type annotation — the first draft wrote
+`move |e: KeyboardEvent|` and the annotation turned out to be unnecessary, which matters for a small
+reason worth having: the line is now byte-identical to the two lines it replaced, so the move is
+visibly a move.
+
+**Ancestor position is the whole mechanism, and it is why this move is safe.** Because Dioxus walks
+the virtual tree from the event target upward (crux, point 2), a handler anywhere on that path
+stops the walk. The old guards sat on the `nav`/`div` one level below the content div; the new one
+sits on the content div. Every element the focus trap can focus is a descendant of both, so the set
+of events the guard sees is unchanged — with one addition, the content div *itself*, which
+`tabindex: "-1"` makes click-focusable. A key pressed with the container focused used to reach
+`reader-root` and turn the page; now it does not. That is the one behaviour difference in the diff,
+and it is the bug the guard exists to prevent.
+
+**Deleting the triple is not just tidier, it removes per-render work.** `open: open()` passes a
+plain `bool` into a `ReadSignal<Option<bool>>` prop, which goes through `SuperFrom` —
+`ReadSignal::new(Signal::new(…))` (`dioxus-signals-0.7.9/src/props.rs:12`) — so **every** render
+built a fresh signal, owned by the scope and living until unmount. Reading `open()` in the body also
+subscribed `SettingsPopover`'s scope, so each toggle re-ran `SettingsPopover`, all three wrapper
+components, and their `attributes!` + `merge_attributes` passes. And `use_controlled`'s `set_value`
+did `internal_value.set(x)` *and* `on_change.call(x)` → `open.set(v)`, dirtying two scopes per
+toggle. With the prop gone, the write lands on the primitive's own internal signal inside its own
+scope: one write, and the re-render is confined to the primitive subtree. The six control children
+were memoized before and after — zero-field props always compare equal.
+
+**Why the wrapper and not the primitives.** The invariant is ours: it exists because
+`.reader-root` claims arrow keys for page turns. Patching a vendored component to know about that
+would put an app rule in a library; the wrapper layer exists precisely to hold app rules about
+somebody else's component.
+
+### Scope note
+
+**This step is D + F only.** E (`ul`/`li` list semantics) is 7e, `toc::label_for_spine` is 7f, and
+scroll-the-current-row-into-view is 7g.
+
+**The hazard this step leaves open, recorded here because nothing else can hold it.**
+`merge_attributes` documents that *"event handler attributes are not merged/combined yet"*
+(`primitives/src/lib.rs:347`) and later lists win, with `props.attributes` last — so a future
+`PopoverContent { onkeydown: … }` **replaces** the guard rather than adding to it, and the page
+quietly starts turning behind that popover. No test in this crate can see it, and `CLAUDE.md`
+forbids the comment that would warn about it at the site, so this paragraph is the whole defence.
+The fix, if it ever bites, is to stop merging and read the caller's handler explicitly.
+
+**The depth question left unresolved on purpose.** The altitude reviewer argued the guard belongs in
+`reader.rs` instead, as "turn pages only when no overlay is open" — one node, and every future
+overlay (a dialog, a search field, a bare `<input>` in the header) gets it for free instead of
+having to rediscover the incantation. That is a better shape and it is **not this step**: it needs
+app-level overlay state, it deletes the popover guard rather than moving it, and it changes
+behaviour in a case the current fix misses (panel open, focus stray on the body). It is the natural
+next move if a third overlay ever appears.
+
+**Left alone, all noted and none of them this step's idea:** the settings panel's wrapper `div`,
+which now carries only styling (`padding: 0.5rem` + `gap: 0.5rem` against `.dx-popover-content`'s
+own `0.25rem` flex column) and its now-inert `gap: "0.25rem"` prop; the hand-rolled `if let/else` +
+`format!` class merge in `PopoverContent`, which `merge_attributes` would join for free; the entry
+`onclick`'s `stop_propagation` in `toc.rs`, which has no ancestor `onclick` to stop; `PopoverRoot`'s
+`props.id`, which the wrapper accepts and then never forwards to the primitive; and the reader's
+hand-rolled `button { class: "icon-button" }`, carried from 7c.
+
+### What the `simplify` pass changed, and what it did not
+
+**It changed nothing, and that is the honest report** — no edits, so the numbers below are the same
+ones the step was already green on. Reuse and efficiency both came back clean; the other two found
+real things that are not this diff's to fix.
+
+- **Reuse confirmed the move is complete**: after this step the only `stop_propagation` outside the
+  wrapper is `toc.rs`'s entry *onclick*, a different concern. It also floated an
+  `IconPopover { icon, children }` to fold away the now-identical
+  `PopoverRoot` + `PopoverTrigger { Icon }` + `PopoverContent { align: End }` shell — declined,
+  because it saves about four lines across two call sites and `ContentsPopover` would still need its
+  own open signal.
+- **Efficiency supplied the accounting in "why it works"** — the per-render `Signal::new` living
+  until unmount, the subscribe-and-re-render-the-subtree cost of reading `open()`, and the two
+  writes per toggle collapsing to one. It also noted that a listener in the base list permanently
+  defeats props memoization of the primitive's content components, and that this is not a
+  regression: `children: Element` compares by `Rc::ptr_eq` and already forced those re-renders.
+- **Three simplification findings were skipped as neighboring code**, all now in the scope note:
+  the settings wrapper `div`, its dead `gap`, and the class merge. Deleting the `div` is the
+  tempting one and it is a *visual* change — its padding and gap differ from the shared content
+  style — so it does not belong in a diff whose only gate is "nothing looks different".
+- **Altitude contributed both the recorded hazard and the depth argument** above.
+
+**One correction to my own reading, since it changed what this step claims.** Working forward from
+`native.js` alone — which does call `event.stopPropagation()` on `response.stopPropagation` — it
+looked as though a blanket keydown guard would swallow the primitives' `document`-level Escape
+listener, making the move a small regression. Reading the Rust side settled it the other way:
+desktop's `SynchronousEventResponse` has one field, `preventDefault`, so the flag never crosses back
+into JS and Escape is untouched. The crux says so now because the wrong version of that paragraph
+was written first.

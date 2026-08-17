@@ -43,7 +43,6 @@ pub(crate) fn ContentsPopover(
                 align: ContentAlign::End,
                 nav {
                     class: "{Styles::contents_popover__list}",
-                    onkeydown: move |e| e.stop_propagation(),
                     for (index, entry) in entries.iter().enumerate() {
                         button {
                             class: "{Styles::contents_popover__entry}",
