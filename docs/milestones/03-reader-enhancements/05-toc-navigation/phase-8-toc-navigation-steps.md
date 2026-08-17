@@ -2117,3 +2117,25 @@ the call sites should not have to care.
 **Reuse came back clean on coverage**, independently confirmed: `grep` for `svg {` and
 `icon-tabler` across `src/` now matches only `icon.rs`, and `assets/main.css` styles only
 `.icon-button` — the wrapper this step never touched — so no CSS was stranded.
+
+> **Status:** done — committed in `6a16fe3`, **116 tests green** (unchanged; this step adds no
+> test), `cargo clippy --all-targets` clean, and all five touched files are rustfmt-clean. The
+> pre-existing drift in `epub.rs`, `web/assets.rs` and `components/popover/mod.rs` is untouched.
+>
+> **A markup extraction cannot be unit-tested here, so it was verified against `HEAD` instead.**
+> Three mechanical comparisons stand in for the test this step does not have:
+>
+> | check | result |
+> |---|---|
+> | the ten `svg` preamble attributes, old vs new | byte-identical; the only change is `icon-tabler-x` → `icon-tabler-{icon.name}` |
+> | all 10 non-blank path strings, as a set | identical — nothing lost or altered in the move |
+> | each const against the file it came from, in order | `CLOSE`←`reader.rs` (2), `SETTINGS`←`settings.rs` (2), `LIST`←`toc.rs` (6) — no swap between icons |
+>
+> The third is the one that matters: comparing the paths as a *set* would have passed even if two
+> icons had traded geometry, which is exactly the mistake this kind of move invites.
+>
+> **The eyeball is still outstanding.** The agent cannot see the webview, and the checks above
+> prove the markup is the same, not that it *renders* the same. The gate is opening `dx serve` and
+> confirming three 24×24 outline glyphs at unchanged weight: the ✕ top-left, the gear and the list
+> icon in the header. A dropped `stroke_width`, `stroke_linecap` or blanking path would show as
+> heavier strokes, squared-off ends, or a filled box behind a glyph.

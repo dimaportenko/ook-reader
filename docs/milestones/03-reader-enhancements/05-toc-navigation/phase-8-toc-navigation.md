@@ -111,9 +111,13 @@ Detail for each lives in
         `fae2125`, **116 tests green**; written by `lbb:next-implement`, the red was a compile
         error, and the assertion was proved live in both directions plus a control — renaming
         either side fails, deleting the dead `, 0` fallback does not.
-  - [ ] **7c. One icon component** — item B alone. The tabler SVG preamble on its third copy
-        moves into `ui/components/icon.rs`; `reader.rs`, `settings.rs` and `toc.rs` keep only
-        their own path data. `dx serve` + `cargo clippy`.
+  - [x] **7c. One icon component** — item B alone. The tabler SVG preamble on its third copy moves
+        into `ui/components/icon.rs`, and the geometry goes with it: `TablerIcon`'s private fields
+        make `CLOSE`/`SETTINGS`/`LIST` the only values that exist, so the name and the paths cannot
+        disagree. Committed in `6a16fe3`, **116 tests green** (unchanged — no test; a markup
+        extraction). Written by `lbb:next-implement`. Verified against `HEAD` instead of by test:
+        identical preamble, identical paths, and each const matched to its origin file in order.
+        **The `dx serve` eyeball is still outstanding.**
   - [ ] **7d. The popover-chrome sitting** — the rest of what 7c originally bundled: the
         duplicated `stop_propagation`, `ul`/`li` list semantics, and the controlled-open triple
         (which is probably three dead lines in `settings.rs`, not a duplication).
