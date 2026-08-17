@@ -2372,3 +2372,250 @@ was written first.
 > under both open panels — is the only way this step's assertion can be observed red, and it was
 > not run. The guard is confirmed working, not confirmed *necessary*, and the two are different
 > claims.
+
+---
+
+## Step 7e — the frame swallows the outside click
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**Not a triage item.** The nine carried items were all quality; this one is a *defect* in what
+Steps 5 and 6 shipped, found by using the panel: open the contents list, click the book to
+dismiss it, and nothing happens. Click the header, the nav row, or the margins and it closes
+normally. A bug in the panel goes before the polish on the panel, so it took the free letter and
+7e/7f/7g became 7f/7g/7h.
+
+### The crux
+
+**The dismissal is not broken — it is looking at the wrong document.** Everything about the
+popover works; the click never arrives.
+
+`use_outside_dismiss` (`primitives/src/lib.rs:212-235`) is one `document::eval` that registers
+two capture-phase listeners on the **host** page and dismisses when the target is not inside the
+popover root:
+
+```js
+const f = e => {
+  const root = document.getElementById(id);
+  if (root && !root.contains(e.target)) dioxus.send(true);
+};
+document.addEventListener('pointerdown', f, true);
+document.addEventListener('focusin', f, true);
+```
+
+The book is not in that document. It is in `#reader-frame`, a separate browsing context with its
+own `document`, and **DOM events do not cross the frame boundary** — a `pointerdown` in the frame
+propagates to *its* document and stops. `e.target` in the host can never be a node inside the
+frame, so the host listener is not merely failing the `contains` test, it is never called at all.
+Which makes the symptom exactly inverted from how it reads: dismissal works everywhere *except*
+the one surface that fills most of the window.
+
+`focusin` is the interesting half. In principle focus moving into a frame fires focus events on
+the `iframe` **element** in the parent, which would satisfy the check — the observed behaviour
+says it does not reach us here, and a fix that depends on which of two documents a webview
+decides to fire focus in is a fix that will rot. The press is the event the primitive actually
+wants; the frame can just say when one happened.
+
+**So this is the same shape as every other thing the frame needs to tell the host** —
+`ook-link`, `ook-key`, `ook-scroll`, `ook-position`. The frame posts, the host acts. What makes
+this one different is where it *ends*: every other message is forwarded into Rust as a
+`BridgeMsg` because Rust owns the state it changes. This one changes no Rust state — after 7d
+the settings popover has no `open` signal at all, the primitive owns it — so the host's job is
+to **re-enter the listener that already exists** rather than to route around it.
+
+### The check — `#[test]`, then `dx serve`
+
+The testable claim is the one the compiler cannot see: two JS files agreeing on a message name,
+the repo's standing hazard (`ook-key`, `ook-reflow`, `ook-set-theme` all have this test).
+
+```rust
+#[test]
+fn a_pointerdown_inside_the_frame_survives_the_hop_back_to_the_host() {
+    assert!(crate::web::assets::INJECTED_ASSETS.contains("ook-pointerdown"));
+    assert!(BRIDGE_JS.contains("ook-pointerdown"));
+
+    assert!(BRIDGE_JS.contains(FRAME_ID));
+}
+```
+
+**Watched red** before either half existed:
+
+```
+assertion failed: crate::web::assets::INJECTED_ASSETS.contains("ook-pointerdown")
+  at src/ui/reader.rs:464:9
+```
+
+The third assertion is a *second* name across a gap, and it is new in this step: the host has to
+find the frame element to replay the press on, and `"reader-frame"` was a bare literal in two
+places in `reader.rs`. It became `const FRAME_ID` so the test can pin the JS to it — rename the
+const and this fails, which is the only way that lookup can be caught before it silently returns
+`null`.
+
+**What no test can hold**, and what `dx serve` is for:
+
+1. Open the contents panel, click anywhere on the book text. It closes. Same for the settings
+   panel.
+2. Click a **link** in the text with the panel open — it should both dismiss *and* follow the
+   link; the two listeners are independent.
+3. **The mutation.** Comment out the `pointerdown` branch in `ook-events-listener.js` and repeat
+   (1): the panel stays open over the book. That is the bug, reproduced on demand.
+4. Nothing regressed outside the frame: header, nav row and margin clicks still dismiss, and
+   Escape still closes.
+
+### The code
+
+`src/web/assets/pointer-listener.js` — new, injected into the frame beside `key-listener.js`:
+
+```js
+document.addEventListener("pointerdown", function () {
+  window.parent.postMessage({ kind: "ook-pointerdown" }, "*");
+});
+```
+
+`src/web/assets/ook-events-listener.js` — the host replays it on the frame element:
+
+```js
+  if (e.data.kind === "ook-pointerdown") {
+    const frame = document.getElementById("reader-frame");
+    if (frame) {
+      frame.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    }
+  }
+```
+
+`src/ui/reader.rs` — `const FRAME_ID`, used by the `iframe`'s `id`, by the existing set-page
+script, and by the test.
+
+Net: one new file, **13 insertions, 4 deletions**.
+
+### Why it works
+
+**A synthetic event runs the real propagation path.** `dispatchEvent` is not a shortcut that
+calls listeners on the target — it computes the full path from `window` down to the target and
+back, and every listener on it fires, indistinguishably from a user press. The primitive's
+listener sits on `document` with `capture: true`, and `document` is an ancestor of the `iframe`
+element, so it is on that path.
+
+**The target is what carries the meaning.** All the primitive asks is
+`!root.contains(e.target)`. Dispatching on the `iframe` element makes the answer *true* for
+every open popover at once — one event dismisses both panels, and no popover has to know the
+frame exists. It is also the honest target: the press really did land on that element as far as
+the host document is concerned.
+
+**`bubbles: true` is belt-and-braces, not the mechanism.** Capture-phase listeners fire on
+ancestors regardless of whether an event bubbles (this is why `focusin`/`focus` work), so the
+`capture: true` registration above would see it either way. It is set because a real
+`pointerdown` bubbles, and a synthetic one that does not would quietly skip any bubble-phase
+listener added later.
+
+**Why the guard.** `use_bridge`'s `message` listener is registered per mount and is never
+removed, so a message can arrive after the reader unmounts and the frame is gone.
+`null.dispatchEvent` would throw inside a listener in a webview with no visible console — a
+silent failure in the one place this app has no eyes.
+
+**Why it does not fight the `<a href>` bridge.** `link-bridge.js` listens for `click`;
+`pointerdown` fires first and on a different event type, so a link click posts both messages.
+The dismissal and the navigation are independent and both are wanted.
+
+**Why the frame's listener is unconditional.** It posts on every press whether or not a popover
+is open. Telling the frame about popover state would mean a second message kind, a subscription,
+and a state machine to keep in sync — all to save one `postMessage` per click, which is already
+what `key-listener.js` and `link-bridge.js` cost per key and per click.
+
+### The forks
+
+- **Where to dispatch: the `iframe` element vs `document.body`.** `body` needs no id and would
+  pass the `contains` check just as well, but it is a lie about where the press landed, and an
+  event dispatched on `body` never traverses `.reader-root` or `#main` — so Dioxus's own
+  delegated listeners (which live on `#main`) could never see it. Targeting the frame keeps the
+  path truthful for whatever listens later. The price is the `FRAME_ID` coupling, which the test
+  now pins.
+- **Where the host branch lives: `ook-events-listener.js` vs its own asset.** Every other branch
+  in that file ends in `dioxus.send`; this one ends in JS. Splitting it into a `frame-dismiss.js`
+  evaluated from `Reader` would keep that file's shape pure, at the cost of a second `message`
+  listener on the host, a second `document::eval`, and a `use_hook` to stop it re-registering on
+  every render. One branch in the listener that already exists is the smaller thing. The file's
+  job is "handle messages from the frame" — that most of them go to Rust is a fact about the
+  messages, not a contract.
+- **Listening from the host instead of injecting.** The host could reach into
+  `frame.contentDocument` and add the listener itself, touching no injected asset. It would have
+  to re-register on every chapter load (each chapter is a fresh document from a fresh blob URL)
+  and depends on same-origin access to that blob from the host. The established pattern in this
+  app is inject-and-post; this follows it.
+- **Fixing it in `dioxus-primitives` instead.** `use_outside_dismiss` knowing about iframes is an
+  app concern in a library — the same argument 7d made for putting the keyboard guard in the
+  wrapper rather than the primitive.
+
+### What to look at hardest
+
+1. **`FRAME_ID` is a widening of the step.** It rewrites two existing lines that were not broken,
+   including the `format!` in the set-page effect (which also picked up inline captures for
+   `page_number`). The defence is that this step is the one that creates the cross-file
+   dependency on that id, so pinning it belongs here — but "the fix needed a const" is exactly
+   how scope creep argues for itself, and the assertion could equally have been dropped.
+2. **The `focusin` half is left alone.** If a webview *does* fire focus into the host on a frame
+   click, the popover now has two independent reasons to dismiss. That is harmless (the second
+   `set_open(false)` is a no-op) but it means the fix is not the *only* thing making this work on
+   every platform, and the eyeball on one platform cannot tell them apart.
+3. **Text selection now dismisses.** Dragging to select in the book closes an open panel, because
+   a drag starts with a `pointerdown`. That matches how the host side already behaves — selecting
+   host text dismisses too — but it is a behaviour choice, not a neutral one.
+
+### Scope note
+
+**This is dismissal only.** It does not give the frame any other host-level input; a click in the
+frame still does not, for instance, blur a focused control in the header.
+
+**The letters after this one are unchanged in content:** 7f is `ul`/`li` list semantics, 7g is
+`toc::label_for_spine`, 7h is scroll-the-current-row-into-view.
+
+**Still left alone, carried from 7d:** the settings panel's styling-only wrapper `div` and its
+inert `gap` prop, the hand-rolled class merge in `PopoverContent`, the entry `onclick`'s
+`stop_propagation` in `toc.rs`, `PopoverRoot`'s unforwarded `props.id`, and the reader's
+hand-rolled `button { class: "icon-button" }`. The `merge_attributes` hazard 7d recorded is also
+still open.
+
+### What the cleanup pass changed
+
+**One edit, and it was to my own test.** The first draft carried two explanatory comments in
+`a_pointerdown_inside_the_frame_survives_the_hop_back_to_the_host`, which `CLAUDE.md` forbids in
+agent-written code — the reasoning belongs here and in the handoff, and the comments in the
+neighbouring tests are the learner's own. They were removed; the assertions are unchanged.
+
+Reuse, efficiency and altitude produced no edits. Reuse: nothing in the repo already forwards a
+frame event to the host DOM, and `link-bridge.js` is a different event for a different purpose.
+Efficiency: one `postMessage` and one event construction per press, against a change of state a
+human just asked for. Altitude: the two candidates — a separate host asset, and patching the
+primitive — are both recorded as forks above rather than taken.
+
+> **Status:** done — committed in `deecc44`, **117 tests green** (116 before), `cargo clippy
+> --all-targets` clean, and `reader.rs` is rustfmt-clean. The pre-existing drift in `epub.rs`,
+> `web/assets.rs` and `components/popover/mod.rs` is still untouched.
+>
+> **All three assertions are proved live, by two different instruments.** The first was watched
+> red before either half of the hop existed. That red *shadowed* the other two — `assert!` short-
+> circuits the test — so at commit time each was inverted in turn and run: misspelling the message
+> name fails, and asking the bridge for `"frame-reader"` instead of `FRAME_ID` fails. The file was
+> then restored and confirmed byte-identical to its pre-mutation copy with `diff`. The mutation
+> was always applied to the *test*, never to the implementation.
+>
+> **What that last mutation does and does not prove.** Inverting the literal shows the assertion
+> runs and that the bridge contains exactly one spelling of the id. It does not directly
+> demonstrate the pin — that renaming `FRAME_ID` turns the test red — because that would mean
+> editing the implementation. The pin follows from the assertion's *form* rather than from an
+> observation: the const's value is the needle, so any new value that the JS does not also carry
+> fails.
+>
+> **No test was owed.** The step planned one and the working tree had it; nothing was written at
+> commit time. The learner's own review was the only change between the handoff and the commit,
+> and it left the tree byte-identical.
+>
+> **The `dx serve` gate was confirmed by hand** — the contents panel now dismisses on a press in
+> the book text, which is the whole point of the step and the half no test in this crate can hold.
+>
+> **Not verified, recorded so the next reader does not assume it was:** the mutation described in
+> the check section — commenting out the host branch and watching the panel stay open — was not
+> run, so the dismissal is confirmed working rather than confirmed *caused* by this diff. Nor were
+> the two side-claims eyeballed: that a link click still both dismisses and navigates, and that
+> dragging to select text in the book now closes an open panel.

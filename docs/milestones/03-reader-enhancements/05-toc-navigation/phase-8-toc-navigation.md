@@ -125,11 +125,18 @@ Detail for each lives in
         markup). Written by `lbb:next-implement`. The gate was `cargo clippy` plus the `dx serve`
         eyeball, confirmed by hand: arrows in the settings `<select>` no longer turn the page, and
         the panel still opens and closes with the triple deleted.
-  - [ ] **7e. `ul`/`li` list semantics for the contents panel** — item E, split out of 7d: eighteen
+  - [x] **7e. The frame swallows the outside click** — not a triage item: a bug found by using
+        the panel. `use_outside_dismiss` listens on the *host* `document`, and a press inside the
+        book's iframe never gets there, so the panel stays open over the one surface it covers.
+        The frame posts the press and the host replays it on the frame element. Committed in
+        `deecc44`, **117 tests green**; written by `lbb:next-implement` and watched red, the two
+        assertions the first one shadowed re-proved by mutation at commit time, and the `dx serve`
+        dismissal confirmed by hand.
+  - [ ] **7f. `ul`/`li` list semantics for the contents panel** — item E, split out of 7d: eighteen
         bare `button`s announce as eighteen buttons with no list and no count.
-  - [ ] **7f. `toc::label_for_spine`** — Step 4's item; deletes the index-then-index dance from
+  - [ ] **7g. `toc::label_for_spine`** — Step 4's item; deletes the index-then-index dance from
         three call sites.
-  - [ ] **7g. Scroll the current row into view** — carried from Step 5. A *behaviour* change,
+  - [ ] **7h. Scroll the current row into view** — carried from Step 5. A *behaviour* change,
         so it gets its own commit at the end or moves to the next phase.
 
   > **7c was split.** The triage bundled B + D + E + F as one "UI-chrome sitting" because they
@@ -141,6 +148,11 @@ Detail for each lives in
   > popover and which to its call sites — and both are gated on pressing keys in a running app. E
   > rewrites the panel's DOM and CSS and is gated on reading markup. E became 7e; the two items
   > after it shifted a letter again. Nothing was dropped.
+  >
+  > **Then a bug jumped the queue.** The contents panel does not dismiss when you click the book,
+  > which is most of the window — a defect in what Steps 5 and 6 shipped, not a polish item, so it
+  > goes before the polish. It took the free letter and the three planned items shifted once more,
+  > which keeps the letters reading in landing order. Nothing was dropped.
 
 ## Out of scope
 
