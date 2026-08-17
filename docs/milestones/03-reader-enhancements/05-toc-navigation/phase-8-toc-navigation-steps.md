@@ -2350,3 +2350,25 @@ listener, making the move a small regression. Reading the Rust side settled it t
 desktop's `SynchronousEventResponse` has one field, `preventDefault`, so the flag never crosses back
 into JS and Escape is untouched. The crux says so now because the wrong version of that paragraph
 was written first.
+
+> **Status:** done — committed in `89a0d7c`, **116 tests green** (unchanged; this step adds no
+> test), `cargo clippy --all-targets` clean, and the three touched files are rustfmt-clean. The
+> pre-existing drift in `epub.rs`, `web/assets.rs` and `components/popover/mod.rs` is still
+> untouched.
+>
+> **No test was owed and none was written.** The step planned none, and `lbb:commit` found nothing
+> to finish: the diff adds one closure and deletes state, so there is no new logic to pin, and F's
+> only mechanical claim — that `open` is an optional prop — is proved by the crate compiling
+> without it. Freelancing a test here would have asserted something the step does not claim.
+>
+> **The `dx serve` eyeball was run and confirmed by hand.** Arrows pressed in the settings panel's
+> `<select>` move the selection without turning the page behind it, and the settings panel still
+> opens and closes from its own trigger with the controlled-open triple deleted — which is the
+> visible half of F. 7c's outstanding icon eyeball is therefore also closed: the ✕, gear and list
+> glyphs render at unchanged weight.
+>
+> **What this step could not verify, recorded so the next reader does not assume it was.** The
+> mutation described in the check section — commenting out the guard and watching the page turn
+> under both open panels — is the only way this step's assertion can be observed red, and it was
+> not run. The guard is confirmed working, not confirmed *necessary*, and the two are different
+> claims.

@@ -118,10 +118,13 @@ Detail for each lives in
         extraction). Written by `lbb:next-implement`. Verified against `HEAD` instead of by test:
         identical preamble, identical paths, and each const matched to its origin file in order.
         **The `dx serve` eyeball is still outstanding.**
-  - [ ] **7d. The popover owns its keyboard** — items D and F: the duplicated `onkeydown` guard
+  - [x] **7d. The popover owns its keyboard** — items D and F: the duplicated `onkeydown` guard
         moves into the shared `PopoverContent`, and `settings.rs`'s controlled-open triple turns out
-        to be three dead lines re-implementing `use_controlled`'s internal signal by hand. No test —
-        `cargo clippy` plus a `dx serve` eyeball, with a mutation to watch the guard fail.
+        to be three dead lines re-implementing `use_controlled`'s internal signal by hand. Committed
+        in `89a0d7c`, **116 tests green** (unchanged — no test; nothing in the crate can see rendered
+        markup). Written by `lbb:next-implement`. The gate was `cargo clippy` plus the `dx serve`
+        eyeball, confirmed by hand: arrows in the settings `<select>` no longer turn the page, and
+        the panel still opens and closes with the triple deleted.
   - [ ] **7e. `ul`/`li` list semantics for the contents panel** — item E, split out of 7d: eighteen
         bare `button`s announce as eighteen buttons with no list and no count.
   - [ ] **7f. `toc::label_for_spine`** — Step 4's item; deletes the index-then-index dance from
