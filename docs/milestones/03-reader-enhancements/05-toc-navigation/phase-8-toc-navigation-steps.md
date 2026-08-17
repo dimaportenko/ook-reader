@@ -1903,3 +1903,217 @@ on a line that was already allocating a `String` for `{entry.depth}`.
 > **No eyeball needed.** The rendered `style` attribute is byte-identical before and after: the
 > const holds the same eleven characters the literal did. Nothing about the panel changed, which is
 > the whole point — this step buys a compiler-adjacent guarantee, not a behaviour.
+
+---
+
+## Step 7c — one icon component
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+Item **B** from the triage, alone. **The triage's "UI-chrome sitting" was split before writing
+it**: B + D + E + F was four ideas bundled on the grounds that they touch the same three files,
+and the icon extraction by itself is a new module plus three call sites. D + E + F became 7d, and
+the two items after them shifted a letter. Nothing was dropped.
+
+**The crux: the thing worth deduplicating is not the thing that looks duplicated.** Three files
+carried the same ten `svg` attributes and the same inert `M0 0h24v24H0z` blanking path — thirty
+lines of preamble around three lines of signal, and the obvious move is to hoist the preamble into
+a component that takes the paths. That move is right, and it is also *half the step*, because it
+leaves each icon's actual identity — its geometry — sitting at the call site it was pasted into.
+`reader.rs` still owns the two `M` strings that spell an ✕; nothing can reuse them; nothing checks
+a fourth copy against them.
+
+The other half only becomes visible once the component exists. A component taking `name` and
+`paths` as two independent props has **two values that must agree and no compiler between them** —
+`Icon { name: "x", paths: GEAR }` compiles fine and renders a gear tagged `.icon-tabler-x`. That is
+precisely the hazard [Step 7b](#step-7b--pin---toc-depth-across-the-rustcss-gap) just spent a whole
+sitting closing at the Rust/CSS layer, and a component that reopened it one level up would be a
+poor advertisement for the step before it.
+
+Rust closes it outright, and the mechanism is the plainest one in the language: **make the fields
+private and hand out constants.**
+
+```rust
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) struct TablerIcon {
+    name: &'static str,
+    paths: &'static [&'static str],
+}
+
+pub(crate) const CLOSE: TablerIcon = TablerIcon {
+    name: "x",
+    paths: &["M18 6l-12 12", "M6 6l12 12"],
+};
+```
+
+`name` and `paths` have no `pub`, so outside `icon.rs` the struct cannot be built at all. The only
+`TablerIcon` values that exist are the three the module defines, each of which pairs a class suffix
+with the geometry it belongs to, once. A call site does not get to disagree — there is no
+expression it can write that would.
+
+### The check — `dx serve` + `cargo clippy`
+
+**There is no red to report, and it should be said plainly.** This is a pure markup extraction:
+the assertion worth making is "the three icons render exactly as before", and nothing in the crate
+can see rendered markup. There is no `dioxus-ssr` dev-dependency, so no test can compare the
+`svg` subtree the component emits against the literal blocks it replaced. Like
+[Step 5](#step-5--render-the-contents-panel), the gate is a clean build plus an eyeball.
+
+**What to look for under `dx serve`:** the ✕ in the reader's top-left, the gear and the list icon
+side by side in the header. All three should be the same 24×24 outline glyphs at the same weight
+as before — if the `stroke_width`, `stroke_linecap` or the blanking path had been dropped in the
+move, they would render heavier, with squared-off ends, or with a filled black box behind them.
+
+**One claim in this step *is* mechanically checkable, and was checked.** That the mismatch is now
+impossible is a statement about the compiler, so the compiler can be asked. Replacing a call site
+with a hand-built struct — `Icon { icon: icon::TablerIcon { name: "x", paths: &["M9 6l11 0"] } }` —
+gives:
+
+```
+error[E0451]: fields `name` and `paths` of struct `TablerIcon` are private
+  --> src/ui/toc.rs:39:49
+```
+
+That error is the step's real deliverable. Before this step the equivalent mistake was thirty lines
+of copy-paste with a wrong word in the middle of it, and it compiled.
+
+### The code
+
+`src/ui/components/icon.rs` — the struct and three consts above, then:
+
+```rust
+#[component]
+pub(crate) fn Icon(icon: TablerIcon) -> Element {
+    rsx! {
+        svg {
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "24",
+            height: "24",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            class: "icon icon-tabler icons-tabler-outline icon-tabler-{icon.name}",
+            path {
+                stroke: "none",
+                d: "M0 0h24v24H0z",
+                fill: "none",
+            }
+            for d in icon.paths.iter().copied() {
+                path { d }
+            }
+        }
+    }
+}
+```
+
+`src/ui/components/mod.rs` gains `pub mod icon;`, and the three call sites collapse to one line
+each:
+
+```rust
+Icon { icon: icon::CLOSE }
+Icon { icon: icon::SETTINGS }
+Icon { icon: icon::LIST }
+```
+
+Net across the three call sites and `mod.rs`: **84 lines deleted, 19 added**, against a 58-line
+new module — so the crate is about even on total lines and three files lighter by thirty each.
+That trade is the point: the lines that left were *copies*, and the lines that arrived are the
+only copy.
+
+### Why it works
+
+**Private fields are the enforcement, not a naming convention.** Rust's field privacy is
+module-scoped, so `icon.name` reads fine inside `icon.rs` — the component needs it — while
+`icon::TablerIcon { .. }` from `toc.rs` is `E0451`. This is the cheapest form of "make illegal
+states unrepresentable" available: no enum, no constructor function, no validation, just the
+absence of `pub` on two lines. The type is still `pub(crate)` because call sites must be able to
+*name* it in the prop position; only its interior is closed.
+
+**`Copy` is what lets the consts be used more than once.** `TablerIcon` is two `&'static`
+references — 32 bytes of pointers, no ownership — so `Copy` is free and correct. Without it,
+`icon::CLOSE` would move on first use and a second call site referencing the same const would need
+an explicit `.clone()`. `PartialEq` is not optional either: Dioxus derives the props struct's
+equality from its fields, and that comparison is what lets a re-render skip a child whose props did
+not change.
+
+**`for d in icon.paths.iter().copied()` buys legibility, not speed — and the difference matters
+because the first draft of this note claimed otherwise.** Iterating `&'static [&'static str]`
+directly yields `&&'static str`, which has no `IntoAttributeValue` impl, so the slice cannot feed
+rsx's bare-ident shorthand without flattening first; `.copied()` is what makes `path { d }` (i.e.
+`d: d`) typecheck at all. The alternatives are `path { d: *d }` or `path { d: "{d}" }`, and **all
+three allocate exactly the same**, because `impl IntoAttributeValue for &str` in
+`dioxus-core-0.7.9/src/nodes.rs:1008` is `AttributeValue::Text(self.to_string())` with no `Cow` or
+`Rc<str>` fast path. The choice is a readability one and nothing more.
+
+**The extraction does add allocations the inline markup never had, and memoization is what makes
+that fine.** A literal `d: "M18 6l-12 12"` is a *static* template attribute — baked into the
+compiled `Template`, allocated never. Looping over a slice makes it a *dynamic* attribute, so each
+path costs a `String`, and the `class` string costs a `format!` on top because static text precedes
+`{icon.name}`. What keeps this from being a per-frame cost is the `PartialEq` derive: Dioxus checks
+`Properties::memoize` *before* running a child's body, `TablerIcon` is two `&'static` references
+that never change, so the props compare equal on every re-render after the first and the body is
+skipped entirely. The eight `String`s and three `format!`s across the three icons happen once each,
+at mount.
+
+**That is also the argument for `#[component]` over a plain function.** A bare
+`fn icon(..) -> Element` called inline gets no scope and no memoize check, so its body would
+re-execute on every parent render — rebuilding the class string and every path `String` each time.
+For the ✕, which lives inside `Reader` and therefore re-renders on every page turn, the plain
+function would be strictly worse. The price of the component form is one small `Box<dyn AnyProps>`
+per parent render, allocated in `VComponent::new` *before* the memo check can skip anything; that
+is the single genuine cost this step adds, and it buys skipping all the work above.
+
+### Scope note
+
+**This step is B only.** D (`stop_propagation` into the shared `PopoverContent`), E (`ul`/`li` list
+semantics) and F (the controlled-open triple, which looks like three dead lines in `settings.rs`)
+are now 7d. `label_for_spine` is 7e and scroll-into-view is 7f.
+
+**The reader's close button is still a hand-rolled `button { class: "icon-button" }`** while the
+other two icons reach the same class through `PopoverTrigger`. That duplication predates this step
+and this step does not touch it; it belongs with 7d's popover-chrome work if it is worth closing at
+all.
+
+**No `attributes` pass-through.** `PopoverTrigger` and `PopoverContent` take `props: XProps` and
+merge caller attributes; `Icon` takes a named prop like `SlugPicker` does. Adding a pass-through
+for a component no caller wants to customize is speculative generality — revisit when a call site
+actually needs to put an `aria_hidden` on an icon.
+
+### What the `simplify` pass changed, and what it did not
+
+The pass **rewrote the step's central design**, and then two of its reviewers **contradicted each
+other** on a line of the result. Both are worth the record.
+
+- **The draft stopped at half the idea.** It shipped `Icon { name, paths }` with the geometry left
+  inline at each call site — the preamble deduplicated, the identity still scattered. The altitude
+  reviewer named the consequence: a fourth call site wanting the ✕ has nothing to import and must
+  re-type two `M` strings with no compiler checking the copy. It then made the sharper point, that
+  two independent props which must agree is the *same hazard class Step 7b had just closed* one
+  layer down. Hoisting the pair into private-field consts fixed both at once, and the `E0451` probe
+  in the check section is that fix being asked to prove itself.
+- **The simplification and efficiency reviewers disagreed about `path { d }`.** Simplification said
+  the bare-ident shorthand passes the `&'static str` through with no allocation and that
+  `d: "{d}"` wastes a `String` per path; efficiency said `AttributeValue::Text` always owns a
+  `String`, so the two forms are identical. **Efficiency was right**, confirmed by reading
+  `dioxus-core-0.7.9/src/nodes.rs:1008` rather than taking either agent's word: `&str` converts via
+  `self.to_string()` unconditionally. The change was kept — `path { d }` reads better than
+  `path { d: *d }` — but the "why it works" paragraph above was rewritten, because it had already
+  repeated the wrong reason.
+- **The efficiency reviewer supplied the argument the draft was missing**: that `#[component]`'s
+  memoize check is what turns a per-render cost into a per-mount one, and that a plain function
+  would have been strictly worse for the icon living inside `Reader`.
+
+**Two findings were skipped.** `Icon` takes named props rather than the `props: XProps` +
+`merge_attributes` pass-through that `PopoverTrigger`/`PopoverContent` use — noted in the scope
+note as speculative until a caller needs it. And the reviewer suggested renaming the component
+`TablerIcon` for vendor honesty; the *type* took that name instead, so `icon::CLOSE` is visibly a
+`TablerIcon` while call sites keep the role-shaped `Icon { .. }`. If the icon set is ever swapped,
+the call sites should not have to care.
+
+**Reuse came back clean on coverage**, independently confirmed: `grep` for `svg {` and
+`icon-tabler` across `src/` now matches only `icon.rs`, and `assets/main.css` styles only
+`.icon-button` — the wrapper this step never touched — so no CSS was stranded.

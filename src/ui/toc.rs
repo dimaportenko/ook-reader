@@ -6,7 +6,10 @@ use dioxus_primitives::ContentAlign;
 use crate::{
     epub::LinkTarget,
     toc::{self, TocEntry},
-    ui::components::popover::{PopoverContent, PopoverRoot, PopoverTrigger},
+    ui::components::{
+        icon::{self, Icon},
+        popover::{PopoverContent, PopoverRoot, PopoverTrigger},
+    },
 };
 
 #[css_module("/src/ui/toc.css")]
@@ -33,41 +36,7 @@ pub(crate) fn ContentsPopover(
             open: open(),
             on_open_change: move |v| open.set(v),
             PopoverTrigger {
-                svg {
-                    xmlns: "http://www.w3.org/2000/svg",
-                    width: "24",
-                    height: "24",
-                    view_box: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    stroke_width: "2",
-                    stroke_linecap: "round",
-                    stroke_linejoin: "round",
-                    class: "icon icon-tabler icons-tabler-outline icon-tabler-list",
-                    path {
-                        stroke: "none",
-                        d: "M0 0h24v24H0z",
-                        fill: "none",
-                    }
-                    path {
-                        d: "M9 6l11 0",
-                    }
-                    path {
-                        d: "M9 12l11 0",
-                    }
-                    path {
-                        d: "M9 18l11 0",
-                    }
-                    path {
-                        d: "M5 6l0 .01",
-                    }
-                    path {
-                        d: "M5 12l0 .01",
-                    }
-                    path {
-                        d: "M5 18l0 .01",
-                    }
-                }
+                Icon { icon: icon::LIST }
             }
             PopoverContent {
                 class: Styles::contents_popover__content.to_string(),

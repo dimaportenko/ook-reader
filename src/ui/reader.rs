@@ -10,7 +10,13 @@ use crate::{
     nav::{self, ReaderDataStoreExt, ReaderState},
     settings::Settings,
     toc::{self, TocEntry},
-    ui::{library::OpenBook, settings::SettingsPopover, toc::ContentsPopover, OrLog},
+    ui::{
+        components::icon::{self, Icon},
+        library::OpenBook,
+        settings::SettingsPopover,
+        toc::ContentsPopover,
+        OrLog,
+    },
 };
 
 const BRIDGE_JS: &str = include_str!("../web/assets/ook-events-listener.js");
@@ -174,29 +180,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                     button {
                         class: "icon-button",
                         onclick: move |_| open_book.set(None),
-                        svg {
-                            xmlns: "http://www.w3.org/2000/svg",
-                            width: "24",
-                            height: "24",
-                            view_box: "0 0 24 24",
-                            fill: "none",
-                            stroke: "currentColor",
-                            stroke_width: "2",
-                            stroke_linecap: "round",
-                            stroke_linejoin: "round",
-                            class: "icon icon-tabler icons-tabler-outline icon-tabler-x",
-                            path {
-                                stroke: "none",
-                                d: "M0 0h24v24H0z",
-                                fill: "none",
-                            }
-                            path {
-                                d: "M18 6l-12 12",
-                            }
-                            path {
-                                d: "M6 6l12 12",
-                            }
-                        }
+                        Icon { icon: icon::CLOSE }
                     }
                 }
                 div {

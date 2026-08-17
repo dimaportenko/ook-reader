@@ -111,13 +111,21 @@ Detail for each lives in
         `fae2125`, **116 tests green**; written by `lbb:next-implement`, the red was a compile
         error, and the assertion was proved live in both directions plus a control — renaming
         either side fails, deleting the dead `, 0` fallback does not.
-  - [ ] **7c. The UI-chrome sitting** — the tabler SVG preamble on its third copy, the
+  - [ ] **7c. One icon component** — item B alone. The tabler SVG preamble on its third copy
+        moves into `ui/components/icon.rs`; `reader.rs`, `settings.rs` and `toc.rs` keep only
+        their own path data. `dx serve` + `cargo clippy`.
+  - [ ] **7d. The popover-chrome sitting** — the rest of what 7c originally bundled: the
         duplicated `stop_propagation`, `ul`/`li` list semantics, and the controlled-open triple
         (which is probably three dead lines in `settings.rs`, not a duplication).
-  - [ ] **7d. `toc::label_for_spine`** — Step 4's item; deletes the index-then-index dance from
+  - [ ] **7e. `toc::label_for_spine`** — Step 4's item; deletes the index-then-index dance from
         three call sites.
-  - [ ] **7e. Scroll the current row into view** — carried from Step 5. A *behaviour* change,
+  - [ ] **7f. Scroll the current row into view** — carried from Step 5. A *behaviour* change,
         so it gets its own commit at the end or moves to the next phase.
+
+  > **7c was split.** The triage bundled B + D + E + F as one "UI-chrome sitting" because they
+  > touch the same three files, but that is four ideas and the icon extraction alone is a new
+  > module plus three call sites. B became 7c; D + E + F became 7d; the two items after them
+  > shifted a letter. Nothing was dropped.
 
 ## Out of scope
 
