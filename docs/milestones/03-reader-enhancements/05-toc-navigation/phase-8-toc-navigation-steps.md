@@ -2861,3 +2861,212 @@ brief.
 > from the markup rather than heard. The visual checks — full-width highlight at every depth, no
 > markers, no new block margin, the `80vh` scroll cap, the bold `aria-current` row, and click
 > still jumping and closing — are the ones that were actually run.
+
+---
+
+## Step 7g — `toc::label_for_spine`
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+Triage item **H**, carried since Step 4. `entry_index_for_spine` answers "which entry?" with an
+*index*, and three of its four callers immediately spend that index on the same lookup —
+`entries[index].label` — spelled identically each time. The fourth caller, the contents panel, is
+the only one that genuinely wants the number.
+
+### The crux
+
+**The function returns the wrong thing for most of its callers, and "wrong" here means one
+indirection too low.**
+
+`entry_index_for_spine` is doing the hard part: the first-match-then-fall-back-to-preceding rule
+that Step 3 had to choose and defend. What it hands back is a position into a slice, which is a
+*handle* to the answer rather than the answer. Every caller that only wanted the name then
+performs the same two-step — index, then index again — and the index leaks out into code that has
+no other use for it.
+
+The tell is that the two test closures in `toc.rs` are **byte-identical**, and neither is testing
+the indexing; they exist because the assertions want to read `Some("I. A SCANDAL IN BOHEMIA")`
+rather than `Some(2)`. When a test has to write a helper to convert the function's output into the
+thing it actually means, the function is returning at the wrong altitude.
+
+The fix is not to change `entry_index_for_spine` — the panel needs it as it is, to compare against
+its loop counter for `aria-current`. It is to put the common half **above** it, so the index stays
+available for the one caller that wants it and stops being the interface for the three that do
+not.
+
+### The check — `cargo test`
+
+**No new test.** The two closures the step deletes *are* the check: rewriting them to call the new
+function makes the existing assertions exercise it directly, which is the whole point of the item.
+
+```rust
+let entries = toc_entries(&epub, &docs);
+let label = |spine_index| label_for_spine(&entries, spine_index);
+
+assert_eq!(label(1), Some("The Adventures of Sherlock Holmes"));
+assert_eq!(label(2), Some("I. A SCANDAL IN BOHEMIA"));
+assert_eq!(label(14), Some("THE FULL PROJECT GUTENBERG™ LICENSE"));
+assert_eq!(label(0), None);
+```
+
+The red is a compile error, the same shape 7a and 7b opened with:
+
+```
+error[E0425]: cannot find function `label_for_spine` in this scope
+   --> src/toc.rs:108:35
+error[E0425]: cannot find function `label_for_spine` in this scope
+   --> src/toc.rs:128:35
+```
+
+Both call sites, which is worth noticing: the closure was duplicated, so the red is too.
+
+### The code
+
+`src/toc.rs`:
+
+```rust
+pub(crate) fn label_for_spine(entries: &[TocEntry], spine_index: usize) -> Option<&str> {
+    entry_index_for_spine(entries, spine_index).map(|index| entries[index].label.as_str())
+}
+```
+
+`src/ui/reader.rs`:
+
+```rust
+fn chapter_label(entries: &[TocEntry], chapter: usize, chapter_count: usize) -> String {
+    match toc::label_for_spine(entries, chapter) {
+        Some(label) => label.to_string(),
+        None => format!("Chapter {} of {}", chapter + 1, chapter_count),
+    }
+}
+```
+
+### Why it works
+
+**`Option<&str>` rather than `Option<String>` is the whole reason this is free.** The label lives
+in the `Vec<TocEntry>` the caller already owns and is not going anywhere while the borrow is
+alive; returning a `&str` hands out a view of it and allocates nothing. The old `chapter_label`
+called `.clone()` on the `String` because it *had* an owned `String` in hand and needed one out;
+the new one calls `.to_string()` on a `&str` for the same reason. Same allocation either way —
+the win is not fewer bytes, it is that the two callers who never wanted a `String` no longer touch
+one.
+
+**The elided lifetime is doing real work here.** Written out, the signature is:
+
+```rust
+fn label_for_spine<'a>(entries: &'a [TocEntry], spine_index: usize) -> Option<&'a str>
+```
+
+Rust's elision rules pick this without being told: one lifetime in the inputs (`spine_index` is
+`usize`, no borrow), so the output borrows from it. That is exactly the guarantee the function
+needs — the returned `&str` cannot outlive the slice it points into, so a caller cannot drop the
+entries and keep the label. Had there been two reference parameters, elision would have refused
+and the lifetime would have to be spelled.
+
+**`entries[index]` cannot panic**, and it is worth being explicit about why, because a bare index
+in Rust usually deserves suspicion. `index` came from `position`/`rposition` on *this same slice*
+one line earlier, so it is in range by construction. `entries.get(index)` would be defensive
+against a bug that the type of the composition already rules out.
+
+**`.map` rather than `?`**: the function is one composition, and `Option::map` says "same shape,
+different payload" in a single expression. The first draft bound `let index = …?;` and returned
+`Some(…)` on the next line; the cleanup pass took the binding out (see below).
+
+### The forks
+
+**`label_for_spine` rather than `entry_for_spine -> Option<&TocEntry>`.** The more general
+function would let a caller reach the depth or the target too, and the label version could be
+built on it. I took the narrow one because nothing wants the other fields at a spine index —
+the panel iterates all entries and the jump goes through `target` on the entry the user clicked,
+not the current one. A `&TocEntry` would also not help the one caller that keeps using the index,
+since it needs the *number* to compare against its loop counter. If a "you are here" feature later
+wants the depth, widening this is a two-line change.
+
+**`entry_index_for_spine` stays `pub(crate)` and stays as it is.** The alternative is to make it
+private and have `ui/toc.rs` use something else, but the panel's need is real and specific:
+`aria_current: if Some(index) == current`. Two functions at two altitudes with one caller each is
+the honest shape; collapsing them would mean the panel recomputing a position it was just handed.
+
+**`match` rather than `map_or_else` in `chapter_label`.** `toc::label_for_spine(entries, chapter)
+.map_or_else(|| format!(…), str::to_string)` is one expression and fits on two lines, but it reads
+the arms out of order — the fallback first, the hit second — and `page_label` directly below uses
+`match`. Consistency with the neighbour won.
+
+### What to look at hardest
+
+1. **Whether `chapter_label` should have moved into `toc.rs` entirely.** It is now a thin
+   `match` over a `toc` function, and the "Chapter N of M" fallback is arguably as much a
+   labelling rule as the first-match rule is. I left it in `ui/reader.rs` because the fallback
+   is a *presentation* string — the only one of the three that mentions a chapter count the
+   model does not track — and because item H asked for the indexing dance to go, not for the
+   function to move. Reasonable to disagree.
+2. **The name.** `label_for_spine` mirrors `entry_index_for_spine`, but neither says *which*
+   label when several entries name one document, which is the fixture's whole complication.
+   `current_label` or `label_at` are alternatives; none of them say it either.
+3. **`.to_string()` on the `&str`.** It is the same allocation the old `.clone()` made, but it
+   now sits in the UI rather than beside the lookup, which makes it easier to see and easier to
+   ask whether `chapter_label` should return `Cow<str>` instead. I did not, because the fallback
+   arm always allocates anyway and a `Cow` that is owned half the time buys nothing.
+
+### Scope note
+
+Three call sites and one new function. It does **not** move `chapter_label`, does not touch
+`entry_index_for_spine`'s rule or signature, and does not change what the reader displays — the
+same assertions pass before and after, which is the definition of this kind of refactor going
+right. **7h** (scroll the current row into view) is the last item in the triage and the only one
+that changes behaviour, so it still wants its own commit or a push to the next phase.
+
+### What the cleanup pass changed
+
+**One edit: the intermediate `let` came out of `label_for_spine`.** The first draft was
+
+```rust
+let index = entry_index_for_spine(entries, spine_index)?;
+
+Some(entries[index].label.as_str())
+```
+
+which binds a name used once on the very next line — the "intermediate `let` that says nothing"
+the simplify brief names explicitly. `.map` says the same thing in one expression, and it is also
+the exact shape of the two closures the step deletes, which makes the diff read as *moving* code
+rather than rewriting it. The checks were re-run after: **117 tests, `cargo clippy --all-targets`
+clean.**
+
+Reuse found nothing to hoist — this step *is* the reuse finding, arriving three sittings after it
+was filed. Efficiency: identical, one `position` scan and one allocation either way. Altitude: the
+one candidate is fork 1 above, `chapter_label` moving into `toc.rs`, recorded rather than taken.
+
+**Note on how this pass was run.** As in 7f, the `simplify` skill's four review agents were not
+spawned — this session's instructions forbid subagents unless the user asks — and the four angles
+were applied by hand in the same order.
+
+> **Status:** done — committed in `a3c4ad7`, **117 tests green** (unchanged), `cargo clippy
+> --all-targets` clean, and both `src/toc.rs` and `src/ui/reader.rs` are rustfmt-clean. The
+> pre-existing drift in `epub.rs`, `web/assets.rs` and `components/popover/mod.rs` is still
+> untouched.
+>
+> **No test was written, and none was owed.** The step's check was the two existing tests rewritten
+> to call the new function, and both were already in the tree at commit time. The count is
+> unchanged because a refactor that adds a test is usually a refactor that changed behaviour.
+>
+> **The red and the mutation prove two different things, and the step needed both.** The red was a
+> compile error at both call sites — `cannot find function label_for_spine in this scope` — which
+> proves the tests now *route through* the new function, but says nothing about whether their
+> assertions still bite. So at commit time each rewritten test was mutated in turn and run:
+> `label(2)`'s expected label replaced with a string the fixture does not contain, and
+> `label(3)`'s `Some("One")` — the fall-back-to-preceding case — replaced with `Some("Two")`. Both
+> failed, and the failure output shows the real value on the left, so the new function is
+> genuinely computing both branches of Step 3's rule. `src/toc.rs` was then restored from a copy
+> taken before the mutation and confirmed byte-identical with `diff`. The mutation was applied to
+> the *tests* only; the implementation was never touched.
+>
+> **`dx serve` was run and confirmed by hand**, though this step is the one where it proves least:
+> the diff is behaviour-preserving by construction, so the app looking unchanged is what success
+> and a no-op both look like. Recorded because it was done, not because it carries the step.
+>
+> **Fork 1 stayed a fork.** `chapter_label` is still in `ui/reader.rs` rather than moved into
+> `toc.rs`. It is now a thin `match` over a `toc` function and the case for moving it is real; it
+> was left because the "Chapter N of M" fallback is a presentation string mentioning a count the
+> model does not track, and because item H asked for the indexing dance to go, not for the function
+> to move.

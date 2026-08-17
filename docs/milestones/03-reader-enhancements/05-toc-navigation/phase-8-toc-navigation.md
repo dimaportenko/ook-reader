@@ -140,8 +140,12 @@ Detail for each lives in
         which sizes to `fit-content` whatever its `display`, so the hover highlight hugged each
         label until `box-sizing: border-box; width: 100%` went on. The handoff had blamed the
         wrong declaration — the `li`, not the dropped flex column, is what took the stretch away.
-  - [ ] **7g. `toc::label_for_spine`** — Step 4's item; deletes the index-then-index dance from
-        three call sites.
+  - [x] **7g. `toc::label_for_spine`** — Step 4's item; deletes the index-then-index dance from
+        three call sites. Committed in `a3c4ad7`, **117 tests green** (unchanged — no test was
+        owed; the check was the two existing tests rewritten to call the new function). Written by
+        `lbb:next-implement`. The red was a compile error at both call sites, and because that
+        proves only that the tests *reach* the function, each rewritten assertion was then
+        re-proved by mutation — including the fall-back-to-preceding branch.
   - [ ] **7h. Scroll the current row into view** — carried from Step 5. A *behaviour* change,
         so it gets its own commit at the end or moves to the next phase.
 
