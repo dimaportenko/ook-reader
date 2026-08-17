@@ -2619,3 +2619,245 @@ primitive — are both recorded as forks above rather than taken.
 > run, so the dismissal is confirmed working rather than confirmed *caused* by this diff. Nor were
 > the two side-claims eyeballed: that a link click still both dismisses and navigates, and that
 > dragging to select text in the book now closes an open panel.
+
+---
+
+## Step 7f — `ul`/`li` list semantics for the contents panel
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+Triage item **E**, the one the 7d split left behind: *"the contents list is a `nav` full of bare
+`button`s. A screen reader announces eighteen buttons with no sense that they are one list, and
+no count."* The smallest item left on the list, and the last one that is purely markup.
+
+### The crux
+
+**A list is a thing you can be lost in, and the browser will only say so if you say `ul`.**
+
+Visually the panel is obviously a list: eighteen rows, stacked, indented by depth. None of that
+reaches the accessibility tree. `nav > button × 18` produces eighteen sibling controls; a screen
+reader user arrowing through them hears "Preface, button", "Chapter I, button" with nothing that
+says how many there are, which one of how many this is, or that they form a single structure.
+`ul > li > button` produces "list, 18 items … Preface, button, 1 of 18". The count and the
+position are computed by the browser from the markup — there is nothing to maintain, and nothing
+to keep in sync with `entries.len()`.
+
+What makes it worth a step rather than a two-character edit is that **`ul`/`li` is not free
+layout-wise**. The old markup worked because the eighteen `button`s were themselves the flex
+items of a `flex-direction: column` container, so they stretched to full width and the hover
+highlight covered the whole row. Insert an `li` between them and the button is no longer the flex
+item: it is an `inline-block` inside a block, shrink-to-fit, and the highlight collapses to the
+width of the label. The fix is not to re-stretch it but to notice that **the flex column was only
+ever simulating block flow**, and block flow is what a list already is.
+
+### The check — `dx serve` + `cargo clippy`
+
+**No red to watch.** The claim is about rendered markup and the accessibility tree, and nothing
+inside this crate can see either — the same wall 7c and 7d hit. The gate is a clean build plus
+eyes, and the specific things to look at are:
+
+- **The rows still look identical to before.** Same indentation per depth, same padding, and the
+  hover highlight still spans the **full width** of the panel, not just the label. This is the
+  half the `li` could plausibly have broken.
+- **No bullets.** A `ul` renders `::marker` discs by default; if a dot appears to the left of
+  every chapter, `list-style: none` did not take.
+- **No new gap at the top and bottom of the list.** The UA gives `ul` a `1em` block margin that
+  would show up inside the popover's own `1rem` padding.
+- **Scrolling still works** — the fixture's ToC is longer than the panel, so the list must still
+  scroll inside its `80vh` cap rather than growing the popover.
+- **The current chapter is still bold** (`aria-current="page"`), and clicking a row still jumps
+  and closes the panel.
+
+If VoiceOver is at hand (`Cmd-F5`), the actual claim of the step is audible: `VO-Right` through
+the panel should now announce a list and an *N of 18* on every row.
+
+### The code
+
+`src/ui/toc.rs` — three new levels of nesting, no new logic:
+
+```rust
+nav {
+    aria_label: "Table of contents",
+    ul {
+        class: "{Styles::contents_popover__list}",
+        for (index, entry) in entries.iter().enumerate() {
+            li {
+                button { /* unchanged */ }
+            }
+        }
+    }
+}
+```
+
+`src/ui/toc.css`:
+
+```css
+.contents-popover__list {
+  max-height: 80vh;
+  margin: 0;
+  padding: 1rem;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.contents-popover__entry {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  /* …unchanged… */
+}
+```
+
+### Why it works
+
+**`ul` is the count.** `aria-setsize` and `aria-posinset` exist for the cases where you *cannot*
+use a list — a virtualized window, a tree assembled from `div`s. Here the whole list is in the
+DOM, so the browser derives both, and they stay right when the book changes without a line of
+Rust knowing about it.
+
+**`nav` keeps the landmark and finally gets a name.** The element was already there and already
+correct — a table of contents is the canonical `<nav>` — but an unnamed landmark is a region a
+screen reader announces as "navigation" and nothing else. `aria_label` costs one attribute and
+makes the landmark list legible. Note the Dioxus spelling: attributes with hyphens are written
+with underscores in `rsx!` (`aria_label`, `aria_current`), and emitted with hyphens.
+
+**The three CSS declarations are each undoing one UA default**, and it is worth naming which:
+
+- `list-style: none` — the `::marker` disc.
+- `margin: 0` — `ul`'s `1em` block margin.
+- The UA's `padding-inline-start: 40px` needed nothing, because the rule already sets `padding`
+  outright. It is only invisible because the shorthand was already there.
+
+**Dropping `display: flex` is the part to think about.** With the `li` in place, the flex
+container's items are the list items, which are block-level and full-width on their own — the
+column flex is doing nothing that normal block flow does not already do. Two declarations that no
+longer earn their place, and removing them is not merely tidy: a `flex-direction: column`
+container with a `max-height` gives every item `flex-shrink: 1`, which is the standard way a
+scrolling flex list ends up squashing its rows instead of scrolling. Block flow has no such edge.
+
+**`box-sizing: border-box; width: 100%` on the button replaces the stretch that flex was
+providing** — and the first draft of this step got that wrong in a way worth keeping in the log,
+because the wrong version is the one that reads as obviously correct.
+
+The draft wrote `display: block` alone, on the reasoning that a block-level element's `width:
+auto` fills its containing block. That rule does not hold for a `<button>`. Form controls are
+sized with **`fit-content`** — `width: auto` on a button means "as wide as your label", `display:
+block` or not — so the row hugged its text and the hover highlight stopped after the last letter.
+The gate caught it; see the status marker below.
+
+Two consequences worth separating, because they are easy to conflate:
+
+- **The regression came from inserting the `li`, not from dropping the flex.** Before this step
+  the button *was* the flex item and `align-items: stretch` gave it full width. Once an `li` sits
+  between the list and the button, the `li` is the flex item and the button is just a control
+  inside it. Restoring `display: flex; flex-direction: column;` would not have fixed the highlight
+  — the fix has to be on the button whatever the list does.
+- **`box-sizing: border-box` is not decoration here.** This repo sets no global `border-box`, so
+  `width: 100%` on its own would size the *content* box to the full row and push the horizontal
+  padding beyond it — and that padding grows with the depth indent, so deeper entries would
+  overflow further than shallow ones.
+
+### The forks
+
+**`nav > ul` rather than replacing the `nav` with the `ul`.** The other option is to drop `nav`
+and let the `ul` carry the class and the label. It is one element less, and inside a floating
+popover a landmark buys less than it does in page chrome. I kept it because removing semantics to
+add semantics is a strange trade, and the label makes it a net gain — but if you find the extra
+wrapper annoying, deleting the `nav` and moving `aria_label` onto the `ul` is a safe edit.
+
+**A flat `ul` rather than nested `ul`s, or an ARIA `tree`.** The ToC *is* a tree, and the truly
+faithful markup is either nested lists or `role="tree"` + `role="treeitem"` + `aria-level`. Both
+were rejected, for different reasons. Nested lists would mean un-flattening the `Vec<TocEntry>`
+back into a tree at render time, against the phase's stated design decision to flatten once at the
+boundary. `role="tree"` is worse than useless done halfway: it is a *widget* role, and a screen
+reader that hears "tree" switches to application mode and expects arrow-key navigation, expand and
+collapse, and roving `tabindex`. Announcing a contract we do not implement is a regression from
+plain buttons. `aria-level` alone on the `li`s is the cheap middle ground and could be added later
+if depth turns out to be inaudible in practice.
+
+**No `key` on the `li`.** The `for` loop has no key, matching what the `button` had before it;
+`library.rs` keys its book list because that list is re-ordered by last-opened. A book's ToC is
+built once per open and never mutates, so the index-position identity Dioxus falls back to is
+exactly right. Worth revisiting only if the panel ever filters or searches.
+
+### What to look at hardest
+
+1. **The row's width.** ~~The `display: flex` removal — the only change in the diff that can
+   produce a visual regression, and the one I could not test.~~ It did regress, and the handoff
+   pointed at the wrong declaration: the cause was the `li` stealing the flex-item role from the
+   button, not the flex column coming off the list. Corrected above and in the status marker; the
+   three declarations on the button now carry the row's width explicitly.
+2. **Whether the `nav` should have survived at all.** See the fork above — this is a taste call
+   about how much structure a popover deserves, and you are better placed to make it than I am.
+3. **`aria_label: "Table of contents"` is a user-visible string sitting in the markup.** Nothing
+   in this app is localized yet and there is no string table to put it in, so it is hardcoded like
+   every other label in `src/ui`. Consistent, but it is the first one that exists *only* for
+   assistive tech, which makes it the easiest one to forget when a string table does arrive.
+
+### Scope note
+
+Markup and CSS only — no Rust logic changed, no test added, and the panel behaves identically for
+a sighted mouse user. It does **not** add `aria-level` for depth, does not make the list a
+keyboard-navigable tree widget, and does not touch the `entry onclick`'s `stop_propagation`, which
+7d recorded and left alone. Two triage items remain after this one: **7g** (`toc::label_for_spine`)
+and **7h** (scroll the current row into view), and 7h is still the one that changes behaviour and
+therefore still wants its own commit or a push to the next phase.
+
+### What the cleanup pass changed
+
+**One edit: the flex column came out of `.contents-popover__list`.** The first draft kept
+`display: flex; flex-direction: column;` untouched, on the theory that the new `li` layer only
+needed `display: block` on the button to fill the row. That is the copy-paste-with-variation
+smell — carrying a declaration because it was there rather than because it does something — and
+the `flex-shrink` reasoning is in *Why it works* above. The checks were re-run after it:
+**117 tests, `cargo clippy --all-targets` clean.**
+
+**The pass was right about the flex and wrong about what replaced it.** Removing the column was
+correct and is kept; `display: block` alone was never going to give a `<button>` full width, in
+either version of the rule. That is the honest shape of this one: the cleanup did not cause the
+regression and did not catch it either, because both drafts shared the same wrong premise about
+how form controls size.
+
+Reuse produced no edit: `library.rs` is the repo's other `ul`/`li`, and it shares no styling with
+this one (a responsive grid of covers against an indented scroll list), so there is nothing to
+hoist. Efficiency: three DOM nodes per entry instead of one, eighteen entries, built once per
+panel open. Altitude: the item is markup at the leaf and there is no deeper mechanism to
+generalize — the one candidate, a shared "list of buttons in a popover" component, has exactly one
+caller.
+
+**Note on how this pass was run.** The `simplify` skill fans out four review agents; this
+session's instructions forbid spawning subagents unless the user asks for them, and the diff is
+ten lines. The four angles were applied by hand instead, in the same order and with the same
+brief.
+
+> **Status:** done — committed in `b92816f`, **117 tests green** (unchanged), `cargo clippy
+> --all-targets` clean, and `src/ui/toc.rs` is rustfmt-clean. The pre-existing drift in `epub.rs`,
+> `web/assets.rs` and `components/popover/mod.rs` is still untouched.
+>
+> **No test was owed and none was written.** The step planned none, and it added no logic to pin
+> — the diff is three levels of nesting and five CSS declarations. The one test this file already
+> carries, `the_depth_variable_is_spelled_the_same_on_both_sides_of_the_css_gap`, was run on its
+> own to confirm the 7b pin survived the rule being edited around it, and it passed. Nothing in
+> this crate can see rendered markup or the accessibility tree, so the step's actual claim — that
+> the panel now announces as a list of eighteen — has no automated instrument at all and is
+> recorded as eyeballed, not asserted.
+>
+> **The eyeball gate failed the first time, which is the useful part of this entry.** The handoff
+> shipped `display: block` on the button and claimed it would fill the row. It did not: the hover
+> highlight hugged each label, and the screenshot came back before the commit. A `<button>` is a
+> form control and sizes to `fit-content` whatever its `display` — the block-level "fill your
+> containing block" rule does not apply to it. `box-sizing: border-box; width: 100%` was added and
+> the gate re-run.
+>
+> **The handoff also pointed at the wrong suspect**, and that is worth more than the fix. It
+> flagged the `display: flex` removal as the risky change; the cause was the `li` taking the
+> flex-item role away from the button, so restoring the flex would not have helped. *Why it works*
+> and *What to look at hardest* were both corrected in place rather than left standing, since this
+> doc is read later as a record of what was believed at the time.
+>
+> **Not verified, recorded so the next reader does not assume it was:** the VoiceOver pass. The
+> list, its item count and the *N of 18* per row are what the step is *for*, and they were argued
+> from the markup rather than heard. The visual checks — full-width highlight at every depth, no
+> markers, no new block margin, the `80vh` scroll cap, the bold `aria-current` row, and click
+> still jumping and closing — are the ones that were actually run.

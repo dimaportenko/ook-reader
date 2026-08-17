@@ -132,8 +132,14 @@ Detail for each lives in
         `deecc44`, **117 tests green**; written by `lbb:next-implement` and watched red, the two
         assertions the first one shadowed re-proved by mutation at commit time, and the `dx serve`
         dismissal confirmed by hand.
-  - [ ] **7f. `ul`/`li` list semantics for the contents panel** — item E, split out of 7d: eighteen
-        bare `button`s announce as eighteen buttons with no list and no count.
+  - [x] **7f. `ul`/`li` list semantics for the contents panel** — item E, split out of 7d: eighteen
+        bare `button`s announce as eighteen buttons with no list and no count. Committed in
+        `b92816f`, **117 tests green** (unchanged — no test; nothing in the crate can see the
+        accessibility tree). Written by `lbb:next-implement`. The `dx serve` gate **failed the
+        first time** and caught a real regression: `display: block` does not widen a `<button>`,
+        which sizes to `fit-content` whatever its `display`, so the hover highlight hugged each
+        label until `box-sizing: border-box; width: 100%` went on. The handoff had blamed the
+        wrong declaration — the `li`, not the dropped flex column, is what took the stretch away.
   - [ ] **7g. `toc::label_for_spine`** — Step 4's item; deletes the index-then-index dance from
         three call sites.
   - [ ] **7h. Scroll the current row into view** — carried from Step 5. A *behaviour* change,
