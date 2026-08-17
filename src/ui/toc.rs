@@ -12,6 +12,8 @@ use crate::{
 #[css_module("/src/ui/toc.css")]
 struct Styles;
 
+const DEPTH_VAR: &str = "--toc-depth";
+
 #[component]
 pub(crate) fn ContentsPopover(
     entries: Rc<Vec<TocEntry>>,
@@ -77,7 +79,7 @@ pub(crate) fn ContentsPopover(
                         button {
                             class: "{Styles::contents_popover__entry}",
                             aria_current: if Some(index) == current { "page" },
-                            style: "--toc-depth: {entry.depth};",
+                            style: "{DEPTH_VAR}: {entry.depth};",
                             onclick: {
                                 let target = entry.target.clone();
 
@@ -93,5 +95,17 @@ pub(crate) fn ContentsPopover(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    const TOC_CSS: &str = include_str!("toc.css");
+
+    #[test]
+    fn the_depth_variable_is_spelled_the_same_on_both_sides_of_the_css_gap() {
+        assert!(TOC_CSS.contains(&format!("var({DEPTH_VAR}")));
     }
 }

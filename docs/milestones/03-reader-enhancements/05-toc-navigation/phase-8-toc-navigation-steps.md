@@ -1711,3 +1711,182 @@ tests, where being explicit about which coordinate is being compared is a featur
 > through the new resolver. Worth one `dx serve` anyway to confirm the panel still shows eighteen
 > rows, since the mutation table shows how quiet the failure mode is if the normalization is
 > wrong.
+
+---
+
+## Step 7b — pin `--toc-depth` across the Rust/CSS gap
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+Item **C** from the triage, and the only item on the list that is genuinely test-first.
+
+**The crux: the ToC panel's indentation is held together by a string that no compiler reads.**
+`ui/toc.rs` writes `--toc-depth` into an inline `style` attribute; `ui/toc.css` reads it back out
+of a `calc()`. Between those two lines there is nothing — not rustc, not the `#[css_module]`
+macro, not the CSS parser — that knows the two names are supposed to be the same word. Rename
+either side and the build stays green, clippy stays quiet, and the panel silently flattens: every
+row draws at the fallback `0`, so an eighteen-entry nested ToC renders as eighteen entries at the
+same indent. Nothing errors. It just stops meaning anything.
+
+This is the same hazard the repo has already met four times on the Rust↔JS side, and it already
+has the answer. `ui/reader.rs` pins `ook-reflow`, `ook-key`, `ook-warn` and `__ookBlobUrl` with
+`assert!(SOME_JS.contains("…"))`, each under a comment naming the silent failure — *"rename it in
+the loader and the cleanup silently revokes nothing, leaking a chapter per book."* The gap here is
+Rust↔CSS rather than Rust↔JS, but it is the same gap and it takes the same instrument.
+
+**The one thing the idiom needs that a straight copy does not give.** In `reader.rs` both sides of
+the shared name are *files*, so two `contains` calls pin both ends. Here one side is *code* — a
+literal inside `rsx!`. Asserting `TOC_CSS.contains("--toc-depth")` would pin only the CSS: rename
+the Rust literal and the test sails through, which is the direction the failure is most likely to
+come from, since the Rust side is the one someone edits while writing a component. So the name has
+to become a value first:
+
+```rust
+const DEPTH_VAR: &str = "--toc-depth";
+```
+
+Once the component interpolates the const instead of spelling the word, the test compares the
+const against the CSS and **both** directions are live. That is the whole step: hoisting a string
+literal into a constant is what turns an untestable gap into a testable one.
+
+### The check — `cargo test`
+
+`src/ui/toc.rs` gets its first test module:
+
+```rust
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    const TOC_CSS: &str = include_str!("toc.css");
+
+    #[test]
+    fn the_depth_variable_is_spelled_the_same_on_both_sides_of_the_css_gap() {
+        assert!(TOC_CSS.contains(&format!("var({DEPTH_VAR}")));
+    }
+}
+```
+
+**The red was a compile error**, and honestly so — the constant the test needs is the constant the
+step exists to introduce:
+
+```
+error[E0425]: cannot find value `DEPTH_VAR` in this scope
+   --> src/ui/toc.rs:107:49
+```
+
+**Then both directions were proved live by mutation**, which is the only evidence that matters for
+a test whose whole job is to notice a rename:
+
+| mutation | result |
+|---|---|
+| `DEPTH_VAR` → `"--toc-indent"` (Rust side) | **fails** |
+| `var(--toc-depth, 0)` → `var(--toc-indent, 0)` (CSS side) | **fails** |
+| *control:* `var(--toc-depth, 0)` → `var(--toc-depth)` | **passes** |
+
+Two mutations rather than one is the point. A test that only caught the CSS rename would have been
+half a test, and it would have looked exactly the same in the diff. The control row is the other
+half of the claim — see the `var(` discussion below.
+
+**Why `var({DEPTH_VAR}` and not just `DEPTH_VAR`.** The bare form passes on any mention of the name
+anywhere in the file — including a comment, or a `--toc-depth:` *declaration* that sets the
+variable without anything ever reading it. Asserting the `var(` prefix pins that the CSS **reads**
+the property, which is the relationship that actually has to hold.
+
+**And why the prefix stops before the comma.** The draft asserted `var({DEPTH_VAR},`, which pins
+the fallback's existence as a side effect. But the fallback is unreachable: `TocEntry::depth` is a
+plain `usize`, unconditionally set, and the `style` attribute is written unconditionally on every
+row — so no `.contents-popover__entry` can ever exist without the property already set. Deleting
+`, 0` would be a legitimate future tidy-up, and a test that fails on it fails for a reason that has
+nothing to do with what it is named after. The control row above is what proves the trimmed form
+draws the line in the right place: rename either side and it fails, delete the dead fallback and it
+does not.
+
+### The code
+
+`src/ui/toc.rs`, two lines:
+
+```rust
+const DEPTH_VAR: &str = "--toc-depth";
+```
+
+```rust
+style: "{DEPTH_VAR}: {entry.depth};",
+```
+
+### Why it works
+
+**`include_str!` resolves relative to the source file, so the test reads the real CSS, not a
+copy.** `include_str!("toc.css")` next to `src/ui/toc.rs` embeds `src/ui/toc.css` at compile time —
+the same bytes the `#[css_module]` macro above it consumes. There is no build step to keep in sync
+and no fixture to go stale: edit the CSS and the next `cargo test` compiles the new bytes into the
+constant. (The two spellings of the path — `"/src/ui/toc.css"` for the macro, `"toc.css"` for
+`include_str!` — are a wart, but not one this step can fix: the macro takes a workspace-absolute
+path and `include_str!` takes a file-relative one, and neither accepts the other's form.)
+
+**The constant lives in the test module, so nothing pays for it at runtime.** `TOC_CSS` is inside
+`#[cfg(test)]`, so the CSS text is compiled into the test binary only; the shipped binary never
+carries a second copy of a stylesheet it already links through the macro. Had the constant gone at
+module level next to `DEPTH_VAR`, it would have been both dead code in release builds and a
+`dead_code` warning in them.
+
+**`{DEPTH_VAR}` inside `rsx!` is an ordinary formatted string, and that is why it is safe.** Dioxus
+0.7's `rsx!` treats an attribute's string value as a format string over identifiers in scope — the
+same machinery already used one line above for `class: "{Styles::contents_popover__entry}"`. A
+`&'static str` const interpolates like any other `Display` value, so the attribute still produces
+one `String` per row per render exactly as the literal did. The change is in what the compiler
+*sees*: a literal is opaque text, whereas the const is a name the test can reach.
+
+**Why a test rather than a deeper fix — checked, not assumed.** The obvious deeper fix would be for
+`#[css_module]` to expose custom properties as checked symbols the way it exposes classes as
+`Styles::foo`; then `Styles::TOC_DEPTH` would be a compile error to misspell and no test would be
+needed. The macro comes from `manganis-macro` 0.7.9, and its `css_module_parser.rs` builds the
+`Styles` symbols in `get_class_mappings`, which walks `CssFragment::Class` and `Global` selectors
+only — there is no handling of `--custom-property` declarations or `var(…)` usages anywhere in the
+crate. So the checked symbol does not exist to reach for, and manufacturing it means editing a
+third-party macro, which is well outside a phase-closing refactor. The test is the cheapest
+instrument that closes the gap today; if manganis grows the feature later, this test is the thing
+that gets deleted.
+
+### Scope note
+
+**This step is C from the triage only.** B (the icon preamble), D (`stop_propagation`), E
+(list semantics) and F (the controlled-open triple) remain, and the plan still lands them as one
+UI-chrome sitting because they touch the same three files. H (`label_for_spine`) follows, and G
+(scroll-into-view) is still a behaviour change wanting its own commit or a push to the next phase.
+
+**Nothing else in the panel crosses an unchecked gap.** Every other name shared between
+`ui/toc.rs` and `ui/toc.css` is a class, and classes go through `Styles::…`, which rustc checks.
+`--toc-depth` was the only one, which is why this step is one assertion and not a suite.
+
+### What the `simplify` pass changed, and what it did not
+
+Three of the four reviewers came back clean; the useful part is that the two findings that landed
+**pulled in opposite directions on the same line**, and the resolution is not either one's.
+
+- **The assertion lost its trailing comma.** The simplification reviewer wanted the whole `format!`
+  gone — `contains(DEPTH_VAR)`, on the argument that `--toc-depth` is distinctive enough to pin by
+  itself. The altitude reviewer, answering a different question, established that the `, 0` fallback
+  is dead code. Put together they say the draft was pinning *two* things and only one of them is a
+  real invariant: keep `var(`, which pins the relationship that must hold, and drop the comma, which
+  pinned a line someone is entitled to delete. The control mutation was added to the table to make
+  that boundary a fact rather than a claim.
+- **The test name said `indent` while everything it names says `depth`.** Renamed to
+  `the_depth_variable_…`. A test whose name does not match the symbol it pins is the one kind of
+  drift this step cannot afford to ship.
+- **The altitude reviewer read the macro rather than guessing at it**, which is what turned "a test
+  is probably the right depth here" into the `manganis-macro` paragraph above. The draft asserted
+  the same conclusion with no evidence behind it.
+
+**One finding was skipped:** the two spellings of one path — `#[css_module("/src/ui/toc.css")]`
+against `include_str!("toc.css")` — are a second, smaller version of the gap this step closes. Real,
+but not closeable: the attribute macro resolves from the crate root and `include_str!` resolves from
+the source file, neither accepts the other's form, and no literal can be shared between an attribute
+argument and a macro call. Noted in the "Why it works" section instead. Unlike the CSS variable, this
+one fails **loudly** at compile time if it ever breaks, which is why it is a wart and not a hazard.
+
+**Reuse and efficiency both came back clean.** No existing helper covers this gap —
+`Settings::css_vars` and `Theme::css_vars` build the global `:root` push, a different mechanism for
+a different job — and the const costs one extra `Display::fmt` of an 11-byte `&'static str` per row
+on a line that was already allocating a `String` for `{entry.depth}`.
