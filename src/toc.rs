@@ -38,6 +38,10 @@ pub(crate) fn entry_index_for_spine(entries: &[TocEntry], spine_index: usize) ->
         })
 }
 
+pub(crate) fn label_for_spine(entries: &[TocEntry], spine_index: usize) -> Option<&str> {
+    entry_index_for_spine(entries, spine_index).map(|index| entries[index].label.as_str())
+}
+
 #[cfg(test)]
 mod test {
     use std::path::Path;
@@ -105,9 +109,7 @@ mod test {
             epub::open_with_spine(Path::new(crate::TEST_BOOK)).expect("open fixture book");
 
         let entries = toc_entries(&epub, &docs);
-        let label = |spine_index| {
-            entry_index_for_spine(&entries, spine_index).map(|index| entries[index].label.as_str())
-        };
+        let label = |spine_index| label_for_spine(&entries, spine_index);
 
         assert_eq!(label(1), Some("The Adventures of Sherlock Holmes"));
         assert_eq!(label(2), Some("I. A SCANDAL IN BOHEMIA"));
@@ -127,9 +129,7 @@ mod test {
             },
         };
         let entries = vec![entry("One", 1), entry("Two", 4)];
-        let label = |spine_index| {
-            entry_index_for_spine(&entries, spine_index).map(|index| entries[index].label.as_str())
-        };
+        let label = |spine_index| label_for_spine(&entries, spine_index);
 
         assert_eq!(label(2), Some("One"));
         assert_eq!(label(3), Some("One"));

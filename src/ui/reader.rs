@@ -89,8 +89,8 @@ impl BridgeMsg {
 }
 
 fn chapter_label(entries: &[TocEntry], chapter: usize, chapter_count: usize) -> String {
-    match toc::entry_index_for_spine(entries, chapter) {
-        Some(index) => entries[index].label.clone(),
+    match toc::label_for_spine(entries, chapter) {
+        Some(label) => label.to_string(),
         None => format!("Chapter {} of {}", chapter + 1, chapter_count),
     }
 }
