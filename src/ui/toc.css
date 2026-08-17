@@ -3,14 +3,17 @@
 }
 
 .contents-popover__list {
-  display: flex;
   max-height: 80vh;
-  flex-direction: column;
+  margin: 0;
   padding: 1rem;
+  list-style: none;
   overflow-y: auto;
 }
 
 .contents-popover__entry {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
   padding: 0.35rem 0.75rem 0.35rem calc(0.75rem + var(--toc-depth, 0) * 1rem);
   border: none;
   border-radius: 0.25rem;

@@ -42,22 +42,27 @@ pub(crate) fn ContentsPopover(
                 class: Styles::contents_popover__content.to_string(),
                 align: ContentAlign::End,
                 nav {
-                    class: "{Styles::contents_popover__list}",
-                    for (index, entry) in entries.iter().enumerate() {
-                        button {
-                            class: "{Styles::contents_popover__entry}",
-                            aria_current: if Some(index) == current { "page" },
-                            style: "{DEPTH_VAR}: {entry.depth};",
-                            onclick: {
-                                let target = entry.target.clone();
+                    aria_label: "Table of contents",
+                    ul {
+                        class: "{Styles::contents_popover__list}",
+                        for (index, entry) in entries.iter().enumerate() {
+                            li {
+                                button {
+                                    class: "{Styles::contents_popover__entry}",
+                                    aria_current: if Some(index) == current { "page" },
+                                    style: "{DEPTH_VAR}: {entry.depth};",
+                                    onclick: {
+                                        let target = entry.target.clone();
 
-                                move |e| {
-                                    e.stop_propagation();
-                                    open.set(false);
-                                    on_pick.call(target.clone());
+                                        move |e| {
+                                            e.stop_propagation();
+                                            open.set(false);
+                                            on_pick.call(target.clone());
+                                        }
+                                    },
+                                    "{entry.label}"
                                 }
-                            },
-                            "{entry.label}"
+                            }
                         }
                     }
                 }
