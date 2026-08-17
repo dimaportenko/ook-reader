@@ -18,6 +18,12 @@ window.addEventListener("message", (e) => {
   if (e.data.kind === "ook-key") {
     dioxus.send("key:" + e.data.key);
   }
+  if (e.data.kind === "ook-pointerdown") {
+    const frame = document.getElementById("reader-frame");
+    if (frame) {
+      frame.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    }
+  }
   if (e.data.kind === "ook-ready") {
     dioxus.send("ready:");
   }

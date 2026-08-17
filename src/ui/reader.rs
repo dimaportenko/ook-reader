@@ -24,6 +24,8 @@ const CHAPTER_LOADER_JS: &str = include_str!("../web/assets/chapter-loader.js");
 const BLOB_CLEANUP_JS: &str = include_str!("../web/assets/blob-cleanup.js");
 const THEME_PUSH_JS: &str = include_str!("../web/assets/theme-push.js");
 
+const FRAME_ID: &str = "reader-frame";
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Turn {
     Prev,
@@ -135,15 +137,14 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
         let page_number = page();
         let script = format!(
             r#"
-            const iframe = document.getElementById("reader-frame");
+            const iframe = document.getElementById("{FRAME_ID}");
             if (iframe && iframe.contentWindow) {{
                 iframe.contentWindow.postMessage(
-                    {{ kind: "ook-set-page", page: {} }},
+                    {{ kind: "ook-set-page", page: {page_number} }},
                     "*"
                 );
             }}
-        "#,
-            page_number
+        "#
         );
         document::eval(&script);
     });
@@ -211,7 +212,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                 style: "flex: 1; position: relative; display: flex;",
 
                 iframe {
-                    id: "reader-frame",
+                    id: FRAME_ID,
                     "sandbox": "allow-same-origin allow-scripts",
                     style: "flex: 1; width: 100%; border: none;",
                     class: if hidden { "invisible" },
@@ -453,6 +454,14 @@ mod test {
         // an unrecognised name is not a panic.
         assert_eq!(BridgeMsg::parse("key:ArrowUp"), None);
         assert_eq!(BridgeMsg::parse("key:notakey"), None);
+    }
+
+    #[test]
+    fn a_pointerdown_inside_the_frame_survives_the_hop_back_to_the_host() {
+        assert!(crate::web::assets::INJECTED_ASSETS.contains("ook-pointerdown"));
+        assert!(BRIDGE_JS.contains("ook-pointerdown"));
+
+        assert!(BRIDGE_JS.contains(FRAME_ID));
     }
 
     #[test]
