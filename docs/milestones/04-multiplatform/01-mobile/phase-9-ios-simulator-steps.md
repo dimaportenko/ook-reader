@@ -56,7 +56,8 @@ phase spends one step on the compiler and the rest on running the thing.
 3. ~~**Get a book in**~~ — ~~the import path under the sandbox~~ a native
    `UIDocumentPickerViewController`, presented from the root controller tao was making all
    along. **Done** — `badd372`.
-4. **Turn pages by touch** *(provisional)* — tap zones and/or swipe.
+4. ~~**Turn pages by touch**~~ — the buttons already worked under tap, so this was swipe: the
+   frame measures the gesture, `Turn::of_swipe` decides. **Done** — `bb18938`.
 5. **Fit the device** *(provisional)* — safe-area insets and thumb-sized chrome.
 5a. **Give it an icon** *(provisional)* — the springboard tile is blank. Found by Step 2.
 6. **Review and refactor** — the phase-closing pass.
@@ -783,9 +784,11 @@ the top-left corner and the safe area is unhandled. That is **Step 5**, and it i
 
 ## Step 4 — Turn pages by touch
 
-> **Status:** in progress — 120 tests green, both targets clippy-clean, driven on the iPhone 17
-> simulator. **Written by:** `lbb:next-implement` — implementation and tests written by the
-> agent, reviewed by hand.
+> **Status:** done — committed in `bb18938` (120 tests green, both targets clippy-clean, driven
+> on the iPhone 17 simulator).
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent, reviewed
+> by hand. The `unsigned_abs` hardening was found by `lbb:commit`'s review pass and applied at
+> the user's instruction before the commit landed.
 
 Step 2a already answered half of this step: the `Prev`/`Next` buttons repaginate under tap, so
 "turn pages by touch" was never entirely open. What was open is the gesture a reader actually
