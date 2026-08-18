@@ -3070,3 +3070,336 @@ were applied by hand in the same order.
 > was left because the "Chapter N of M" fallback is a presentation string mentioning a count the
 > model does not track, and because item H asked for the indexing dance to go, not for the function
 > to move.
+
+---
+
+## Step 7h — Scroll the current row into view
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+Triage item **G**, carried since Step 5 and the last one on the list. The panel knows which row
+you are on — `aria-current="page"` has been on it since 7f — and opens at the top of the list
+anyway. On the fixture's 18 entries that costs nothing, because nothing scrolls. On a book whose
+ToC does not fit in `80vh`, the one row the panel exists to show you is the one you cannot see.
+
+**This is the phase's only behaviour change since Step 6**, which is why the triage put it last
+and on its own commit: a review-and-refactor step that also changes what the app does is two steps
+pretending to be one.
+
+### The crux
+
+**The row you want to scroll to does not exist until the moment you want to scroll to it.**
+
+The obvious shape — an effect watching `open()` that finds the current row and scrolls it — races
+and loses. `PopoverContent` renders nothing at all while closed (`use_animated_open` returns
+`false` and the component early-returns an empty `rsx!`), so at the instant `open` flips to `true`
+the row is not in the DOM yet. It arrives one render later, after the primitive's own effect has
+run. An effect keyed on `open()` would fire into an empty document.
+
+The fix is to stop asking "when should I scroll?" and let the element answer. `onmounted` fires
+exactly once per row, at the moment that row enters the DOM — which, because the content unmounts
+on close and remounts on open, is exactly once per panel opening. **The lifecycle event the
+framework already gives you is the synchronisation you were about to hand-roll.**
+
+`reader.rs` already uses the same hook for the same reason: `onmounted` + `set_focus(true)` on the
+reader root, because focus also cannot be set on an element that is not there yet.
+
+**That was the crux the step was planned around, and it turned out to be only half of it.** The
+first draft did all of the above and the panel still opened at the top, because *something else was
+already scrolling the list* and winning. See "The second crux" below.
+
+### The second crux — the focus trap scrolls too
+
+**`is_modal` defaults to `true`, and a focus trap is a scroll you did not write.**
+
+`PopoverRootProps::is_modal` is `#[props(default = ReadSignal::new(Signal::new(true)))]`. Nothing in
+this repo ever set it, so every popover in the app is modal, and `PopoverContent` runs this on open:
+
+```rust
+dialog.trap = window.createFocusTrap(dialog);
+```
+
+`FocusTrap`'s constructor ends with `this.focusNext()`, which walks a `TreeWalker` to the **first
+focusable descendant** and calls `.focus()` on it. That is the first `<button>` in the list — row
+one. And `HTMLElement.focus()` scrolls the focused element into view unless you pass
+`preventScroll`, which the trap does not.
+
+So the sequence on every open was: our `onmounted` scrolls the current row into view, then the
+trap's `use_effect` focuses row one and scrolls the list straight back to the top. The screenshot
+that caught this shows the header reading *4.3 Operators* over a panel sitting on *Notes on Usage*
+— the label proves `current` was `Some`, so the guard fired and the scroll ran. It was undone, not
+skipped.
+
+**The trap's initial focus is a bug in its own right, not just an obstacle to this step.** On a
+book with a two-hundred-entry ToC it puts the keyboard user on row one — the least useful row in
+the list, and the one place the panel already scrolls to by default. Nothing was gained by it.
+
+The fix is `is_modal: false` on this popover, which stops the trap being created at all. What that
+costs is examined under the forks.
+
+### The check — `dx serve`
+
+**No test, and none is possible in this crate.** The step's claim is "a row is visible after the
+panel opens", which is layout in a webview; nothing in the process can see a scroll offset. Same
+situation as 7c, 7d and 7f, and the count stays at **117**.
+
+**The gate failed the first time**, on a real book rather than the fixture, and that is how the
+focus trap was found. The corrected implementation has not been eyeballed yet.
+
+The gate needs setting up, because **the bundled fixture cannot show this working**. Eighteen rows
+at ~1.6rem each is roughly 430px against a `max-height: 80vh` that is ~640px in a normal window —
+the list never overflows, so opening the panel looks identical before and after this diff. Two ways
+to make it real (a real book with a long ToC, like the C++ one that caught the bug, is a third):
+
+1. **Shrink the window** to about a third of the screen's height and open the panel on a late
+   chapter. `80vh` shrinks with it, the list starts scrolling, and the current row should be at
+   the top of the visible list rather than the list starting at "The Adventures of Sherlock
+   Holmes".
+2. **Temporarily** set `.contents-popover__list`'s `max-height` to `10rem` in `src/ui/toc.css`,
+   check the same thing, and put `80vh` back.
+
+What to look for, in order:
+
+- Open the panel on chapter 1: nothing moves, the list is already at the top.
+- Open it on a late chapter: the bold `aria-current` row is visible without scrolling by hand.
+- Nothing else moved — the *page behind the panel* must not have scrolled, and the panel must not
+  have jumped position.
+- Click a row: it still jumps and still closes. Reopen: it lands on the new current row.
+
+Two checks added by the focus-trap fix, since dropping `is_modal` changes the keyboard story:
+
+- **After picking a chapter, the arrow keys still turn pages.** This is the one thing the trap was
+  quietly doing for us — `trap.remove()` restored focus to whatever held it before. Without the
+  trap nothing ever took focus away, so it should be identical, but it is the regression to watch.
+- **Tab from the list button still walks into the list**, and Escape still closes the panel.
+
+### The code
+
+`src/ui/toc.rs`. On the row `button`:
+
+```rust
+onmounted: move |e| async move {
+    if Some(index) == current {
+        if let Err(err) = e.scroll_to(ScrollBehavior::Instant).await {
+            eprintln!("ook: the contents panel did not scroll: {err}");
+        }
+    }
+},
+```
+
+and on the `PopoverRoot`:
+
+```rust
+is_modal: false,
+```
+
+### Why it works
+
+**`onmounted` fires per row, per mount — and the panel remounts every time it opens.**
+`PopoverContent` is not hidden with CSS while closed; the primitive drops the subtree. So the
+eighteen handlers run on every opening, seventeen of them do nothing, and one scrolls. Nothing
+needs to know *when* the panel opened.
+
+**Both captured values are `Copy`, which is why there is no `let` block here.** `index` is a
+`usize` from `enumerate` and `current` is the `Option<usize>` computed once above the `rsx!`. The
+`move` closure copies both, so unlike the `onclick` directly below it — which has to
+`let target = entry.target.clone();` first, because `LinkTarget` is owned data borrowed from a
+`Vec` that outlives nothing — this handler needs no preamble. The two handlers sitting next to
+each other with different shapes is not inconsistency; it is the difference between capturing four
+bytes and capturing a heap allocation.
+
+**The inner `async move` takes ownership of `e`.** `scroll_to` returns a future — the desktop
+renderer implements it by evaluating `window.interpreter.scrollTo(id, options)` in the webview and
+awaiting the answer, so the call cannot be synchronous. `onmounted` accepts a closure returning a
+future, and the `move` on the inner block is what lets `e` outlive the closure body. Same idiom as
+`reader.rs`'s `set_focus`.
+
+**The `Err` arm is logged rather than discarded, and the first draft got that wrong.** `scroll_to`
+returns `MountedResult<()>`, and the draft wrote `_ = e.scroll_to(…).await` on the argument that
+neither failure mode — renderer does not support scrolling, node not found — is recoverable or
+worth a line in a handler that runs eighteen times per open. Both halves of that were wrong. The
+guard means the call happens **once** per open, not eighteen times, so there is no noise to avoid.
+And when the panel then failed to scroll, the discarded `Result` was the reason there was nothing
+to go on: the interpreter's `scrollTo` returns `false` when it cannot find the node, which arrives
+as `Err(OperationFailed)` and looked exactly like the observed silence. Not the actual cause this
+time — but it cost a debugging session to rule out, which is the whole argument for the line.
+`eprintln!("ook: …")` matches the bridge's existing warning idiom in `reader.rs`.
+
+**`Instant`, not the default `Smooth`.** The panel is fading in over 200ms at the same time. A
+smooth scroll would animate the list from the top while the panel animates from transparent, which
+reads as two things arriving late; instant means the panel is simply *already* in the right place
+when it becomes visible. Opacity does not affect layout, so the scroll and the fade do not fight.
+
+**What the row does *not* control is where in the viewport it lands.** `MountedData::scroll_to`
+fills in `ScrollToOptions { behavior, vertical: Start, horizontal: Center }` — and on desktop the
+last two are dead. The struct serialises its fields as `vertical`/`horizontal`, the interpreter
+hands the JSON straight to `Element.scrollIntoView`, and that API reads `block`/`inline`. Unknown
+keys are ignored, so what actually happens is `scrollIntoView({behavior: "instant"})` — DOM
+defaults, `block: "start"`, `inline: "nearest"`. **The current row goes to the top of the list.**
+Worth knowing before reaching for `scroll_to_with_options` to ask for `Center`: it would compile,
+read as a deliberate choice, and change nothing.
+
+**The document does not scroll along with the list.** `scrollIntoView` walks every scrollable
+ancestor, and `.dx-popover-content` is `position: fixed` inside a `body` with `margin: 0` around a
+`.reader-root` of `height: 100vh` — the document is exactly the viewport, so there is no second
+scroll to perform. That is load-bearing and invisible; the third eyeball check above exists to
+catch it if a future layout change breaks it.
+
+### The forks
+
+**`onmounted` on all eighteen rows with a guard, rather than a handler on one row.** The
+alternative is `if is_current { button { onmounted: … } } else { button { … } }`, which duplicates
+the entire row markup to vary one attribute — clearly worse. rsx has no way to attach an event
+handler conditionally, and no way to bind `let is_current = Some(index) == current;` inside the
+`for` body either (I tried: `error: expected identifier` at the `=`). So the predicate is spelled
+twice in the same element, once for `aria-current` and once for the scroll. It is three tokens and
+they are four lines apart; splitting the row into its own component to hoist it would cost more
+than it saves. **This is the one bit of the diff I would most expect to be overruled.**
+
+The cost of the chosen shape is seventeen no-op async handlers per panel open. Real, but each is a
+`Copy` closure and a comparison, and it is bounded by the number of rows the user is about to look
+at.
+
+**No JS asset.** The repo's other DOM manipulations go through `src/web/assets/*.js` and
+`document::eval`, but those all talk to the *sandboxed iframe*, which Dioxus does not own. This row
+is a node in Dioxus's own tree with an `ElementId` already assigned — going out to
+`document.querySelector('[aria-current="page"]')` would re-derive by CSS selector something the
+framework hands over for free, and would reintroduce the timing problem the crux describes.
+
+**Scroll on open only, not on chapter change.** If the chapter changes while the panel is open the
+rows do not remount and nothing re-scrolls. Reaching that state needs a page turn from inside the
+frame while the panel is over it, which 7e made harder by dismissing the panel on a press in the
+frame. Not worth an effect and a stored `MountedData` to chase.
+
+**`is_modal: false` rather than out-racing the trap.** Three other ways to get the scroll to stick
+were considered and rejected:
+
+- **Scroll after the trap.** Both the trap's `eval` and our query are async scripts queued on the
+  webview, and their order is an implementation detail of two effects in two components. Winning a
+  race by arranging to be scheduled second is not a fix; it is a fix-shaped coincidence.
+- **`tabindex="-1"` on every row but the current one.** This is genuinely clever: the trap's
+  `focusable()` check rejects `tabIndex < 0`, so its `TreeWalker` would skip straight to the
+  current row and focus *it*, doing our scroll for us with no `scroll_to` at all. It also makes
+  every other row unreachable by Tab, which is a real accessibility regression traded for a
+  cosmetic win. The standard answer here is a roving tabindex with arrow-key navigation, and that
+  is a feature, not a line.
+- **Keeping the trap and focusing the current row ourselves.** Same race, plus the trap's
+  `TreeWalker` would then be pointing at the wrong node, so the first Tab would jump to row two.
+
+**What dropping the trap costs, honestly.** Focus no longer moves into the panel on open — a
+keyboard user Tabs into it instead — and Tab can walk back out while the panel is open. What it
+does *not* cost is focus restoration, which is the part that looked expensive: `trap.remove()`
+restores focus to `document.activeElement` as it was when the trap was built, which is the trigger
+button, and without a trap focus never leaves the trigger button in the first place. The end state
+is identical, which is why the arrow-keys-still-work check above should pass. `aria-modal="true"`
+also comes off the `role="dialog"`, which is more honest for a panel that never blocked the rest of
+the page.
+
+**Only this popover.** `is_modal` is a prop on `PopoverRoot`, so the settings panel keeps its trap.
+Whether *it* should is a separate question and a separate diff — it is a short list of controls
+where landing on the first one is a reasonable thing to do.
+
+### What to look at hardest
+
+1. **The duplicated `Some(index) == current`.** See the fork above. If it bothers you, the honest
+   fix is a `TocRow` component taking `is_current: bool` — which is a real refactor with a real
+   argument for it, and a bigger diff than the feature.
+2. **`Instant` vs `Smooth`.** I argued the panel should appear already-scrolled, but a short smooth
+   scroll is also a way of *showing* the user that the list moved and where. This is a taste call
+   about a thing I cannot see; you can.
+3. **`block: "start"` putting the current chapter at the very top of the list.** Every entry before
+   it is then hidden, which on a deep ToC hides the parent heading the current row sits under. The
+   DOM would do `block: "center"` happily; Dioxus's typed API cannot currently ask for it on
+   desktop (see *Why it works*), so getting it would mean a raw `eval` or an upstream fix. Worth
+   deciding whether `start` is actually what you want before anyone bothers.
+4. **`is_modal: false`.** The largest behavioural claim in the diff and the one made under
+   diagnosis rather than under a passing test. The mechanism is read off the primitive's source and
+   is not in doubt; what is a judgement call is whether a contents panel should trap focus at all.
+   If you decide it should, this step needs a different answer, and the `tabindex` one under the
+   forks is where I would start.
+
+### Scope note
+
+One file, no test, no CSS. It does **not** scroll on chapter change while open, does not add a
+"you are here" affordance beyond the existing bold row, does not touch fragment-level precision,
+and does not give the list arrow-key navigation — which is what a roving tabindex would need and
+what would let the current row be the only tab stop. It also leaves the settings popover modal.
+**This closes the 7-series triage.** With it, every carried item from the Step 5 and Step 6 reviews
+is landed, and Phase 8 has nothing left but the phase-closing status marker.
+
+### What the cleanup pass changed
+
+**Nothing.** The pass ran over a five-line diff and produced one candidate — binding
+`Some(index) == current` once — which does not compile inside an rsx `for` body. That was tried,
+not assumed: the edit was applied, `cargo clippy` returned `error: expected identifier` pointing at
+the `=`, and the file was restored from a copy taken beforehand. The checks were re-run after the
+restore: **117 tests, `cargo clippy --all-targets` clean**, and `src/ui/toc.rs` is rustfmt-clean.
+The pre-existing rustfmt drift in `epub.rs`, `web/assets.rs` and `components/popover/mod.rs` is
+still untouched.
+
+Reuse: the `onmounted` + await idiom is shared with `reader.rs`'s `set_focus`, but the two calls
+have no common body to hoist. Efficiency: seventeen no-op handlers, recorded as the fork's cost
+rather than optimised away. Altitude: the `TocRow` component is the one candidate, and it is a
+refactor larger than the feature it would tidy — fork 1 above.
+
+**Note on how this pass was run.** As in 7f and 7g, the `simplify` skill's four review agents were
+not spawned — this session's instructions forbid subagents unless the user asks — and the four
+angles were applied by hand in the same order.
+
+### What the failed eyeball changed
+
+The handoff shipped a five-line diff and claimed it scrolled. It did not, and the screenshot that
+proved it also carried the evidence for why: the header read *4.3 Operators* while the panel sat on
+*Notes on Usage*, so `current` was `Some` and the guard had fired. A scroll that runs and leaves no
+trace is a scroll that something undid.
+
+Three things came out of the diagnosis and all three are in the diff above:
+
+1. **`is_modal: false`** — the actual fix. The focus trap the popover creates by default focuses
+   row one on open, and focusing scrolls.
+2. **The `Err` arm is logged** rather than `_ =`-ed away. The first handoff argued for discarding
+   it and the argument was wrong on both counts; see *Why it works*.
+3. **The "why it works" section grew a second crux.** The original one — the row does not exist
+   until the panel opens — is still true and still load-bearing. It was just not the only thing
+   standing between the step and a working scroll, and a doc that records only the first half reads
+   later as if the step were easier than it was.
+
+**Verified at commit time.** The corrected version went through `dx serve` and the panel now opens
+on the current chapter. The diagnosis was read off `dioxus-primitives`' `focus-trap.ts` and
+`popover.rs` before it was observed, which is worth recording: the fix was argued from the
+dependency's source rather than found by trial, and the eyeball confirmed it rather than discovered
+it.
+
+> **Status:** done — committed in `75a5cde`, **117 tests green** (unchanged), `cargo clippy
+> --all-targets` clean, and `src/ui/toc.rs` is rustfmt-clean. The pre-existing rustfmt drift in
+> `epub.rs`, `web/assets.rs` and `components/popover/mod.rs` is still untouched — a stray
+> `cargo fmt` picked all three up during the step and was reverted, because reformatting files
+> this step never edited is not this step's business.
+>
+> **No test was written and none was owed.** The step planned none, and neither of its two claims
+> has an instrument in this crate: where a list is scrolled and whether a focus trap exists are
+> both webview state, and nothing in the process can see either. The count staying at 117 is the
+> honest record of that. The one test living in the file this step edited — 7b's `--toc-depth`
+> pin — was run on its own to confirm it survived, and passed.
+>
+> **The gate failed once, and the failure is the most useful thing in this entry.** The first draft
+> was five lines and shipped with a handoff claiming it worked. It did not, and the screenshot that
+> proved it also carried the evidence for why: the header read *4.3 Operators* over a panel sitting
+> on *Notes on Usage*, so `current` was `Some` and the guard had fired. **A scroll that runs and
+> leaves no trace is a scroll something undid** — which is a different search than "why did my code
+> not run", and the screenshot is what made the difference visible.
+>
+> **The first handoff also argued for discarding the `Result`**, on the grounds that the failure was
+> unrecoverable and the handler ran eighteen times per open. Both halves were wrong: the guard means
+> once, not eighteen, and the discarded `Err` was the one instrument that could have distinguished
+> "the node was not found" from "something scrolled it back". It is logged now. That reasoning was
+> corrected in place in *Why it works* rather than left standing, since this doc is read later as a
+> record of what was believed at the time.
+>
+> **What was not verified, recorded so the next reader does not assume it was:** the keyboard story
+> after dropping the trap. The arrow-keys-still-turn-pages check is argued from where focus sits
+> (never leaving the trigger button, so there is nothing for `trap.remove()` to restore) rather than
+> pressed. Tab-into-the-list and Escape-to-close are argued the same way. The visual check — the
+> panel opening on the current chapter on a book whose ToC overflows — is the one that was actually
+> run.

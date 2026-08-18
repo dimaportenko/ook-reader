@@ -96,10 +96,11 @@ Detail for each lives in
       that row's duplicate label is still open.
 - [x] **6. Jump to an entry** — convert a `TocEntry` into `epub::LinkTarget` and hand it to
       the existing `follow_link`. `#[test]` for the conversion, eyeball for the jump.
-- [ ] **7. Review and refactor** — the phase-closing pass. Nine carried items, too many for one
-      diff, so it is **sketched as a triage and landing as lettered sittings** the way Phase 4's
-      Step 8 did. One item is already closed: Step 4's duplicated chapter label in the `NavRow`
-      went in `c5e6d37`.
+- [x] **7. Review and refactor** — the phase-closing pass. Nine carried items, too many for one
+      diff, so it was **sketched as a triage and landed as lettered sittings** the way Phase 4's
+      Step 8 did. One item was closed before the lettering started: Step 4's duplicated chapter
+      label in the `NavRow` went in `c5e6d37`. The rest landed across 7a–7h below, ending at
+      `75a5cde`; **117 tests green**, every carried item closed, nothing dropped.
   - [x] **7a. One resolver, one target** — `epub::link_target` becomes the single path→spine
         resolver both a ToC entry and an in-book `<a href>` go through, and `TocEntry` carries a
         `LinkTarget` instead of a loose `spine_index`/`fragment` pair. `#[test]`. Committed in
@@ -146,8 +147,14 @@ Detail for each lives in
         `lbb:next-implement`. The red was a compile error at both call sites, and because that
         proves only that the tests *reach* the function, each rewritten assertion was then
         re-proved by mutation — including the fall-back-to-preceding branch.
-  - [ ] **7h. Scroll the current row into view** — carried from Step 5. A *behaviour* change,
-        so it gets its own commit at the end or moves to the next phase.
+  - [x] **7h. Scroll the current row into view** — carried from Step 5, and the phase's only
+        behaviour change since Step 6, so it took its own commit. `onmounted` + `scroll_to` on the
+        row itself, because the row does not exist until the panel opens — **plus
+        `is_modal: false`**, because the popover's default focus trap focuses row one on open and
+        focusing scrolls, which silently undid the first draft. Committed in `75a5cde`, **117 tests
+        green** (unchanged — no test is possible in-crate for either claim). Written by
+        `lbb:next-implement`. **The `dx serve` gate failed the first time** and is what found the
+        trap; the corrected version was confirmed by hand on a book whose ToC overflows `80vh`.
 
   > **7c was split.** The triage bundled B + D + E + F as one "UI-chrome sitting" because they
   > touch the same three files, but that is four ideas and the icon extraction alone is a new
