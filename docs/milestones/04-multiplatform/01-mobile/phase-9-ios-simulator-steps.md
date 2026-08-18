@@ -780,3 +780,193 @@ Both are noted for **Step 6**.
 capability, so Android's WebView will need a third arm rather than a second impl. And the
 library screen it imports into is still the one Step 2a measured: the covers are cramped into
 the top-left corner and the safe area is unhandled. That is **Step 5**, and it is next.
+
+## Step 4 — Turn pages by touch
+
+> **Status:** in progress — 120 tests green, both targets clippy-clean, driven on the iPhone 17
+> simulator. **Written by:** `lbb:next-implement` — implementation and tests written by the
+> agent, reviewed by hand.
+
+Step 2a already answered half of this step: the `Prev`/`Next` buttons repaginate under tap, so
+"turn pages by touch" was never entirely open. What was open is the gesture a reader actually
+uses, and the one [`TODO.md`](../../../../TODO.md) has wanted since before there was a phone to
+run it on — **swipe**.
+
+### The crux — a swipe is a measurement in one language and a decision in another
+
+The gesture happens inside the sandboxed chapter iframe, which is the one place in this app
+that Rust cannot see. So the temptation is to decide there: *if the finger moved more than
+40 pixels leftward, post "next page"*. That is the shape almost every swipe tutorial has.
+
+It is the wrong seam here, and this codebase has already picked the right one twice.
+`key-listener.js` does **not** decide that ArrowRight means forward; it posts the key name and
+lets `Turn::of` in `src/ui/reader.rs` decide. The host's own `onkeydown` posts nothing and calls
+the same `Turn::of`. **One policy, two producers** — which is why "what turns the page" is a
+thing you can read in one place and, crucially, a thing you can write a `#[test]` about.
+
+A swipe gets the same treatment: **the iframe reports geometry, Rust decides intent.** The
+threshold, the horizontal-vs-vertical tiebreak, and the sign-to-direction mapping are all Rust,
+where they are testable on the host with no simulator in the loop. The JS is left with the one
+job it alone can do: subtract two pointer positions.
+
+### The check — a `#[test]` for the policy, a simulator for the gesture
+
+The decision is pure arithmetic over two integers, so it is a host test, and it is written
+against the *rejections* as much as the accepts — a swipe detector that fires on taps and
+scrolls is worse than none:
+
+```rust
+#[test]
+fn only_a_long_mostly_horizontal_drag_is_a_swipe() {
+    assert_eq!(Turn::of_swipe(0, 0), None);
+    assert_eq!(Turn::of_swipe(-12, 3), None);
+    assert_eq!(Turn::of_swipe(-140, 220), None);
+
+    assert_eq!(BridgeMsg::parse("swipe:0,0"), None);
+    assert_eq!(BridgeMsg::parse("swipe:left"), None);
+    assert_eq!(BridgeMsg::parse("swipe:-140"), None);
+
+    assert_eq!(Turn::of_swipe(i32::MIN, 0), Some(Turn::Next));
+    assert_eq!(BridgeMsg::parse("swipe:-2147483648,0"), Some(BridgeMsg::Turn(Turn::Next)));
+}
+```
+
+**The red, observed before any implementation:**
+
+```
+error[E0599]: no variant, associated function, or constant named `of_swipe`
+              found for enum `ui::reader::Turn` in the current scope
+  --> src/ui/reader.rs:476:26   (and 4 more sites)
+error: could not compile `ook-reader` (bin "ook-reader" test) due to 5 previous errors
+```
+
+The companion test is the by-now-standard three-hop assertion — the message kind and *both
+payload field names* have to appear in the injected assets and in the bridge, because three
+files share one wire format with no compiler between any two of them.
+
+The gesture itself has no host test — there is no finger on a build machine — so its check is
+the simulator, driven rather than eyeballed, for exactly the reason Step 2a gave: an eyeball
+cannot tell "the handler is broken" from "you swiped in the wrong place". Baseline first, one
+gesture at a time, reading the page label out of the accessibility tree each time:
+
+```
+$ agent-device snapshot -i     # baseline, after opening the book
+[off-screen below] 3 interactive items: "Prev", "Page 12 of 79", "Next"
+
+$ agent-device swipe 320 450  80 450   → Page 13 of 79   # right-to-left: forward
+$ agent-device swipe  80 450 320 450   → Page 12 of 79   # left-to-right: back
+$ agent-device swipe 320 450 300 450   → Page 12 of 79   # 20px: under the floor
+$ agent-device swipe 200 600 200 300   → Page 12 of 79   # vertical: not a page turn
+$ agent-device press  200 450          → Page 12 of 79   # a tap is still a tap
+```
+
+**Read the first attempt as a warning about this kind of check.** The very first swipe appeared
+to jump from chapter 1 page 2 to chapter 3 page 12, which looks damning and means nothing: the
+snapshot had been taken while the saved-position restore was still in flight, so the "before"
+reading was of a screen the app was in the middle of leaving. The run above is the honest one —
+relaunch, open the book, confirm the label is *stable across two snapshots*, and only then
+gesture. A device check with no settled baseline can manufacture any result you like.
+
+### The code
+
+`src/web/assets/swipe-listener.js` is new, and is deliberately its own file rather than three
+more lines in `pointer-listener.js`: every sibling in `INJECTED_ASSETS` owns exactly one
+concern, and `pointer-listener.js`'s concern is "something was touched, close the popovers".
+
+```js
+let swipeFrom = null;
+
+document.addEventListener("pointerdown", function (e) {
+  swipeFrom = { id: e.pointerId, x: e.clientX, y: e.clientY };
+});
+
+document.addEventListener("pointerup", function (e) {
+  if (!swipeFrom || e.pointerId !== swipeFrom.id) return;
+  const dx = Math.round(e.clientX - swipeFrom.x);
+  const dy = Math.round(e.clientY - swipeFrom.y);
+  swipeFrom = null;
+  if (dx === 0 && dy === 0) return;
+  window.parent.postMessage({ kind: "ook-swipe", dx, dy }, "*");
+});
+```
+
+`ook-events-listener.js` forwards it as `swipe:<dx>,<dy>`, and `src/ui/reader.rs` gains the
+policy next to the one it already had:
+
+```rust
+const SWIPE_MIN_PX: u32 = 40;
+
+fn of_swipe(dx: i32, dy: i32) -> Option<Turn> {
+    if dx.unsigned_abs() < SWIPE_MIN_PX || dx.unsigned_abs() <= dy.unsigned_abs() {
+        return None;
+    }
+    Some(if dx.is_negative() { Turn::Next } else { Turn::Prev })
+}
+```
+
+plus one arm in `BridgeMsg::parse`, which lands on the existing `Turn` variant and therefore on
+the existing `Turn::apply` → `state.page_next()/page_prev()`. **No new path through `nav`.**
+
+### Why it works
+
+**`pointerId` is what makes a second finger harmless.** Without it, a two-finger gesture fires
+two `pointerdown`s — the second overwrites `swipeFrom` — and then the *first* finger's
+`pointerup` computes a delta between one finger's start and another's end. That is a number with
+no physical meaning, and it is large and horizontal often enough to turn a page for no reason.
+Pinning the gesture to the pointer that started it makes the extra finger a no-op instead.
+
+**The tiebreak is `<=`, not `<`.** A perfectly diagonal drag (`|dx| == |dy|`) is not a page turn;
+it is an ambiguous gesture, and the safe reading of an ambiguous gesture in a reader is "do
+nothing". Turning the page is not undoable by the same gesture that caused it — the reader has
+to notice and swipe back — so the asymmetry of the mistake belongs in the comparison.
+
+**Negative `dx` is *forward*, which reads backwards until you think about the finger.** The
+content moves with the finger: dragging right-to-left pulls the next page in from the right,
+the same direction the `translateX` in `pagination.css` already moves. The sign is about the
+hand, not about the page number.
+
+**`unsigned_abs` rather than `abs`, because the frame is not trusted** *(found reviewing the
+step at commit time, and fixed before it landed)*. `i32::MIN.abs()` panics — "attempt to negate
+with overflow" — and the wire value that reaches it is `swipe:-2147483648,0`, which parses
+perfectly well. That is not a theoretical input: the chapter iframe carries `allow-scripts`, so
+**a book's own JavaScript can post any message it likes** to the parent. `unsigned_abs` is total
+where `abs` is partial, and it costs nothing: the comparison only ever wanted magnitudes, and a
+magnitude has no business being signed. `SWIPE_MIN_PX` becomes a `u32` for the same reason —
+the type now says what the number is.
+
+The general lesson outlives this line. Everything arriving over the bridge is **untrusted input
+from a document we did not write**, and `BridgeMsg::parse` is the boundary that has to say so.
+It already refuses malformed payloads; it now also refuses to panic on well-formed hostile ones.
+
+**The `dx === 0 && dy === 0` gate is the `key-listener.js` precedent, not a second threshold.**
+`key-listener.js` filters to the two arrow keys in the frame before posting, because a bridge
+message per keystroke is waste. The same argument applies to a bridge message per tap — and the
+gate is written as "the pointer did not move" rather than as the 40px rule *specifically so the
+threshold stays defined once, in Rust*. A `40` in the JS would be the same drift hazard the
+`INJECTED_ASSETS` tests exist to catch.
+
+### Scope note
+
+**It does not make the swipe follow the finger.** There is no rubber-banding, no partial page
+under the thumb, no animation — the page changes at `pointerup` or not at all. A live-tracking
+transform means driving `--ook-page` fractionally from `pointermove`, which is a different and
+much larger idea.
+
+**It does not swipe on the host chrome.** The listener is inside the chapter iframe, so a swipe
+that starts on the header or the nav row does nothing. On a phone the iframe is nearly the whole
+screen, so this is currently invisible; it is worth knowing before someone reports it as
+intermittent.
+
+**`SWIPE_MIN_PX` is viewport-independent by choice.** 40 CSS pixels is a different fraction of an
+iPhone than of an iPad, and the codebase elsewhere (`pagination.css`) deliberately derives its
+geometry from one source rather than hard-coding numbers. Making the threshold a fraction of the
+viewport would mean getting the viewport width over the wire, which is a new idea and not this
+step's.
+
+**It does not merge `key:` and `swipe:` into one `turn:` message.** Both decode to
+`BridgeMsg::Turn`, and a third gesture would make that duplication worth collapsing — the
+producers would post intent and one decoder would read it. Recorded for **Step 6**; doing it here
+would mean rewriting the `key:` path this step did not touch.
+
+**It does not fix the layout.** The page label this step reads its evidence from is still
+off-screen at rest, which is **Step 5** and unchanged.

@@ -100,10 +100,11 @@ Detail for each lives in
       green, and driven end to end on the iPad. And the inert `<input type="file">` is
       explained too: `dioxus-desktop` routes file inputs to `rfd`, which has **no iOS
       backend**, so Dioxus was returning an empty file list from its own stub. — `badd372`
-- [ ] **4. Turn pages by touch** *(half-answered)* — the `Next`/`Prev` buttons already
-      repaginate under tap (Step 2a). What is open is **swipe**: `pointer-listener.js` already
-      exists, and `TODO.md` has wanted "change page on swipe" since before there was a phone to
-      run it on.
+- [ ] **4. Turn pages by touch** — the `Next`/`Prev` buttons already repaginated under tap
+      (Step 2a), so the open half was **swipe**, and that is what landed: a new
+      `swipe-listener.js` reports the pointer delta out of the frame and `Turn::of_swipe`
+      decides in Rust, on the same seam `key-listener.js` and `Turn::of` already use. Driven on
+      the iPhone 17 simulator — forward, back, and three gestures that correctly do nothing.
 - [ ] **5. Fit the device** — **grown, and now load-bearing.** *Not* provisional any more:
       `src/ui/reader.rs:164`'s `height: 100vh` is 32pt taller than the usable viewport, because
       the document is offset below the status bar without the viewport being shrunk. At rest on

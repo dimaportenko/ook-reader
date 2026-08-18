@@ -26,6 +26,8 @@ const THEME_PUSH_JS: &str = include_str!("../web/assets/theme-push.js");
 
 const FRAME_ID: &str = "reader-frame";
 
+const SWIPE_MIN_PX: u32 = 40;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Turn {
     Prev,
@@ -39,6 +41,13 @@ impl Turn {
             Key::ArrowRight => Some(Turn::Next),
             _ => None,
         }
+    }
+
+    fn of_swipe(dx: i32, dy: i32) -> Option<Turn> {
+        if dx.unsigned_abs() < SWIPE_MIN_PX || dx.unsigned_abs() <= dy.unsigned_abs() {
+            return None;
+        }
+        Some(if dx.is_negative() { Turn::Next } else { Turn::Prev })
     }
 
     fn apply(self, state: ReaderState) {
@@ -71,6 +80,9 @@ impl BridgeMsg {
                 .as_ref()
                 .and_then(Turn::of)
                 .map(BridgeMsg::Turn)
+        } else if let Some(delta) = msg.strip_prefix("swipe:") {
+            let (dx, dy) = delta.split_once(',')?;
+            Turn::of_swipe(dx.parse().ok()?, dy.parse().ok()?).map(BridgeMsg::Turn)
         } else if let Some(page) = msg.strip_prefix("scroll:") {
             page.parse().ok().map(BridgeMsg::Scroll)
         } else if let Some(page_count) = msg.strip_prefix("pages:") {
@@ -454,6 +466,40 @@ mod test {
         // an unrecognised name is not a panic.
         assert_eq!(BridgeMsg::parse("key:ArrowUp"), None);
         assert_eq!(BridgeMsg::parse("key:notakey"), None);
+    }
+
+    #[test]
+    fn a_swipe_inside_the_frame_survives_all_three_hops() {
+        assert!(crate::web::assets::INJECTED_ASSETS.contains("ook-swipe"));
+        assert!(BRIDGE_JS.contains("ook-swipe"));
+
+        for field in ["dx", "dy"] {
+            assert!(crate::web::assets::INJECTED_ASSETS.contains(field));
+            assert!(BRIDGE_JS.contains(&format!("e.data.{field}")));
+        }
+
+        assert_eq!(
+            BridgeMsg::parse("swipe:-140,6"),
+            Some(BridgeMsg::Turn(Turn::Next))
+        );
+        assert_eq!(
+            BridgeMsg::parse("swipe:140,-6"),
+            Some(BridgeMsg::Turn(Turn::Prev))
+        );
+    }
+
+    #[test]
+    fn only_a_long_mostly_horizontal_drag_is_a_swipe() {
+        assert_eq!(Turn::of_swipe(0, 0), None);
+        assert_eq!(Turn::of_swipe(-12, 3), None);
+        assert_eq!(Turn::of_swipe(-140, 220), None);
+
+        assert_eq!(BridgeMsg::parse("swipe:0,0"), None);
+        assert_eq!(BridgeMsg::parse("swipe:left"), None);
+        assert_eq!(BridgeMsg::parse("swipe:-140"), None);
+
+        assert_eq!(Turn::of_swipe(i32::MIN, 0), Some(Turn::Next));
+        assert_eq!(BridgeMsg::parse("swipe:-2147483648,0"), Some(BridgeMsg::Turn(Turn::Next)));
     }
 
     #[test]
