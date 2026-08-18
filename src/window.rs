@@ -1,4 +1,4 @@
-use dioxus::desktop::tao::window::Window;
+use crate::renderer::tao::window::Window;
 
 pub(crate) const FRAME_AUTOSAVE_NAME: &str = "ook-reader-main";
 
@@ -16,7 +16,7 @@ pub(crate) const FRAME_AUTOSAVE_NAME: &str = "ook-reader-main";
 /// so the frame is the last word and no one watches it move.
 #[cfg(target_os = "macos")]
 pub(crate) fn remember_frame(window: &Window) {
-    use dioxus::desktop::tao::platform::macos::WindowExtMacOS;
+    use crate::renderer::tao::platform::macos::WindowExtMacOS;
     use objc2_app_kit::NSWindow;
     use objc2_foundation::NSString;
 

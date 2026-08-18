@@ -16,6 +16,12 @@ mod ui;
 mod web;
 mod window;
 
+#[cfg(feature = "desktop")]
+pub(crate) use dioxus::desktop as renderer;
+
+#[cfg(all(feature = "mobile", not(feature = "desktop")))]
+pub(crate) use dioxus::mobile as renderer;
+
 use library::Library;
 
 use crate::{
@@ -65,7 +71,7 @@ fn App() -> Element {
     });
     let open_book = use_signal(|| None::<OpenBook>);
 
-    let desktop = dioxus::desktop::use_window();
+    let desktop = crate::renderer::use_window();
     use_hook(move || window::remember_frame(&desktop.window));
 
     use_context_provider(|| library.clone());

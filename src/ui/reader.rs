@@ -272,7 +272,7 @@ fn NavRow(
 /// through the webview directly also means holding a strong handle, so there is
 /// no weak upgrade left to fail if the window is torn down first.
 fn use_revoke_blob_on_unmount() {
-    let window = dioxus::desktop::use_window();
+    let window = crate::renderer::use_window();
 
     use_hook_with_cleanup(
         move || window,

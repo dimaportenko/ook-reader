@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use dioxus::desktop::{use_asset_handler, wry::http::Response};
+use crate::renderer::{use_asset_handler, wry::http::Response};
 use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 use rbook::epub::rewrite::{EpubRewriteOptions, PathRewrite};
 use rbook::Epub;
