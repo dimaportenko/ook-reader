@@ -74,6 +74,42 @@ Critical reminders:
 - `cx`, `Scope`, and `use_state` are gone.
 - Use only Dioxus 0.7 APIs for examples and implementation guidance.
 
+## Verifying on a simulator (iOS / iPadOS)
+
+The project's usual checks are `cargo test` for logic and `dx serve` plus an eyeball for
+Dioxus UI. **Neither reaches a phone**, so mobile work uses a third tool:
+[`agent-device`](https://github.com/callstack/agent-device) — a CLI and MCP server that opens
+an app on a simulator, snapshots its accessibility tree into `@refs`, and presses, fills, or
+scrolls them.
+
+Rules for using it here:
+
+- **Installation is the user's, never the agent's.** `npm install -g agent-device@latest` is a
+  user-owned setup step — agent-device's own skill says so, and it also rules out
+  `npx -y agent-device@latest`, which executes a mutable package unprompted. If the CLI is not
+  on `PATH`, **stop and ask**; do not install it, and do not fall back to a floating version.
+- **It does not replace the other two.** Rust logic still gets a `#[test]`; anything visible
+  and stationary is still cheaper to eyeball. Reach for the simulator driver when the thing
+  under test is an *interaction* — a tap, a swipe, a file picker — which is neither assertable
+  in Rust nor legible in a screenshot.
+- **Drive, don't probe.** Start with `agent-device open <bundle-id> --platform ios
+  --foreground` and work from the snapshot it prints. Skip `--help` / `--version` / `devices`
+  warm-ups. Act with `--settle` and continue from the printed diff; refs are only valid against
+  the latest output, so copy them byte-for-byte and re-snapshot rather than reusing a stale one.
+- **The tree is healthy — use it.** Measured, not assumed: this app's WKWebView publishes a
+  full accessibility tree (`snapshotQuality: healthy`, 64 nodes in the reader). So prefer refs
+  and selectors; coordinates stay the last resort. Some elements come back **anonymous** — that
+  is a finding about our markup, not the tool. Log it as an accessibility gap; do not paper
+  over it with a coordinate tap.
+- **`rect`s are ground truth about layout.** `agent-device snapshot -i --json` returns geometry,
+  and it is the cheapest way to diagnose a layout bug precisely — it is how the reader's
+  safe-area overflow was found after screenshots had been read as evidence that nothing was
+  wrong. A refusal like *"off-screen and not safe to press"* is a finding, not an obstacle.
+
+The bundle identifier is `com.dimaportenko.ook-reader`; the simulator build is
+`dx build --platform ios` (or `ios:dx:serve` in `.nvim/config.json`). Context for all of this
+lives in [`docs/milestones/04-multiplatform/01-mobile/`](docs/milestones/04-multiplatform/01-mobile/README.md).
+
 ## Skills
 
 Project-local skills live under `.agents/skills/` for Pi. Claude Code sees shared skills
@@ -82,6 +118,12 @@ through symlinks in `.claude/skills/`.
 Important project skills:
 
 - `dioxus-07`: Dioxus 0.7 API reference.
+- `ios-simulator`, `agent-device`, `android-emulator`, `dogfood` (from
+  `callstack/agent-device`): how to drive a simulator without burning turns on probes. Added
+  with `npx skills add callstack/agent-device` — the same `skills` CLI that tracks the others
+  in `skills-lock.json` — which installs all four as a set; only the first two are in scope
+  today. The CLI they document is installed separately, by the user — see
+  [Verifying on a simulator](#verifying-on-a-simulator-ios--ipados).
 - `lbb:next`, `lbb:refine`, `lbb:commit`, `lbb:next-implement`: learn-by-building workflow
   skills from the Claude Code LBB skill set, made available to Pi through
   `.agents/skills/lbb`. In Pi, their slash-command names come from the original skill
