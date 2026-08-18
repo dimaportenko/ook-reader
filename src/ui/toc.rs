@@ -33,6 +33,7 @@ pub(crate) fn ContentsPopover(
 
     rsx! {
         PopoverRoot {
+            is_modal: false,
             open: open(),
             on_open_change: move |v| open.set(v),
             PopoverTrigger {
@@ -51,6 +52,13 @@ pub(crate) fn ContentsPopover(
                                     class: "{Styles::contents_popover__entry}",
                                     aria_current: if Some(index) == current { "page" },
                                     style: "{DEPTH_VAR}: {entry.depth};",
+                                    onmounted: move |e| async move {
+                                        if Some(index) == current {
+                                            if let Err(err) = e.scroll_to(ScrollBehavior::Instant).await {
+                                                eprintln!("ook: the contents panel did not scroll: {err}");
+                                            }
+                                        }
+                                    },
                                     onclick: {
                                         let target = entry.target.clone();
 
