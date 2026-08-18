@@ -4,9 +4,18 @@
 
 **Outcome:** the reader knows what it is showing you. The nav bar says
 *"I. A Scandal in Bohemia"* instead of *"Chapter 3 of 15"*, and a contents panel lists the
-book's own chapter tree so you can jump to any of them. **Status:** 🚧 in progress.
+book's own chapter tree so you can jump to any of them. **Status:** ✅ done — shipped by
+[Phase 8](phase-8-toc-navigation.md), closed 2026-08-18.
+
+> **Bookmarks are not in it.** The milestone board files them under this feature's heading, but
+> Phase 8 deferred them out on day one — they need their own table and belong with a later
+> persistence step. Nothing schedules them yet; whoever picks them up opens Phase 9 here rather
+> than reopening Phase 8.
 
 ## Why this, why now
+
+*Written when the feature opened; kept in the present tense it was written in. Phase 8 has
+since answered all of it.*
 
 Phase 4 closed Themes & Typography, and the reader is now pleasant to *look* at while still
 being blind to its own structure. Nothing in `src/` reads a ToC today: `open_with_spine`
@@ -51,7 +60,7 @@ into index arithmetic over a `Vec`, which `cargo test` can reach.
 
 | # | Phase | Outcome | Status |
 |---|-------|---------|--------|
-| 8 | [ToC & Navigation](phase-8-toc-navigation.md) | Flatten the ToC, name the current chapter, and jump to any entry | 🚧 |
+| 8 | [ToC & Navigation](phase-8-toc-navigation.md) | Flatten the ToC, name the current chapter, and jump to any entry | ✅ |
 
 ## Reference
 

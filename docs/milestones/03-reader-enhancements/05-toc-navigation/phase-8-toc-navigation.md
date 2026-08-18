@@ -1,7 +1,16 @@
 # Phase 8 — ToC & Navigation
 
-[← Feature: ToC & Navigation](README.md) · **Status:** 🚧 in progress ·
+[← Feature: ToC & Navigation](README.md) · **Status:** ✅ done ·
 build log: [`phase-8-toc-navigation-steps.md`](phase-8-toc-navigation-steps.md)
+
+> **Closed 2026-08-18.** All seven steps landed; the 7-series triage closed every carried item
+> and dropped none. The last code commit is `75a5cde` (7h) and the build log closes at
+> `1f9ace0`, with **117 tests green** and `cargo clippy --all-targets` clean. The reader now
+> names the chapter it is showing you, in the header, and opens a contents panel — scrolled to
+> where you are — whose every row jumps. What the phase set out to prove it also proved: past
+> the flatten-at-the-boundary line, `cargo test` answered the phase and `dx serve` only had to
+> confirm pixels. The exceptions are recorded honestly per step — five of the eight 7-series
+> sittings had no test to write, and two of them failed their eyeball first.
 
 ## Goal
 

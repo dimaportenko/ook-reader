@@ -49,14 +49,19 @@ reader can use (open a book, see text, turn a page, resume). The MVP slice seque
 
 ## Current focus
 
-**Milestone 3 → [Phase 8 — ToC & Navigation](milestones/03-reader-enhancements/05-toc-navigation/phase-8-toc-navigation.md), Step 1.**
-Nothing in `src/` reads a ToC today: the reader navigates the **spine** alone, so
-"Chapter 7 of 15" is a spine index with no title behind it and there is no way to jump to a
-named chapter. The interesting part is not parsing — `rbook` hands over the tree — it is that
-ToC and spine are a **many-to-many** mapping (see [`glossary.md`](glossary.md)). The bundled
-fixture makes that concrete: 15 spine items, 18 ToC entries, a cover with no entry, one
-document carrying four. So "which chapter am I in?" is a real question with a chosen answer
-rather than an array lookup.
+**Between phases.** Milestone 3 has no open phase: the next feature has not been chosen. The
+candidates are on the [milestone's board](milestones/03-reader-enhancements/README.md) —
+full-text search, annotations, sync — plus **bookmarks**, which
+[Phase 8 deferred out](milestones/03-reader-enhancements/05-toc-navigation/README.md) and
+nothing has picked up since. [`TODO.md`](../TODO.md) holds the smaller unscheduled items.
+
+[Phase 8 — ToC & Navigation](milestones/03-reader-enhancements/05-toc-navigation/phase-8-toc-navigation.md)
+**closed 2026-08-18** and was the last one worked: the reader names the chapter you are in
+and opens a contents panel, scrolled to where you are, whose every row jumps. The phase was
+never really about parsing — `rbook` hands over the tree — but about ToC and spine being a
+**many-to-many** mapping (see [`glossary.md`](glossary.md)), which the bundled fixture makes
+concrete at 15 spine items against 18 entries. "Which chapter am I in?" got a chosen answer
+and a defence, not an array lookup. **117 tests green.**
 
 [Phase 4 — Themes & Typography](milestones/03-reader-enhancements/04-themes-typography/phase-4-theming.md)
 **closed** before it: six settings (theme, font size, line height, page margins, max line

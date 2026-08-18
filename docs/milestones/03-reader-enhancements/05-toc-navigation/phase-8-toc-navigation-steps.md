@@ -3403,3 +3403,59 @@ it.
 > pressed. Tab-into-the-list and Escape-to-close are argued the same way. The visual check — the
 > panel opening on the current chapter on a book whose ToC overflows — is the one that was actually
 > run.
+
+---
+
+## Phase closed
+
+Every planned step is landed and the phase doc's checklist is fully ticked. The last code
+commit is `75a5cde` (7h); this log closed at `1f9ace0`. Final state: **117 tests passing, 0
+failed**, `cargo clippy --all-targets` clean, working tree clean.
+
+### The tally
+
+| | |
+|---|---|
+| steps planned | 7 |
+| steps landed | 15 — Step 7 split into 7a…7h, plus `c5e6d37` ahead of the lettering |
+| tests at the phase's start | 108 |
+| tests at its close | 117 |
+| steps that added no test | 6 — 5, 7c, 7d, 7f, 7g, 7h |
+| eyeball gates that failed first | 2 — 7f (`display: block` does not widen a `button`) and 7h (the focus trap scrolls) |
+| carried review items dropped | 0 |
+
+**Nine tests for seven steps is the phase's own thesis showing up in the numbers.** Flattening
+the ToC at the boundary turned entry→spine, spine→entry, and entry→`LinkTarget` into pure
+functions over a `Vec`, and every one of them is pinned by `cargo test`. The six steps that
+added none are all on the other side of that line — rendered markup, the accessibility tree,
+webview scroll position, whether a focus trap exists — where nothing in this crate can see the
+thing being claimed. That split was predicted in the crux and it held.
+
+**The two failed eyeballs are the more useful entry.** Both were steps whose handoff claimed a
+working result before anyone had looked, and in both cases the screenshot carried the diagnosis,
+not just the verdict. They are the argument for why a visual gate is a gate and not a formality.
+
+### One gate never explicitly closed: 7c
+
+7c's entry still reads *"the eyeball is still outstanding"*, and nothing since has recorded
+running it. What is true is weaker than a pass and is worth stating as such: **7f and 7h both
+ran `dx serve` afterwards**, on screens carrying all three extracted glyphs — the list icon in
+the header, the gear beside it, the ✕ in the panel — and neither reported anything wrong with
+them. That is a bystander observation, not the check 7c specified, which was to confirm three
+24×24 outline glyphs at unchanged stroke weight. Left open rather than back-dated to a pass.
+**If the ✕, the gear, or the list icon ever looks heavier, squared-off, or backed by a filled
+box, 7c is where the change came from.**
+
+### What the phase did not do
+
+Unchanged from the phase doc's *Out of scope*, and none of it is scheduled: **bookmarks** (they
+need their own table and belong with a later persistence step), `landmarks` and `page-list` —
+the other two ToC kinds `rbook` exposes, both absent from the fixture — and fragment-precise
+"you are here" highlighting inside the panel, which is the resolve-a-position-in-the-live-DOM
+problem Milestone 3 defers for annotations and jump-to-search-hit alike.
+
+Two smaller things were named in a handoff and deliberately left standing, so they do not get
+lost: a **`TocRow` component** taking `is_current: bool`, which would delete 7h's duplicated
+`Some(index) == current` at the cost of a diff larger than the feature it tidies; and the
+contents list having **no arrow-key navigation**, which is what a roving tabindex would buy and
+what would make the current row the list's only tab stop.
