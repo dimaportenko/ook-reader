@@ -45,15 +45,27 @@ reader can use (open a book, see text, turn a page, resume). The MVP slice seque
 | 1 | [Foundation](milestones/01-foundation/README.md) | Rust/Dioxus NeoVim toolchain + a buildable desktop app | ⬜ |
 | 2 | [Basic EPUB Reader](milestones/02-basic-reader/README.md) | Open an `.epub` and read it with paging + saved position | ✅ |
 | 3 | [Reader Enhancements](milestones/03-reader-enhancements/README.md) | The features missing from other readers | 🚧 |
-| 4 | [Multi-platform](milestones/04-multiplatform/README.md) | Mobile (iOS/Android) + web (WASM) from the same codebase | ⏸ |
+| 4 | [Multi-platform](milestones/04-multiplatform/README.md) | Mobile (iOS/Android) + web (WASM) from the same codebase | 🚧 |
 
 ## Current focus
 
-**Between phases.** Milestone 3 has no open phase: the next feature has not been chosen. The
-candidates are on the [milestone's board](milestones/03-reader-enhancements/README.md) —
-full-text search, annotations, sync — plus **bookmarks**, which
-[Phase 8 deferred out](milestones/03-reader-enhancements/05-toc-navigation/README.md) and
-nothing has picked up since. [`TODO.md`](../TODO.md) holds the smaller unscheduled items.
+**Milestone 4 → [Phase 9 — Run on the iOS simulator](milestones/04-multiplatform/01-mobile/phase-9-ios-simulator.md), Step 1.**
+Read the book on the iPad. The crux is that **the UI ports for free and the assumptions do
+not**: `dioxus::desktop` and `dioxus::mobile` are the same crate under two feature-gated
+names, so the entire dependency graph — bundled `rusqlite` included — cross-compiled on the
+first try and the whole crate failed on *five identifiers*. What the compiler cannot see is
+everything the app assumes about being a desktop process: that a picked file has a path, that
+a window has a size worth remembering, that pages turn on arrow keys, that the viewport is a
+rectangle. So Step 1 is the compiler's half of the phase and Step 2 launches the thing and
+writes down what actually breaks.
+
+**Milestone 3 stays open behind it**, with no phase in progress — full-text search,
+annotations, sync, and the **bookmarks** that
+[Phase 8 deferred out](milestones/03-reader-enhancements/05-toc-navigation/README.md) are all
+unclaimed on its [board](milestones/03-reader-enhancements/README.md). Milestone 4 is not
+jumping that queue: its deferral was gated on "until the desktop reader works", and it does.
+[`TODO.md`](../TODO.md) holds the smaller unscheduled items — two of which, swipe-to-turn and
+keyboard paging, Phase 9 walks straight into.
 
 [Phase 8 — ToC & Navigation](milestones/03-reader-enhancements/05-toc-navigation/phase-8-toc-navigation.md)
 **closed 2026-08-18** and was the last one worked: the reader names the chapter you are in
