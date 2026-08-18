@@ -1,7 +1,8 @@
 {
   "commands": {
     "dx:bundle": "dx bundle --bundle macos --release",
-    "dx:serve": "dx serve --platform desktop",
+    "desktop:dx:serve": "dx serve --platform desktop",
+    "ios:dx:serve": "dx serve --platform ios",
     "test": "RUST_BACKTRACE=1 cargo test",
     "validate": "cargo test && cargo clippy --all-targets"
   }
