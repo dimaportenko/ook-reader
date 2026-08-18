@@ -52,6 +52,28 @@ nothing about the code. **Android is not in this feature's first phase** either:
 in the milestone's table alongside iOS, but it needs a second toolchain (SDK, NDK, CMake)
 and its own crop of runtime surprises. One platform at a time.
 
+## How this gets verified
+
+Neither of the project's two checks reaches a phone. `cargo test` cannot see a running app, and
+`dx serve` plus an eyeball assumes a pointer you are already holding and a failure you can
+*see* — where the mobile failures are interaction failures: a tap that lands on nothing, a
+swipe the JS never receives, a picker that returns a security-scoped URL instead of a path.
+
+So this feature adds a third tool: [`agent-device`](https://github.com/callstack/agent-device),
+which opens an app on a simulator, snapshots its accessibility tree, and presses elements by
+reference. The mechanism carries a lesson beyond the tooling — **a UI driver reads the same
+tree VoiceOver reads**, so an app that cannot be driven is an app that cannot be used with a
+screen reader. Whether a WKWebView publishes a useful tree at all was the open question;
+[Step 2a](phase-9-ios-simulator-steps.md#step-2a--drive-it-by-tap) answered **yes** — a healthy
+tree, 64 nodes deep in the reader.
+
+It earned its place immediately, and not by tapping. The tree carries **geometry**, and two
+numbers out of it explained a layout bug that screenshots had been read as evidence *against*:
+the reader is laid out 32pt below the status bar at a full `100vh`, so its nav bar hangs off
+the bottom of the iPad and the book cannot be paged at rest. It also refused to press an
+off-screen button rather than helpfully scrolling to it — which is the only reason the bug was
+visible at all.
+
 ## Phases
 
 | # | Phase | Outcome | Status |
@@ -63,4 +85,6 @@ and its own crop of runtime surprises. One platform at a time.
 [`dx serve --platform ios`](https://dioxuslabs.com/learn/0.7/CLI/) ·
 [wry on iOS](https://github.com/tauri-apps/wry) ·
 [`env(safe-area-inset-*)`](https://developer.mozilla.org/en-US/docs/Web/CSS/env) ·
-[UIDocumentPickerViewController](https://developer.apple.com/documentation/uikit/uidocumentpickerviewcontroller)
+[UIDocumentPickerViewController](https://developer.apple.com/documentation/uikit/uidocumentpickerviewcontroller) ·
+[`agent-device`](https://github.com/callstack/agent-device) ·
+[its iOS Simulator skill](https://github.com/callstack/agent-device/blob/main/skills/ios-simulator/SKILL.md)

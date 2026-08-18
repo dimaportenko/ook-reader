@@ -47,7 +47,12 @@ phase spends one step on the compiler and the rest on running the thing.
 
 1. ~~**Name the renderer once**~~ — the five `dioxus::desktop` references behind one
    cfg-gated alias. Two-target build. **Done** — `1fc64eb`.
-2. **Launch it** — `dx serve --platform ios` on iPhone and iPad. A discovery step.
+2. ~~**Launch it**~~ — `dx serve --platform ios` on iPhone and iPad. A discovery step.
+   **Done** — no commit; it produced no diff.
+2a. ~~**Drive it by tap**~~ *(added by `lbb:refine`, because Step 2 ran out of fingers)* — stand up
+   [`agent-device`](https://github.com/callstack/agent-device) and use it to close Step 2's two
+   blocked observations. Not a feature step: it is the phase's missing **check**.
+   **Done** — tooling in `99d68c7`; no `src/` diff.
 3. **Get a book in** *(provisional)* — the import path under the sandbox.
 4. **Turn pages by touch** *(provisional)* — tap zones and/or swipe.
 5. **Fit the device** *(provisional)* — safe-area insets and thumb-sized chrome.
@@ -241,9 +246,13 @@ exactly as the phase doc predicted.
    Every EPUB resource the reader serves goes through it, so if it had not worked the phase
    would have been a rewrite rather than a port. Proved by seeding a real cover file and
    watching the book's own blue *Strand Library* cover render through `/covers/{name}`.
-4. **The top safe area is already respected**, on the iPhone's Dynamic Island and the iPad's
-   status bar alike, with no `viewport-fit` or `env()` work. **This shrinks Step 5** — see
-   below.
+4. ~~**The top safe area is already respected**, on the iPhone's Dynamic Island and the iPad's
+   status bar alike, with no `viewport-fit` or `env()` work. **This shrinks Step 5.**~~
+   **Wrong — retracted by [Step 2a](#finding-b--the-top-safe-area-is-not-handled-and-step-2-was-wrong-about-it).**
+   The inset is applied as an *offset* without the viewport being shrunk, so every `100vh`
+   screen hangs 32pt off the bottom. This claim was read off a **library** screenshot, where
+   the content is too short for anything to fall off the bottom edge. Step 5 does not shrink;
+   it grows.
 
 **Two things are wrong and neither is fatal.**
 
@@ -273,6 +282,13 @@ book to open the reader, and tapping `Choose Files` to import, are both outstand
 the learner's eyeball.** Everything above was verified without a single tap; everything below
 needs one.
 
+> **Superseded, and that is the point.** "The learner's eyeball" is a fine answer once; it is a
+> bad answer for **Step 4**, whose whole subject is what a *swipe* does. So the wall this step
+> hit turned out to be a phase-level gap rather than a Step 2 gap, and it is closed by
+> [Step 2a](#step-2a--drive-it-by-tap), which was added afterwards by `lbb:refine`. The two
+> outstanding observations belong to 2a now; this entry keeps them only as the record of why 2a
+> exists.
+
 > **A fixture is left in the iPad simulator on purpose.** The Sherlock Holmes epub was seeded
 > directly into the sandbox — file copied into `books/`, row inserted into `books`, cover
 > extracted and `cover_path` set — precisely because import could not be tested. It is a
@@ -288,11 +304,13 @@ like a cover. The protocol was only actually exercised once a real `.cover.jpg` 
 
 ### What this changes about the plan
 
-- **Step 5 (fit the device) shrinks.** The top inset it was mostly about is already handled.
-  What is left is the bottom home-indicator region and thumb-sized chrome — and the app icon,
-  which was not on the list at all.
+- ~~**Step 5 (fit the device) shrinks.**~~ **Retracted by Step 2a** — the top inset is not
+  handled, and it is the reason the reader's nav bar is unreachable at rest on an iPad. Step 5
+  grows, and is now load-bearing for the phase's bar. The app icon, which was not on the list
+  at all, joins it.
 - **Step 3 (get a book in) is unchanged and is still the risk.** Nothing observed here makes
-  `file.path()` more or less likely to work; it is simply still untested.
+  `file.path()` more or less likely to work; it is simply still untested. *(Step 2a tested it:
+  the risk was real and worse than stated — the picker never opens at all.)*
 - **A new item: the app icon — Step 5a.** First read as a footnote on Step 5, then given its
   own step once the evidence above showed it is not one line of TOML: it needs a plist dx does
   not generate *and* an image-into-bundle mechanism that is still unknown. Small, but it has a
@@ -308,3 +326,262 @@ in Step 1.
 
 It deliberately does **not** open the reader, import a book, touch layout, or add an icon.
 Those are Steps 3–5, now with better information behind them.
+
+> **Status:** done — **no commit, because there is no diff.** The step's check was the launch
+> itself and its product is the findings above; `cargo test` stayed at **117**, unchanged. The
+> two observations it could not make were closed by Step 2a, and **finding 4 was retracted
+> there** — the strikethrough above is the record of the correction, not a tidy-up.
+
+---
+
+## Step 2a — Drive it by tap
+
+> **Added by `lbb:refine`** after Step 2 landed. It is not a step the plan predicted; it is the
+> plan noticing that the next four steps have no runnable check.
+
+### Why this is a step and not a footnote on Step 2
+
+Step 2 ended with two questions it could not answer — *does the reader open?* and *does
+`Choose Files` hand back a path `fs::copy` can read?* — and parked both as "the learner's
+eyeball". Read that as a Step 2 shortfall and you fix it by tapping twice. Read it as a
+**phase** shortfall and something larger is visible: every step from here has the shape *do
+something on the device, then look at what happened*, and this project's two verification
+tools cannot reach that shape.
+
+- `cargo test` cannot see a running app. Nothing in the crate observes a simulator.
+- `dx serve` + eyeball assumes a pointer you are already holding, and assumes the thing you
+  are checking is *visible*. **Step 4's subject is a swipe** — a gesture, not a picture — and
+  its failure mode is "the page did not turn", which a screenshot cannot distinguish from
+  "you swiped in the wrong place".
+
+So the wall Step 2 hit is the phase's missing third verification tool.
+[`agent-device`](https://github.com/callstack/agent-device) (Callstack) is a CLI *and* an MCP
+server that drives a simulator: open an app, snapshot its accessibility tree into referenceable
+elements, press one, settle, look at the diff. This step is where it enters the project — and,
+because it is infrastructure rather than a feature, where its limits get established before
+three later steps are built on top of it.
+
+### The setup — done, and it is user-owned by default
+
+```sh
+npm install -g agent-device@latest          # -> agent-device 0.20.9, /opt/homebrew/bin
+npx skills add callstack/agent-device       # -> 4 skills, .agents/skills/ + .claude/skills/ symlinks
+agent-device doctor
+```
+
+Node here is **v22.21.1** against the package's `engines.node: >=22.12`. `doctor` returns
+**warn, no hard blockers** — the only complaints are a missing HarmonyOS `hdc` and a missing
+Vega CLI, neither of which this project will ever have. It also warms an Xcode runner build in
+the background on first run, so the first `open` is the slow one.
+
+The skills arrive as a set of four — `agent-device`, `ios-simulator`, `android-emulator`,
+`dogfood`. Two are out of this phase's scope and were kept anyway rather than hand-pruning a
+tracked install; `skills-lock.json` records all four, the same way it records
+`rust-best-practices`.
+
+> **Installation was run here only because it was explicitly asked for.** The tool's own skill
+> says *"Treat installation and upgrades as user-owned setup steps. Do not run that command
+> autonomously."* That remains the standing rule in [`AGENTS.md`](../../../../AGENTS.md); this
+> was an instruction, not an agent deciding to install something.
+
+**One gotcha worth the line:** sessions are keyed by **working directory**
+(`cwd:9c17880f281d1877:default`). Running `agent-device screenshot` from a scratch directory
+after opening from the repo root answers `SESSION_NOT_FOUND`. Drive from the repo root.
+
+### The answer to the open question: the tree is healthy
+
+The step's one genuine uncertainty was whether a WKWebView publishes anything addressable.
+It does — **outcome #1, not the sparse fallback**:
+
+```
+$ agent-device open com.dimaportenko.ook-reader --platform ios --foreground --device "iPad Pro 13-inch (M5)"
+Snapshot: 9 nodes
+@e1 [application] "OokReader"
+@e2 [window]
+@e3 [webview] "Dioxus app"
+@e4 [other] "Dioxus app"
+@e5 [other] "Remove"
+@e6 [button]
+@e7 [button] "Remove"
+@e8 [other] "Import EPUB"
+@e9 [button] "Import EPUB"
+```
+
+`snapshotQuality: {state: "healthy", backend: "tree"}`. In the reader it is 64 nodes deep —
+every ToC link by name, the headings, the pager. Sub-frames get a `~sN` pin (`@e39~s932177`),
+which is how the paginated iframe's contents are addressed. `rect`s come back in the JSON, so
+the harness doubles as a **layout probe**, which turned out to matter more than the tapping.
+
+So Dioxus + wry on iOS is drivable, and every step after this one has a real check.
+
+### Finding A — four buttons with no accessible name
+
+Predicted as outcome #3 and half-true. The tree is there; some of the **labels** are not:
+
+| ref | what it is | source |
+|---|---|---|
+| `@e6` (library) | the book cover — the primary control on the screen | `src/ui/library.rs:44`, `button.book-cover` wrapping an `img` with no `alt` |
+| `@e6` (reader) | close | `src/ui/reader.rs` top bar |
+| `@e9` (reader) | contents | " |
+| `@e10` (reader) | settings | " |
+
+The cover one is the sharpest: it is a *real* `<button>` — the markup is semantically right —
+and it is still anonymous, because everything inside it is an unlabelled image. `--overlay-refs`
+annotated two of nine nodes and skipped it.
+
+**This is a finding about this app, not about the tool, and it is not a mobile problem.** The
+same four buttons are unnamed under VoiceOver on the desktop build; iOS is just the first place
+anything looked. An `alt` on the cover `img` and three `aria-label`s would close it.
+**Scheduled for Step 6**, not fixed here.
+
+### Finding B — the top safe area is *not* handled, and Step 2 was wrong about it
+
+The correction this step exists to have found. Step 2 reported the top inset as "already
+respected, with no `viewport-fit` or `env()` work". It is not, and the geometry says so exactly.
+
+Every number below is from `snapshot --json`, on the iPad Pro 13-inch (M5):
+
+| | |
+|---|---|
+| window / webview | `1032 × 1376` at `y=0` — the webview is the whole screen |
+| Dioxus document root | height **1376** — this is `height: 100vh` from `src/ui/reader.rs:164` |
+| root `y`, scrolled to top | **+32** |
+| root `y`, scrolled to bottom | **−20** |
+| scroll range on a screen that should not scroll | **52pt** |
+
+Read those two offsets together and the bug is plain. The document is exactly as tall as the
+screen, but it is laid out starting **32pt down**, below the status bar — so `100vh` is 32pt
+too tall to fit, and the bottom of the reader falls off the bottom of the display. The
+consequences, both observed:
+
+- **Scrolled to top** — top bar visible; the nav bar sits at `y=1380` on a 1376-tall screen.
+  `press` refuses it outright: *"Ref `@e64` is off-screen and not safe to press."*
+- **Scrolled to bottom** — nav bar visible at `y=1338`; the close button is now at `y=−8`,
+  clipped under the status bar, and pressing it does nothing.
+
+**You can have the top chrome or the bottom chrome. Never both.** On an iPad, at rest, the
+reader opens with no way to turn a page.
+
+> **Why Step 2 got it wrong, which is the same mistake it already confessed to once.** Step 2
+> judged the safe area from screenshots of the **library** — a short screen where nothing
+> reaches the bottom, so nothing visibly falls off it. The top of the content did clear the
+> status bar, and that was read as "the inset is handled". What is actually happening is worse
+> than no inset at all: the layout is *offset* down without the viewport being *shrunk*, which
+> silently pushes 32pt of every full-height screen past the bottom edge. **A screen that
+> happens to fit is not evidence that the viewport is right** — the same shape of error as
+> reading a placeholder cover as proof of the asset protocol.
+
+### Finding C — paging by tap works
+
+```
+$ agent-device press @e64 --settle
+Tapped @e64 (584, 1338)
+settled after 758ms: +1 -1 (~63 unchanged)
+- @e63 [text] "Page 1 of 2"
++ @e63~s932186 [text] "Page 2 of 2"
+```
+
+Tapping the book cover opens the reader on a real book — **Step 2's first outstanding
+observation, closed** — and the `Next` button repaginates. So the whole reading path works on
+iPad under touch, once you can reach the button. Swipe is untested; that is Step 4.
+
+### Finding D — `<input type="file">` is inert on iOS, and this rewrites Step 3
+
+**Step 2's second outstanding observation, closed — with a worse answer than the one the plan
+was braced for.**
+
+Pressing the import control does nothing. Not a wrong path, not an error — nothing:
+
+```
+$ agent-device press @e9~s932197 --settle
+Tapped @e9 (234, 454)
+settled after 662ms: +0 -0 (~9 unchanged)
+```
+
+Tried again on the `Choose Files` pill by coordinate (`146 454`, dead centre per
+`--overlay-refs`): identical. No picker, no dialog, no view change, and `agent-device logs`
+over the tap shows nothing but focus churn — no upload panel, no presentation failure, no
+exception. Taps in general reach the webview; the cover and `Next` both responded.
+
+**A hypothesis with source evidence, short of proof.** In wry 0.53.5 the file-upload handler
+is macOS-only:
+
+```rust
+// wry-0.53.5/src/wkwebview/class/wry_web_view_ui_delegate.rs:101
+#[cfg(target_os = "macos")]
+#[unsafe(method(webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:))]
+fn run_file_upload_panel(…)
+```
+
+That method is macOS-only in WebKit too, so its absence is not itself the cause — on iOS
+WebKit presents its own `WKFileUploadPanel`. But presenting anything on iOS needs a
+`UIViewController`, and wry's `wkwebview` module never creates one: it only ever
+`addSubview`s the webview. No view controller, nothing to present from, silent no-op. Fits
+every observation; unproven until something fixes it.
+
+**What it does to the plan:** Step 3 was written as *"the picker returns a security-scoped URL
+and `file.path()` may not be readable."* That question is moot — the picker never opens.
+Step 3 is now a **native import channel** (a `UIDocumentPickerViewController` through
+`objc2`, or the Files-app "Open in" route, or an in-app source that is not the filesystem at
+all), and it has gone from the phase's likeliest split to its largest step.
+
+### Why it works — the mechanism worth keeping
+
+**The accessibility tree is the API, and it is also a mirror.** A UI driver has no privileged
+view of the app; it reads the tree the OS builds for assistive technology, and addresses
+elements by what that tree calls them. Two things follow, and both showed up here within one
+session: testability and accessibility are the *same property* (Finding A is a VoiceOver bug
+the harness found while looking for a tap target), and **`rect`s in that tree are ground truth
+about layout** — Finding B is a bug no screenshot produced and no eyeball would have explained,
+recovered from two numbers.
+
+**Refs are frame-scoped, and the tool enforces it.** `@e12` means "the twelfth node of the
+snapshot you are looking at now". Reuse one after a mutation and you get
+*"Ref `@e6` needs a complete snapshot — the current frame only authorizes its emitted refs"*
+rather than a tap on whatever is twelfth this time. `--settle` exists so the next ref comes
+from the state you actually caused. That refusal is the feature: the standard way these
+harnesses go quietly wrong is a stale ref that still resolves.
+
+**Refusing to press is also the feature.** *"off-screen and not safe to press"* is how Finding
+B surfaced. A harness that helpfully scrolled-then-tapped would have turned the page and
+reported success, and the reader would still be unusable at rest on an iPad.
+
+### Scope note
+
+**No Rust was written and `src/` is untouched.** `cargo test` stays at **117**. What landed is
+the harness, four skills, `skills-lock.json`, and the findings above.
+
+Nothing found here was fixed: the missing labels go to **Step 6**, the safe-area overflow to
+**Step 5**, the import channel to **Step 3**. Swipe was not attempted (**Step 4**), the iPhone
+was not re-driven (the geometry bug is a viewport bug and will be worse on a phone, not
+different), and no `.ad` replay script or CI wiring was written.
+
+**What it changes about the plan, which is most of the plan:**
+
+- **Step 3 is rewritten and is now the phase's biggest step** — not a path problem, a missing
+  picker.
+- **Step 5 grows back.** Step 2 said it shrank because the top inset looked handled. It is not
+  handled, and it is the reason the reader cannot be paged at rest. Step 5 is now load-bearing
+  for the phase's own bar — *a book, on a tablet, that you can read.*
+- **Step 4 is half-answered.** Button paging works under touch; only swipe is open.
+- **A new Step 6 item:** accessible names for four buttons.
+
+> **Status:** done — the harness, its four skills and the `AGENTS.md` rules are committed in
+> `99d68c7`; this build-log entry follows it. **No `src/` diff:** `cargo test` is **117 passed,
+> 0 failed**, unchanged, and `cargo clippy --all-targets` is clean apart from the unrelated
+> `block v0.1.6` future-incompat note.
+>
+> **Written by:** the agent, at the user's explicit instruction to install the tool and run the
+> mobile checks — including the `npm install -g`, which the standing rule in `AGENTS.md`
+> otherwise reserves for the user.
+>
+> **How it was verified, stated precisely.** This is a step whose check is a running app, and
+> the usual gate for those in this project is *the learner's eyeball*. That is **not** what
+> happened here: the app was driven by the agent, and the evidence is machine-readable rather
+> than visual — snapshot JSON with rects, press diffs, and the app log, all quoted verbatim
+> above. Stronger than an eyeball for the geometry, and weaker in one specific way: **nobody has
+> yet held the iPad and formed an opinion about how it feels.** Findings B and D are the ones to
+> re-check by hand if any of this is ever doubted.
+>
+> **Nothing found here was fixed.** Import → Step 3, safe area → Step 5, accessible names →
+> Step 6. All three are recorded in the phase doc's checklist.

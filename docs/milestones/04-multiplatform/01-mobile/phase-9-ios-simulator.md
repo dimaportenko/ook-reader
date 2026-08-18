@@ -56,6 +56,12 @@ Established before the phase was planned, so the steps are not guesses:
 - **A readable book is the bar, not feature parity.** Desktop affordances that are meaningless
   or broken on a phone — window-frame memory, keyboard paging, hover states — get **noted in
   the build log, not fixed**. Chasing them would turn a port into a redesign.
+- **The device is driven by a tool, not by a hand** *(added after Step 2)*. Verification here
+  is `agent-device` — CLI or MCP — rather than `simctl` plus a person tapping the Simulator
+  window. Two reasons, and neither is convenience: `simctl` cannot synthesize a touch at all,
+  and a human eyeball cannot distinguish "the swipe handler is broken" from "you swiped in the
+  wrong place." Installing it stays a **user-owned** step, per the tool's own instruction to
+  agents. See Step 2a.
 - **Steps 3–5 are provisional.** They are the problems the crux predicts, in the order that
   seems likely. Step 2 is a discovery step, and per [ADR-0002](../../../adr/0002-dogfood-driven-prioritization.md)
   what it finds gets to re-order what follows. Re-deriving them with `lbb:refine` after Step 2
@@ -70,27 +76,46 @@ Detail for each lives in
       cfg-gated alias, so the crate builds for `aarch64-apple-ios-sim` *and* still builds for
       desktop. The check is both targets, because the failure mode is fixing one and breaking
       the other. Two-target build. — `1fc64eb`
-- [ ] **2. Launch it** — `dx serve --platform ios`, on an iPhone simulator and then an iPad.
+- [x] **2. Launch it** — `dx serve --platform ios`, on an iPhone simulator and then an iPad.
       A **discovery step**: get to the library screen, then write down what actually happens.
       Eyeball, and a build-log entry that is mostly findings. *Findings landed; the gate is
       still open on two taps `simctl` cannot synthesize.* **No diff** — nothing needed
       changing. Launches on iPad Pro 13" (M5) and iPhone 17; sandbox persistence and
       `use_asset_handler` both confirmed working; top safe area already handled. Opening the
       reader and the import tap are **outstanding** — `simctl` cannot synthesize taps.
-- [ ] **3. Get a book in** *(provisional)* — the import path under the sandbox.
-      `ImportControl` uses `<input type="file">` and then `file.path()`; on iOS the picker
-      returns a security-scoped URL and that path may not be one `fs::copy` can read. The
-      likeliest step to split in two.
-- [ ] **4. Turn pages by touch** *(provisional)* — tap zones and/or swipe. `pointer-listener.js`
-      already exists, and `TODO.md` has wanted "change page on swipe" since before there was a
-      phone to run it on.
-- [ ] **5. Fit the device** *(provisional)* — safe-area insets for the notch and home
-      indicator, and chrome sized for a thumb rather than a cursor.
+- [x] **2a. Drive it by tap** *(added by `lbb:refine` — the plan noticing it had no check)* —
+      stand up [`agent-device`](https://github.com/callstack/agent-device) and spend it on the
+      two observations Step 2 could not make. The phase's missing third verification tool, not
+      a feature. **No `src/` diff.** The open question — does a **WKWebView** publish an
+      addressable accessibility tree? — is **answered yes**: healthy tree, 64 nodes in the
+      reader. It then rewrote most of the steps below. Findings: the reader opens and pages by
+      tap; **the top safe area is *not* handled** (Step 2 was wrong) and the nav bar is
+      off-screen at rest; **`<input type="file">` is inert on iOS**; four buttons have no
+      accessible name.
+- [ ] **3. Get a book in** — ~~the import path under the sandbox~~ **a native import channel.**
+      *Rewritten by Step 2a.* Not a `file.path()` problem: the picker never opens, and the
+      likeliest reason is that wry puts the webview in no `UIViewController`, so WebKit has
+      nothing to present its upload panel from. Needs `UIDocumentPickerViewController` via
+      `objc2`, the Files-app "Open in" route, or an import channel that is not the filesystem.
+      **Now the phase's largest step**, and its real risk.
+- [ ] **4. Turn pages by touch** *(half-answered)* — the `Next`/`Prev` buttons already
+      repaginate under tap (Step 2a). What is open is **swipe**: `pointer-listener.js` already
+      exists, and `TODO.md` has wanted "change page on swipe" since before there was a phone to
+      run it on.
+- [ ] **5. Fit the device** — **grown, and now load-bearing.** *Not* provisional any more:
+      `src/ui/reader.rs:164`'s `height: 100vh` is 32pt taller than the usable viewport, because
+      the document is offset below the status bar without the viewport being shrunk. At rest on
+      an iPad the nav bar is off the bottom of the screen and the book cannot be paged. Needs
+      `viewport-fit=cover` plus `env(safe-area-inset-*)`, or dropping `100vh`. Plus the home
+      indicator and thumb-sized chrome.
 - [ ] **5a. Give it an icon** *(provisional — found by running it)* — the springboard shows
       the default blank tile. `Dioxus.toml`'s `[bundle].icon` is a `dx bundle` key and dx
       0.7.9's iOS path never reads it, so this is a gap in the port rather than a setting
       that was missed. Eyeball on the home screen.
-- [ ] **6. Review and refactor** — the phase-closing pass.
+- [ ] **6. Review and refactor** — the phase-closing pass. Carries two parked items: the
+      `FRAME_AUTOSAVE_NAME` dead code under iOS (Step 1), and **accessible names for four
+      unnamed buttons** — the book cover, and the reader's close/contents/settings — found by
+      Step 2a and not a mobile bug at all.
 
 ## Out of scope
 
