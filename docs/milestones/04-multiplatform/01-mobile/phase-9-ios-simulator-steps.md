@@ -55,7 +55,7 @@ phase spends one step on the compiler and the rest on running the thing.
    **Done** — tooling in `99d68c7`; no `src/` diff.
 3. ~~**Get a book in**~~ — ~~the import path under the sandbox~~ a native
    `UIDocumentPickerViewController`, presented from the root controller tao was making all
-   along. **Written, green, and driven end to end on the iPad** — awaiting `lbb:commit`.
+   along. **Done** — `badd372`.
 4. **Turn pages by touch** *(provisional)* — tap zones and/or swipe.
 5. **Fit the device** *(provisional)* — safe-area insets and thumb-sized chrome.
 5a. **Give it an icon** *(provisional)* — the springboard tile is blank. Found by Step 2.
@@ -590,9 +590,10 @@ different), and no `.ad` replay script or CI wiring was written.
 
 ## Step 3 — Get a book in
 
+> **Status:** done — committed in `badd372` (118 tests green, both targets clippy-clean).
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
-> reviewed by hand. One new test (**118 green**), plus a full round trip driven on the
-> iPad Pro 13-inch (M5) simulator.
+> reviewed by hand. One new test, plus a full round trip driven on the iPad Pro 13-inch (M5)
+> simulator and an `ios:dx:serve` eyeball.
 
 Step 2a left this step rewritten and frightening: *the picker never opens, and the likeliest
 reason is that wry puts the webview in no `UIViewController`, so WebKit has nothing to present

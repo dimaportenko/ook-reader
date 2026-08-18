@@ -92,14 +92,14 @@ Detail for each lives in
       tap; **the top safe area is *not* handled** (Step 2 was wrong) and the nav bar is
       off-screen at rest; **`<input type="file">` is inert on iOS**; four buttons have no
       accessible name.
-- [ ] **3. Get a book in** — ~~the import path under the sandbox~~ **a native import channel.**
+- [x] **3. Get a book in** — ~~the import path under the sandbox~~ **a native import channel.**
       *Rewritten by Step 2a, then defused by reading tao.* The "wry puts the webview in no
       `UIViewController`" hypothesis is **wrong**: tao builds a `TaoUIViewController`, makes it
       the window's root, and exposes it as `WindowExtIOS::ui_view_controller()`. So the step is
       a `UIDocumentPickerViewController` presented from it, via `objc2` — written, 118 tests
       green, and driven end to end on the iPad. And the inert `<input type="file">` is
       explained too: `dioxus-desktop` routes file inputs to `rfd`, which has **no iOS
-      backend**, so Dioxus was returning an empty file list from its own stub.
+      backend**, so Dioxus was returning an empty file list from its own stub. — `badd372`
 - [ ] **4. Turn pages by touch** *(half-answered)* — the `Next`/`Prev` buttons already
       repaginate under tap (Step 2a). What is open is **swipe**: `pointer-listener.js` already
       exists, and `TODO.md` has wanted "change page on swipe" since before there was a phone to
