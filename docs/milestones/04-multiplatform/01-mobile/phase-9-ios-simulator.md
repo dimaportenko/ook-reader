@@ -72,7 +72,11 @@ Detail for each lives in
       the other. Two-target build. — `1fc64eb`
 - [ ] **2. Launch it** — `dx serve --platform ios`, on an iPhone simulator and then an iPad.
       A **discovery step**: get to the library screen, then write down what actually happens.
-      Eyeball, and a build-log entry that is mostly findings.
+      Eyeball, and a build-log entry that is mostly findings. *Findings landed; the gate is
+      still open on two taps `simctl` cannot synthesize.* **No diff** — nothing needed
+      changing. Launches on iPad Pro 13" (M5) and iPhone 17; sandbox persistence and
+      `use_asset_handler` both confirmed working; top safe area already handled. Opening the
+      reader and the import tap are **outstanding** — `simctl` cannot synthesize taps.
 - [ ] **3. Get a book in** *(provisional)* — the import path under the sandbox.
       `ImportControl` uses `<input type="file">` and then `file.path()`; on iOS the picker
       returns a security-scoped URL and that path may not be one `fs::copy` can read. The
@@ -82,6 +86,10 @@ Detail for each lives in
       phone to run it on.
 - [ ] **5. Fit the device** *(provisional)* — safe-area insets for the notch and home
       indicator, and chrome sized for a thumb rather than a cursor.
+- [ ] **5a. Give it an icon** *(provisional — found by running it)* — the springboard shows
+      the default blank tile. `Dioxus.toml`'s `[bundle].icon` is a `dx bundle` key and dx
+      0.7.9's iOS path never reads it, so this is a gap in the port rather than a setting
+      that was missed. Eyeball on the home screen.
 - [ ] **6. Review and refactor** — the phase-closing pass.
 
 ## Out of scope

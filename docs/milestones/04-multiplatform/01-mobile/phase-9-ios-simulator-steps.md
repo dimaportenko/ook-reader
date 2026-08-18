@@ -51,12 +51,11 @@ phase spends one step on the compiler and the rest on running the thing.
 3. **Get a book in** *(provisional)* — the import path under the sandbox.
 4. **Turn pages by touch** *(provisional)* — tap zones and/or swipe.
 5. **Fit the device** *(provisional)* — safe-area insets and thumb-sized chrome.
+5a. **Give it an icon** *(provisional)* — the springboard tile is blank. Found by Step 2.
 6. **Review and refactor** — the phase-closing pass.
 
 Steps 3–5 are written from what the crux predicts, not from observation. Step 2 is expected
 to re-order them.
-
----
 
 ## Step 1 — Name the renderer once
 
@@ -192,3 +191,120 @@ It also does not touch **`FRAME_AUTOSAVE_NAME`**, which the iOS build reports as
 it is one line to silence, but it is a second idea (dead code under a `cfg`), and it belongs
 either folded in deliberately or parked for Step 6. Parked, and noted here so it is not
 mistaken later for something nobody saw.
+
+---
+
+## Step 2 — Launch it
+
+> **Status:** recorded, **gate not closed.** The app builds, installs, and renders on both
+> simulators, and the sandbox claims below were re-verified against the iPad's data container.
+> But two eyeball checks this step named are still outstanding — tapping the book to open the
+> reader, and tapping `Choose Files` to import — because `simctl` cannot synthesize taps. The
+> step closes when those are confirmed by hand, not before.
+>
+> **Written by:** `lbb:next-implement` — but see the scope note: **this step has no diff.** It
+> is a discovery step, and nothing in `src/` needed changing to complete it.
+
+The first time the app runs on a phone. The step's job is not to build anything — it is to
+replace the crux's *predictions* with observations, so Steps 3–5 are derived from what iOS
+actually does rather than from what the desktop assumptions suggest it might.
+
+### The check — `dx build` + the simulator, and an eyeball
+
+No test; nothing in the crate can see a running app. There is also no red to watch, because
+the step's claim ("it launches") has no failing state short of a crash.
+
+```sh
+dx build --platform ios
+xcrun simctl boot <ipad-udid> && open -a Simulator
+xcrun simctl install <ipad-udid> target/dx/ook-reader/debug/ios/OokReader.app
+xcrun simctl launch  <ipad-udid> com.dimaportenko.ook-reader
+xcrun simctl io      <ipad-udid> screenshot ipad.png
+```
+
+The gate is the library screen appearing. It appeared, on **iPad Pro 13-inch (M5)** and
+**iPhone 17**, both iOS 26.5. `dx build --platform ios` exits 0 and bundles
+`OokReader.app` with `UIDeviceFamily = [1, 2]` — one universal binary, both device families,
+exactly as the phase doc predicted.
+
+### What was found
+
+**Three things work that were not certain, and one of them is the phase's central mechanism.**
+
+1. **The app launches and renders on both devices.** No crash, no panic, no blank webview.
+2. **Persistence works inside the sandbox, end to end.** `Config::app_dir()` → `directories`
+   → `…/Library/Application Support/com.dimaportenko.ook-reader/`; `ensure_dirs()` created
+   `books/`; `Db::open` created `library.sqlite3`. Verified by reading the simulator's data
+   container, not inferred from the app not crashing. **`directories` mapping to the iOS
+   container was a guess in the phase doc and is now a fact.**
+3. **`use_asset_handler` — wry's custom protocol — works on iOS.** This is the important one.
+   Every EPUB resource the reader serves goes through it, so if it had not worked the phase
+   would have been a rewrite rather than a port. Proved by seeding a real cover file and
+   watching the book's own blue *Strand Library* cover render through `/covers/{name}`.
+4. **The top safe area is already respected**, on the iPhone's Dynamic Island and the iPad's
+   status bar alike, with no `viewport-fit` or `env()` work. **This shrinks Step 5** — see
+   below.
+
+**Two things are wrong and neither is fatal.**
+
+5. **The app icon is blank on the home screen.** `Dioxus.toml`'s `icon` list is `.icns`,
+   `.ico` and desktop PNGs; iOS wants its own sizes. Cosmetic, but it is the first thing you
+   see — and **it is a hole in the port, not a setting that was missed.** That key belongs to
+   `dx bundle`, and dx 0.7.9's iOS path never reads it:
+
+   | | |
+   |---|---|
+   | the iOS plist template | `assets/ios/ios.plist.hbs` carries no icon key at all — no `CFBundleIcons`, no `CFBundleIconFiles` |
+   | the generated plist | `plutil -p …/ios/OokReader.app/Info.plist` matches nothing on `icon`, case-insensitive |
+   | the built `.app` | holds exactly three entries: `Info.plist`, `assets/`, and the binary. No `Assets.car`, no `AppIcon*.png` |
+
+   dx's escape hatch is `[application].ios_info_plist` (`apple.rs:186`), a path to an
+   `Info.plist` of your own that replaces the generated one wholesale. That covers the plist
+   keys; getting the image files *next to* it inside the `.app` is the second half and is not
+   yet established.
+6. **The chrome is desktop chrome.** A single top-left column, a `Remove` button as wide as
+   the cover, and the import control rendering as WKWebView's stock `Choose Files` pill.
+   Legible, and clearly not designed for a tablet.
+
+**Two things could not be tested, and the reason is worth recording.** `simctl` cannot
+synthesize taps, and driving the Simulator through System Events needs macOS Accessibility
+permission this session does not have — `osascript` returned error `-25204`. So **tapping the
+book to open the reader, and tapping `Choose Files` to import, are both outstanding and are
+the learner's eyeball.** Everything above was verified without a single tap; everything below
+needs one.
+
+> **A fixture is left in the iPad simulator on purpose.** The Sherlock Holmes epub was seeded
+> directly into the sandbox — file copied into `books/`, row inserted into `books`, cover
+> extracted and `cover_path` set — precisely because import could not be tested. It is a
+> **diagnostic, not Step 3**: it proves the *reader* can be reached without waiting on the
+> *importer*. Tap it and the reader opens on a real book.
+
+**One correction, recorded because the mistake is instructive.** The first seeded book showed
+a cover and that was briefly read as proof the asset handler worked. It was not: `cover_path`
+was `NULL`, so `cover_name()` returned `None` and `LibraryBooks` took its **placeholder**
+branch — `placeholder-2.jpg` with the title and author drawn over it, which looks convincingly
+like a cover. The protocol was only actually exercised once a real `.cover.jpg` was seeded and
+`cover_path` set. *A rendered image is not evidence about where the image came from.*
+
+### What this changes about the plan
+
+- **Step 5 (fit the device) shrinks.** The top inset it was mostly about is already handled.
+  What is left is the bottom home-indicator region and thumb-sized chrome — and the app icon,
+  which was not on the list at all.
+- **Step 3 (get a book in) is unchanged and is still the risk.** Nothing observed here makes
+  `file.path()` more or less likely to work; it is simply still untested.
+- **A new item: the app icon — Step 5a.** First read as a footnote on Step 5, then given its
+  own step once the evidence above showed it is not one line of TOML: it needs a plist dx does
+  not generate *and* an image-into-bundle mechanism that is still unknown. Small, but it has a
+  research half.
+
+### Scope note
+
+**This step wrote no code, and that is the finding, not a shortfall.** The phase doc called
+Step 2 a discovery step; discovery found nothing broken enough to need a source change. The
+crate is untouched: **117 tests green**, `cargo clippy --all-targets` clean on desktop, and
+the iOS target still carrying only the known `FRAME_AUTOSAVE_NAME` dead-code warning parked
+in Step 1.
+
+It deliberately does **not** open the reader, import a book, touch layout, or add an icon.
+Those are Steps 3–5, now with better information behind them.
