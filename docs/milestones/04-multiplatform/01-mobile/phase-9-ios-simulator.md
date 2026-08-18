@@ -66,10 +66,10 @@ Established before the phase was planned, so the steps are not guesses:
 Detail for each lives in
 [`phase-9-ios-simulator-steps.md`](phase-9-ios-simulator-steps.md).
 
-- [ ] **1. Name the renderer once** — replace the five `dioxus::desktop` references with one
+- [x] **1. Name the renderer once** — replace the five `dioxus::desktop` references with one
       cfg-gated alias, so the crate builds for `aarch64-apple-ios-sim` *and* still builds for
       desktop. The check is both targets, because the failure mode is fixing one and breaking
-      the other. Two-target build.
+      the other. Two-target build. — `1fc64eb`
 - [ ] **2. Launch it** — `dx serve --platform ios`, on an iPhone simulator and then an iPad.
       A **discovery step**: get to the library screen, then write down what actually happens.
       Eyeball, and a build-log entry that is mostly findings.

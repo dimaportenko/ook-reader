@@ -45,8 +45,8 @@ phase spends one step on the compiler and the rest on running the thing.
 
 ## Step plan
 
-1. **Name the renderer once** — the five `dioxus::desktop` references behind one cfg-gated
-   alias. Two-target build.
+1. ~~**Name the renderer once**~~ — the five `dioxus::desktop` references behind one
+   cfg-gated alias. Two-target build. **Done** — `1fc64eb`.
 2. **Launch it** — `dx serve --platform ios` on iPhone and iPad. A discovery step.
 3. **Get a book in** *(provisional)* — the import path under the sandbox.
 4. **Turn pages by touch** *(provisional)* — tap zones and/or swipe.
@@ -59,6 +59,10 @@ to re-order them.
 ---
 
 ## Step 1 — Name the renderer once
+
+> **Status:** done — committed in `1fc64eb` (117 tests green, both targets check clean).
+> **Written by:** `lbb:next-implement` — implementation written by the agent, reviewed by
+> hand. No test: the step's check is the compiler.
 
 The whole compiler-guided half of the phase, and it is one idea: **the renderer has two names
 and the crate should only know one of them.**
@@ -163,6 +167,19 @@ platform. The day anything branches on `feature = "desktop"` — a `dioxus::conf
 future `cfg` of your own — the phone build quietly takes the desktop branch, and the bug will
 not look like a feature-flag bug. The alias keeps one name in the code and keeps the flags
 honest.
+
+**The green, after the edit.** `cargo check --target aarch64-apple-ios-sim
+--no-default-features --features mobile` finishes clean; `cargo test` is 117 passed, 0
+failed, unchanged; `cargo clippy --all-targets` is clean. The iOS check keeps one warning —
+`constant FRAME_AUTOSAVE_NAME is never used` — which is the known one, parked below.
+
+**A third invocation, run to prove the guard rather than to pass.**
+`cargo check --target aarch64-apple-ios-sim --features mobile` — no
+`--no-default-features`, so `desktop` stays on and *both* features are live at once. It
+compiles. That is the `not(feature = "desktop")` arm doing its job: without it this exact
+command is the one that answers `E0252: the name renderer is defined multiple times`. Worth
+running once, because it is the invocation a future contributor is most likely to type by
+accident.
 
 ### Scope note
 
