@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{path::PathBuf, rc::Rc};
 
 use dioxus::prelude::*;
 use rbook::Epub;
@@ -151,51 +151,65 @@ pub(crate) fn ImportControl() -> Element {
     let library_status = use_context::<Signal<Option<String>>>();
     let mut status = use_signal(|| None::<String>);
 
+    let import = use_callback(move |sources: Vec<PathBuf>| {
+        if sources.is_empty() {
+            return;
+        }
+
+        let summary = library.add_all(&sources, now_secs());
+
+        status.set(Some(match summary.failed {
+            0 => format!("Imported {} books", summary.added),
+            failed => format!("Imported {} books, {failed} failed", summary.added),
+        }));
+
+        refresh_books(&library, books, library_status);
+    });
+
     rsx! {
         div {
             style: "padding: 8px; display: flex; gap: 8px; align-items: center;",
 
-            label {
-                "Import EPUB "
-
-                input {
-                    r#type: "file",
-                    accept: ".epub",
-                    multiple: true,
-                    onchange: move |event| {
-                        let files = event.files();
-                        if files.is_empty() {
-                            return;
-                        }
-
-                        let mut imported = 0usize;
-                        let mut failed = 0usize;
-                        let added_at = now_secs();
-
-                        for file in files {
-                            match library.add_from_path(&file.path(), added_at) {
-                                Ok(_) => imported += 1,
-                                Err(_) => failed += 1,
-                            }
-                        }
-
-                        status
-                            .set(
-                                match failed {
-                                    0 => format!("Imported {imported} books").into(),
-                                    _ => format!("Imported {imported} books, {failed} failed").into(),
-                                },
-                            );
-
-                        refresh_books(&library, books, library_status);
-                    },
-                }
-            }
+            ImportPicker { import }
 
             if let Some(message) = status() {
                 span {
                     "{message}"
                 }
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "ios")]
+#[component]
+fn ImportPicker(import: Callback<Vec<PathBuf>>) -> Element {
+    let window = crate::renderer::use_window();
+
+    rsx! {
+        button {
+            onclick: move |_| {
+                crate::document_picker::pick_epubs(&window.window, move |sources| import.call(sources))
+            },
+            "Import EPUB"
+        }
+    }
+}
+
+#[cfg(not(target_os = "ios"))]
+#[component]
+fn ImportPicker(import: Callback<Vec<PathBuf>>) -> Element {
+    rsx! {
+        label {
+            "Import EPUB "
+
+            input {
+                r#type: "file",
+                accept: ".epub",
+                multiple: true,
+                onchange: move |event| {
+                    import.call(event.files().iter().map(|file| file.path()).collect());
+                },
             }
         }
     }

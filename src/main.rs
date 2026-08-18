@@ -7,6 +7,8 @@ use dioxus::prelude::*;
 mod clock;
 mod config;
 mod db;
+#[cfg(target_os = "ios")]
+mod document_picker;
 mod epub;
 mod library;
 mod nav;

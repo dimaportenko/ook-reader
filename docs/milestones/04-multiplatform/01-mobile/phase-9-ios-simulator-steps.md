@@ -53,7 +53,9 @@ phase spends one step on the compiler and the rest on running the thing.
    [`agent-device`](https://github.com/callstack/agent-device) and use it to close Step 2's two
    blocked observations. Not a feature step: it is the phase's missing **check**.
    **Done** — tooling in `99d68c7`; no `src/` diff.
-3. **Get a book in** *(provisional)* — the import path under the sandbox.
+3. ~~**Get a book in**~~ — ~~the import path under the sandbox~~ a native
+   `UIDocumentPickerViewController`, presented from the root controller tao was making all
+   along. **Written, green, and driven end to end on the iPad** — awaiting `lbb:commit`.
 4. **Turn pages by touch** *(provisional)* — tap zones and/or swipe.
 5. **Fit the device** *(provisional)* — safe-area insets and thumb-sized chrome.
 5a. **Give it an icon** *(provisional)* — the springboard tile is blank. Found by Step 2.
@@ -585,3 +587,195 @@ different), and no `.ad` replay script or CI wiring was written.
 >
 > **Nothing found here was fixed.** Import → Step 3, safe area → Step 5, accessible names →
 > Step 6. All three are recorded in the phase doc's checklist.
+
+## Step 3 — Get a book in
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand. One new test (**118 green**), plus a full round trip driven on the
+> iPad Pro 13-inch (M5) simulator.
+
+Step 2a left this step rewritten and frightening: *the picker never opens, and the likeliest
+reason is that wry puts the webview in no `UIViewController`, so WebKit has nothing to present
+its upload panel from.* If that were true, the fix would be somewhere between hard and
+upstream.
+
+**It is not true, and five minutes in tao's source says so.** `tao-0.34.8`'s iOS window builder
+creates a `TaoUIViewController` (`platform_impl/ios/view.rs:458`), sets it as the `UIWindow`'s
+`rootViewController` (`:529`), and hands its view to wry, which `addSubview`s the `WKWebView`
+into it (`wry-0.53.5/src/wkwebview/mod.rs:652`). tao even exposes the controller deliberately,
+as `WindowExtIOS::ui_view_controller()`. **There has been a presenter the whole time.**
+
+### And the inert `<input type="file">` is Dioxus's own stub
+
+*Found while reviewing the finished step, by asking the obvious question: isn't there a
+standard Dioxus way to pick a file?* There is — it is `<input type="file">` — and the answer
+turns out to be Finding D's missing cause.
+
+**Dioxus never lets WebKit handle a file input.** `dioxus-desktop` injects JS that intercepts
+the click and routes it through its own `__file_dialog` custom protocol
+(`dioxus-desktop-0.7.9/src/protocol.rs:67`), which calls [`rfd`](https://crates.io/crates/rfd).
+And the entry point is cfg-gated by OS:
+
+```rust
+// dioxus-desktop-0.7.9/src/file_upload.rs:44
+#[cfg(not(any(
+    target_os = "windows", target_os = "macos", target_os = "linux",
+    target_os = "dragonfly", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"
+)))]
+pub(crate) fn get_file_event(&self) -> Vec<PathBuf> {
+    vec![]
+}
+```
+
+iOS lands in that arm. `rfd-0.17.2` confirms it from the other side: backends for `macos`,
+`win_cid`, `gtk3`, `xdg_desktop_portal`, and `wasm`, and **zero occurrences of
+`target_os = "ios"`** in the whole crate.
+
+So the tap was never inert. Dioxus *handled* it, called a stub, and returned an empty file
+list — which is exactly why Step 2a saw focus churn in the log, no picker, no error, and
+`+0 -0`. Both of Step 2a's guesses were wrong in the same direction: they looked for something
+**missing in iOS**, when the gap was in **the layer we control**.
+
+> **The shape that would delete this whole step.** An iOS backend in `rfd`, or an iOS arm on
+> `FileDialogRequest::get_file_event`, makes `<input type="file">` work on iOS — at which point
+> `src/document_picker.rs` and both `ImportPicker` bodies disappear and `ImportControl` goes
+> back to one body. That is the right long-term fix and it is upstream work, not this phase's;
+> it is recorded here so the local copy is understood as a *stand-in for a missing backend*
+> rather than as the way this has to be done.
+
+### The crux — the picker is not the app's, and neither is the file
+
+Two things about `UIDocumentPickerViewController` shape the whole step.
+
+**It runs in another process.** The Files sheet is a *remote view controller*: it draws over
+your window but its views are not yours, so it cannot read your app's sandbox and your app
+cannot read its accessibility tree. That is why the results arrive through a **delegate
+callback** rather than a return value, and why `agent-device snapshot` sees only
+`[other] "dismiss popup"` while the picker is up — the file rows have to be tapped by
+coordinate.
+
+**The file it hands back is not where you think.** In `asCopy: true` mode iOS copies the chosen
+document into *your* sandbox first (`tmp/<bundle-id>-Inbox/`) and gives you a plain, readable
+path. In `asCopy: false` mode you get the original's URL and must bracket every read in
+`startAccessingSecurityScopedResource` / `stop…`. This step takes the copy, because
+`Library::add_from_path` was always going to copy the bytes into `books_dir` anyway — the
+security-scoped dance would buy nothing but a chance to forget the `stop`.
+
+### The check — a test for the half that is testable, a simulator for the half that is not
+
+Two callers now feed one import path — the desktop `<input type="file">` and the iOS picker —
+and the thing worth asserting is the shared half: **that a batch import counts every source and
+does not stop at the first bad one.** That is host-testable, so it is a `#[test]`:
+
+```rust
+#[test]
+fn add_all_counts_every_source_and_keeps_going_past_a_bad_one() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let (library, source, _) = library_with_source(&dir);
+    let missing = dir.path().join("not-a-book.epub");
+
+    let summary = library.add_all(&[missing, source], 1_000);
+
+    assert_eq!(summary, ImportSummary { added: 1, failed: 1 });
+    assert_eq!(library.list().expect("list succeeds").len(), 1);
+}
+```
+
+The bad source goes **first** on purpose: the assertion that matters is that the good one still
+lands. Red was `no method named add_all found for struct library::Library`.
+
+The FFI half has no host test — there is no `UIDocumentPickerViewController` on macOS to stand
+one up against — so its check is the simulator, driven end to end:
+
+```
+$ agent-device press @e10 --settle          # Import EPUB
+$ agent-device press 241 640 --settle       # "On My iPad"  (coordinates: remote view controller)
+$ agent-device press 530 490 --settle       # holmes.epub   (selectable — the UTType filter works)
+$ agent-device press 865 400 --settle       # Open
+settled after 2613ms: +10 -2
++ @e25 [text] "Imported 1 books"
+```
+
+The fixture was placed where the picker could see it by dropping it into the simulator's
+"On My iPad" storage — the `group.com.apple.FileProvider.LocalStorage` app group container —
+which is the headless stand-in for dragging a file onto the Simulator window.
+
+### The code
+
+`Cargo.toml` gains an iOS-only block, mirroring the macOS one: `objc2`, `objc2-foundation`,
+`objc2-ui-kit`, and `objc2-uniform-type-identifiers`, all `default-features = false` because
+these crates otherwise bind every class in their framework. `objc2-ui-kit` needs `block2` for
+`presentViewController:animated:completion:` and the `objc2-uniform-type-identifiers` feature
+for `initForOpeningContentTypes:asCopy:`.
+
+`src/document_picker.rs` is new, and sits beside `src/window.rs` as the crate's second
+platform shim. It declares one Objective-C class:
+
+```rust
+define_class!(
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "OokDocumentPickerDelegate"]
+    #[ivars = Box<dyn Fn(Vec<PathBuf>)>]
+    struct PickerDelegate;
+
+    unsafe impl NSObjectProtocol for PickerDelegate {}
+
+    unsafe impl UIDocumentPickerDelegate for PickerDelegate {
+        #[unsafe(method(documentPicker:didPickDocumentsAtURLs:))]
+        fn documentPicker_didPickDocumentsAtURLs(…) { … (self.ivars())(paths); }
+    }
+);
+```
+
+and one function, `pick_epubs(window: &Window, handle: impl Fn(Vec<PathBuf>) + 'static)`, which
+resolves the root controller through `window.ui_view_controller()` with the same
+`cast` → `as_ref` → early-return shape `window.rs` already uses for `ns_window()`.
+
+`Library::add_all(&[PathBuf], now) -> ImportSummary` is the shared import loop, lifted out of
+the `onchange` closure it used to live inside. `ImportControl` now holds one
+`Callback<Vec<PathBuf>>` and renders a `#[cfg]`-selected `ImportPicker` — a `<button>` on iOS,
+the unchanged `<input type="file">` everywhere else — so the two platforms differ only in how
+paths are *produced*.
+
+### Why it works
+
+**A `Callback` carries its own runtime, which is what makes the delegate callable at all.**
+The picked paths arrive on the main thread from UIKit's run loop, nowhere near a Dioxus render
+or event handler — so a bare `signal.set()` would be reaching for a runtime that is not on the
+stack. `dioxus_core::Callback::call` (`events.rs:519`) upgrades its own stored `Weak<Runtime>`,
+installs a `RuntimeGuard`, and pushes its origin scope before calling. That is precisely the
+"call into Dioxus from a foreign callback" seam, and it is why this step needs no channel, no
+coroutine, and no new dependency.
+
+**The delegate is weak, so somebody has to hold it.** `UIDocumentPickerViewController.delegate`
+is a weak property — set it and drop the `Retained`, and it is nil before the user has picked
+anything. A one-slot `thread_local` keeps the live delegate alive and drops the previous one at
+the next press, when it is provably idle.
+
+**`#[thread_kind = MainThreadOnly]` is load-bearing, not decoration.** `UIDocumentPickerDelegate`
+is declared `NSObjectProtocol + MainThreadOnly` in `objc2-ui-kit`, so the class cannot be
+allocated without a `MainThreadMarker` — the thread-safety requirement UIKit only documents in
+prose is enforced by the type system here, and `MainThreadMarker::new()` returning `None` is the
+first guard in `pick_epubs`.
+
+### Scope note
+
+**It does not fix the inert `<input type="file">`, though it now knows why.** The cause is
+`rfd`'s missing iOS backend, reached through Dioxus's own stub — see above. Fixing it properly
+is upstream work and would leave the reader unable to import books until it shipped.
+
+**It does not delete the copy iOS makes.** `asCopy: true` leaves the picked file in
+`tmp/<bundle-id>-Inbox/` and nothing removes it — verified on device, one 379 KB `holmes.epub`
+still sitting there after a successful import. Deliberately left for review: deleting files is
+the riskiest line this step could have contained, and it is the learner's call.
+
+**It does not carry the errors.** `ImportSummary` folds `library::Error` down to two counts, so
+"Imported 4 books, 1 failed" can never say *which* or *why* — and `pick_epubs` returns silently
+on all four of its guards, which is the same silence Step 2a spent a whole step diagnosing.
+Both are noted for **Step 6**.
+
+**It does not touch Android or the layout.** The cfg switch is on `target_os = "ios"`, not on a
+capability, so Android's WebView will need a third arm rather than a second impl. And the
+library screen it imports into is still the one Step 2a measured: the covers are cramped into
+the top-left corner and the safe area is unhandled. That is **Step 5**, and it is next.

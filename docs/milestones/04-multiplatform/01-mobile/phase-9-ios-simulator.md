@@ -93,11 +93,13 @@ Detail for each lives in
       off-screen at rest; **`<input type="file">` is inert on iOS**; four buttons have no
       accessible name.
 - [ ] **3. Get a book in** — ~~the import path under the sandbox~~ **a native import channel.**
-      *Rewritten by Step 2a.* Not a `file.path()` problem: the picker never opens, and the
-      likeliest reason is that wry puts the webview in no `UIViewController`, so WebKit has
-      nothing to present its upload panel from. Needs `UIDocumentPickerViewController` via
-      `objc2`, the Files-app "Open in" route, or an import channel that is not the filesystem.
-      **Now the phase's largest step**, and its real risk.
+      *Rewritten by Step 2a, then defused by reading tao.* The "wry puts the webview in no
+      `UIViewController`" hypothesis is **wrong**: tao builds a `TaoUIViewController`, makes it
+      the window's root, and exposes it as `WindowExtIOS::ui_view_controller()`. So the step is
+      a `UIDocumentPickerViewController` presented from it, via `objc2` — written, 118 tests
+      green, and driven end to end on the iPad. And the inert `<input type="file">` is
+      explained too: `dioxus-desktop` routes file inputs to `rfd`, which has **no iOS
+      backend**, so Dioxus was returning an empty file list from its own stub.
 - [ ] **4. Turn pages by touch** *(half-answered)* — the `Next`/`Prev` buttons already
       repaginate under tap (Step 2a). What is open is **swipe**: `pointer-listener.js` already
       exists, and `TODO.md` has wanted "change page on swipe" since before there was a phone to

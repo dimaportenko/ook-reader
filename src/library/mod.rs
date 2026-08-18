@@ -1,4 +1,7 @@
-use std::{path::Path, rc::Rc};
+use std::{
+    path::{Path, PathBuf},
+    rc::Rc,
+};
 
 use rbook::Epub;
 
@@ -24,6 +27,12 @@ pub(crate) enum Error {
 
 pub(crate) use crate::db::Book;
 
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct ImportSummary {
+    pub(crate) added: usize,
+    pub(crate) failed: usize,
+}
+
 pub(crate) struct Library {
     db: Rc<Db>,
     files: BookFiles,
@@ -35,6 +44,19 @@ impl Library {
             db,
             files: BookFiles::new(books_dir.to_path_buf()),
         }
+    }
+
+    pub(crate) fn add_all(&self, sources: &[PathBuf], now: i64) -> ImportSummary {
+        let mut summary = ImportSummary::default();
+
+        for source in sources {
+            match self.add_from_path(source, now) {
+                Ok(_) => summary.added += 1,
+                Err(_) => summary.failed += 1,
+            }
+        }
+
+        summary
     }
 
     pub(crate) fn add_from_path(&self, source_path: &Path, now: i64) -> Result<Book, Error> {
@@ -127,8 +149,6 @@ impl Library {
 
 #[cfg(test)]
 mod test {
-    use std::path::PathBuf;
-
     use super::*;
 
     #[test]
@@ -293,6 +313,18 @@ mod test {
 
         assert!(removed, "a stale row is still removable");
         assert!(library.list().expect("list succeeds").is_empty());
+    }
+
+    #[test]
+    fn add_all_counts_every_source_and_keeps_going_past_a_bad_one() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let (library, source, _) = library_with_source(&dir);
+        let missing = dir.path().join("not-a-book.epub");
+
+        let summary = library.add_all(&[missing, source], 1_000);
+
+        assert_eq!(summary, ImportSummary { added: 1, failed: 1 });
+        assert_eq!(library.list().expect("list succeeds").len(), 1);
     }
 
     fn library_with_source(dir: &tempfile::TempDir) -> (Library, PathBuf, PathBuf) {
