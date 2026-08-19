@@ -973,3 +973,191 @@ would mean rewriting the `key:` path this step did not touch.
 
 **It does not fix the layout.** The page label this step reads its evidence from is still
 off-screen at rest, which is **Step 5** and unchanged.
+
+## Step 5 — Fit the device
+
+> **Status:** in progress — 123 tests green, clippy clean on both targets, driven on the
+> iPhone 17 simulator.
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+The step [Finding B](#finding-b--the-top-safe-area-is-not-handled-and-step-2-was-wrong-about-it)
+scheduled. At rest on a tablet the reader opened with **no way to turn a page**: the nav row sat
+below the bottom edge of the display, and scrolling it into view pushed the close button up under
+the status bar. You could have the top chrome or the bottom chrome, never both.
+
+### The crux — the inset is applied to the *content*, not to the *viewport*
+
+The instinct is to read this as "iOS forgot about the safe area". The opposite is true, and the
+difference is the whole step.
+
+A `WKWebView` whose frame is the whole screen defaults to
+`contentInsetAdjustmentBehavior = .automatic`: UIKit sets the scroll view's `contentInset.top` to
+the safe-area inset, so the document is **drawn 32pt lower**. What it does *not* do is shrink the
+scroll view, so the layout viewport stays the full height of the display — and `100vh` still
+means the full height of the display. A full-height screen is therefore laid out at exactly the
+right size in exactly the wrong place, and the bottom `inset` points of it are pushed past the
+bottom edge. Nothing is clipped, nothing errors; the page just becomes 52pt scrollable and half
+its chrome is always somewhere else.
+
+The web platform's answer is to take the offsetting away from UIKit and do it yourself. One meta
+tag — `viewport-fit=cover` — tells WebKit to stop insetting the content and lay the document out
+edge to edge, and *in exchange* it starts paying out the four `env(safe-area-inset-*)` values so
+CSS can inset the parts that need it. **The two halves are a bargain, not two features**: without
+the meta the `env()`s are silently `0`, and with the meta and no `env()` the content runs under
+the Dynamic Island. That coupling — two files, no compiler between them — is what the first test
+below exists to hold together.
+
+### The check
+
+Two host tests for the bargain and one for the unit it forces, in the
+[`INJECTED_ASSETS`](../../../../src/web/assets.rs) idiom this repo already uses for cross-file
+invariants that no compiler can see:
+
+```rust
+#[test]
+fn the_safe_area_is_only_paid_out_to_a_viewport_that_covers_it() {
+    assert!(VIEWPORT.contains("viewport-fit=cover"), ...);
+    assert_eq!(MAIN_CSS_SOURCE.matches("env(safe-area-inset-").count(), 4, ...);
+}
+
+#[test]
+fn the_replacement_viewport_restates_what_it_overrides() { ... }
+
+#[test]
+fn a_full_height_screen_is_measured_inside_the_inset_box() {
+    assert!(!MAIN_CSS_SOURCE.contains("100vh"), ...);
+    assert!(MAIN_CSS_SOURCE.contains("#main"), ...);
+}
+```
+
+**The red, observed before any implementation:**
+
+```
+error[E0425]: cannot find value `VIEWPORT` in this scope
+   --> src/main.rs:129:13   (and 3 more sites)
+error: could not compile `ook-reader` (bin "ook-reader" test) due to 4 previous errors
+```
+
+The real check is the device, because this is a layout bug and `rect`s are the only honest
+evidence about layout — the lesson Step 2 learned twice. On the iPhone 17 simulator
+(`402 × 874`, top inset 62, home indicator 34), from `snapshot -i --json`:
+
+| | before (Step 2a, iPad) | after (iPhone 17) |
+|---|---|---|
+| document root `y` | +32, and −20 when scrolled | **62** — the top inset, exactly |
+| document root height | 1376 on a 1376 screen | **778** |
+| root bottom vs. screen | 1408 vs. 1376 — 32pt off | **840** vs. 874 — the home indicator, exactly |
+| scroll range | 52pt on a screen that should not scroll | **0** |
+| nav row | `y=1380`, `press` refused it | `y=812`, **pressed → `Page 14 → 15`** |
+| close button | `y=−8` when the nav row was visible | `y=74`, and it closes the book |
+
+`62 + 778 + 34 = 874`. The arithmetic closing on the nose is the point: the document is now
+exactly the usable rectangle, not the display.
+
+### The code
+
+`src/main.rs` declares the viewport and renders it into the head beside the stylesheets that
+were already there:
+
+```rust
+const VIEWPORT: &str =
+    "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover";
+
+// in App's rsx!, above the existing document::Link's
+document::Meta { name: "viewport", content: VIEWPORT }
+```
+
+`assets/main.css` spends what the meta buys, and carries the height down to the reader:
+
+```css
+body {
+  margin: 0;
+  box-sizing: border-box;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+    env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+html,
+body,
+#main {
+  height: 100%;
+}
+
+.reader-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+```
+
+and `src/ui/reader.rs` loses the inline layout it used to carry, and anchors its floating title:
+
+```diff
+-            style: "display: flex; flex-direction: column; height: 100vh; {settings().inline_styles()}",
++            style: "{settings().inline_styles()}",
+...
+-                style: "display: flex; justify-content: space-between;",
++                style: "display: flex; justify-content: space-between; position: relative;",
+```
+
+### Why it works
+
+**The insets go on `body`, once, rather than on each screen.** There are two full-screen views
+and both start at the top of the display; padding one of them would leave the other to rediscover
+the same four values. `box-sizing: border-box` is what makes that padding free — without it the
+padding adds to the height instead of eating into it, and the overflow comes straight back.
+
+**`height: 100%` replaces `100vh` because `vh` cannot see the padding.** `100vh` is the display,
+insets and all — the exact quantity that was 32pt too tall. A percentage height is resolved
+against the *parent's content box*, so it is the inset box by construction and can never disagree
+with the padding above it. The price is that percentages need an unbroken chain of resolved
+heights, and Dioxus mounts the app into `<div id="main">`, which is not ours and had none. **The
+first device run caught this and nothing else would have**: the tests were green, the app
+launched, and the reader silently collapsed to `250pt` of content height with the nav row
+floating at `y=284` in the middle of the screen. `#main` in the chain is the fix; the assertion
+in the third test is so the next person to touch that selector list learns it from a failure
+rather than from a snapshot.
+
+**The floating title needed a positioned ancestor it never had.** `position: absolute; top: 0`
+with no positioned ancestor resolves against the initial containing block — the *viewport*. That
+was invisible while the viewport and the header row happened to share a top edge, and stopped
+being invisible the moment `body` got 62pt of padding: the title would have gone back under the
+Dynamic Island on its own. `position: relative` on the header row re-parents it to the box it was
+always meant to be centred over. It changes nothing on desktop, where the two edges still
+coincide. (It also does not disturb the two popovers in that row — `.dx-popover` is already
+`position: relative`, so it remains their nearer positioned ancestor.)
+
+**Re-declaring the viewport resets it, so the new one has to restate the old one.** WebKit
+re-parses `<meta name="viewport">` on insertion and *replaces* the whole viewport description
+rather than merging into it, which is why the fourth-from-last word matters: dropping
+`user-scalable=no` here would silently re-enable pinch-zoom on a reader that paginates by
+transform. That is the second test, and it is guarding a property of the platform, not of us.
+
+**The runtime-injected meta was the risk, and the device settled it.** `document::Meta` is
+`use_hook` + an `eval` that appends to `<head>` *after* the page has loaded — so this only works
+if WebKit re-processes a viewport meta it did not parse at load time. It does; the measured `62`
+and `778` are the proof, since the alternative reading of those numbers dies on the height.
+
+### Scope note
+
+**It does not do the thumb-sized chrome.** The other half of what the phase doc filed under Step
+5: the nav row's `Prev`/`Next` are 20pt tall against a 44pt minimum touch target, and the library
+grid is still the six-column desktop layout Step 2a found cramped into a corner. That is layout
+*sizing*, a separate idea from the viewport, and it is the next step.
+
+**It does not sweep the remaining `vh`.** `pagination.css` keeps its `100vh` — that one is inside
+the chapter iframe, whose box is already the inset box, so `vh` there means what it should.
+`toc.css`'s `max-height: 80vh` on the contents list is now measured against the whole display and
+so can in principle run under the home indicator; on the iPhone 17 it does not (it ends ~30pt
+short), and it was strictly worse before this step, so it is noted rather than changed.
+
+**It does not verify the iPad.** The phase's headline evidence was an iPad Pro 13", and this step
+was driven on the iPhone 17 — the harder device for the top inset and the only one `dx serve`
+would install onto. The arithmetic is device-independent, but "iOS and iPadOS is one port and two
+eyeball checks" is the phase's own rule, and the second check is outstanding.
+
+**The desktop half is an eyeball, not a measurement.** `dx serve --platform desktop` builds and
+launches; `agent-device`'s macOS runner would not attach and screen capture is unavailable to
+this process, so "the window still looks right" is the learner's to confirm. Every `env()` is `0`
+there and the height chain is the same, so the expectation is *no visible change at all*.

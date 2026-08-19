@@ -173,7 +173,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
     rsx! {
         div {
             class: "reader-root",
-            style: "display: flex; flex-direction: column; height: 100vh; {settings().inline_styles()}",
+            style: "{settings().inline_styles()}",
             tabindex: "0",
             onmounted: move |e| async move {
                 _ = e.set_focus(true).await;
@@ -186,7 +186,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
             },
 
             div {
-                style: "display: flex; justify-content: space-between;",
+                style: "display: flex; justify-content: space-between; position: relative;",
                 div {
                     style: "padding: 0.75rem 1rem; z-index: 1;",
 

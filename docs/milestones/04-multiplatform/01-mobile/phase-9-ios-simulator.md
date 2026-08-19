@@ -109,12 +109,18 @@ Detail for each lives in
       `src/ui/reader.rs:164`'s `height: 100vh` is 32pt taller than the usable viewport, because
       the document is offset below the status bar without the viewport being shrunk. At rest on
       an iPad the nav bar is off the bottom of the screen and the book cannot be paged. Needs
-      `viewport-fit=cover` plus `env(safe-area-inset-*)`, or dropping `100vh`. Plus the home
-      indicator and thumb-sized chrome.
+      `viewport-fit=cover` plus `env(safe-area-inset-*)`, or dropping `100vh`. *Split on
+      implementation:* the viewport is one idea and the chrome's sizing is another, so this step
+      is the viewport — `viewport-fit=cover`, `env()` insets on `body`, and `100vh` → `100%`
+      down an unbroken chain. Driven on the iPhone 17: `62 + 778 + 34 = 874`, zero scroll range,
+      both bars reachable at once.
 - [ ] **5a. Give it an icon** *(provisional — found by running it)* — the springboard shows
       the default blank tile. `Dioxus.toml`'s `[bundle].icon` is a `dx bundle` key and dx
       0.7.9's iOS path never reads it, so this is a gap in the port rather than a setting
       that was missed. Eyeball on the home screen.
+- [ ] **5b. Size it for a thumb** *(split out of Step 5)* — the other half: `Prev`/`Next` are
+      20pt tall against the 44pt minimum touch target, and the library grid is still the
+      six-column desktop layout Step 2a found cramped into the top-left corner.
 - [ ] **6. Review and refactor** — the phase-closing pass. Carries two parked items: the
       `FRAME_AUTOSAVE_NAME` dead code under iOS (Step 1), and **accessible names for four
       unnamed buttons** — the book cover, and the reader's close/contents/settings — found by

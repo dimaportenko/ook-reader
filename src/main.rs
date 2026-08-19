@@ -40,6 +40,9 @@ const FAVICON: Asset = asset!("/assets/favicon.ico");
 const MAIN_CSS: Asset = asset!("/assets/main.css");
 const DIOXUS_PRIMITIVES_CSS: Asset = asset!("/assets/dx-components-theme.css");
 
+const VIEWPORT: &str =
+    "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover";
+
 #[cfg(test)]
 pub(crate) const TEST_BOOK: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -92,6 +95,10 @@ fn App() -> Element {
     epub::use_register_covers_handler(config.books_dir.clone());
 
     rsx! {
+        document::Meta {
+            name: "viewport",
+            content: VIEWPORT,
+        }
         document::Link {
             rel: "icon",
             href: FAVICON,
@@ -114,5 +121,46 @@ fn App() -> Element {
             LibraryBooks {}
             ImportControl {}
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    const MAIN_CSS_SOURCE: &str = include_str!("../assets/main.css");
+
+    #[test]
+    fn the_safe_area_is_only_paid_out_to_a_viewport_that_covers_it() {
+        assert!(
+            VIEWPORT.contains("viewport-fit=cover"),
+            "without it every env(safe-area-inset-*) below resolves to 0",
+        );
+        assert_eq!(
+            MAIN_CSS_SOURCE.matches("env(safe-area-inset-").count(),
+            4,
+            "the app's box is inset on all four edges or on none",
+        );
+    }
+
+    #[test]
+    fn the_replacement_viewport_restates_what_it_overrides() {
+        assert!(VIEWPORT.contains("width=device-width"));
+        assert!(VIEWPORT.contains("initial-scale=1.0"));
+        assert!(VIEWPORT.contains("user-scalable=no"));
+    }
+
+    #[test]
+    fn a_full_height_screen_is_measured_inside_the_inset_box() {
+        assert!(
+            !MAIN_CSS_SOURCE.contains("100vh"),
+            "vh is the whole display, padding and all, so a 100vh screen hangs the \
+             insets off the bottom edge",
+        );
+        assert!(
+            MAIN_CSS_SOURCE.contains("#main"),
+            "the Dioxus mount point has to carry the height too, or the percentage \
+             resolves against an auto-height ancestor and the screen collapses",
+        );
     }
 }
