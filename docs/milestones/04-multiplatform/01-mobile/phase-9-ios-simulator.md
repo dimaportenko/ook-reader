@@ -105,7 +105,7 @@ Detail for each lives in
       `swipe-listener.js` reports the pointer delta out of the frame and `Turn::of_swipe`
       decides in Rust, on the same seam `key-listener.js` and `Turn::of` already use. Driven on
       the iPhone 17 simulator — forward, back, and three gestures that correctly do nothing. — `bb18938`
-- [ ] **5. Fit the device** — **grown, and now load-bearing.** *Not* provisional any more:
+- [x] **5. Fit the device** — **grown, and now load-bearing.** *Not* provisional any more:
       `src/ui/reader.rs:164`'s `height: 100vh` is 32pt taller than the usable viewport, because
       the document is offset below the status bar without the viewport being shrunk. At rest on
       an iPad the nav bar is off the bottom of the screen and the book cannot be paged. Needs
@@ -113,7 +113,7 @@ Detail for each lives in
       implementation:* the viewport is one idea and the chrome's sizing is another, so this step
       is the viewport — `viewport-fit=cover`, `env()` insets on `body`, and `100vh` → `100%`
       down an unbroken chain. Driven on the iPhone 17: `62 + 778 + 34 = 874`, zero scroll range,
-      both bars reachable at once.
+      both bars reachable at once. — `5e0f82e`
 - [ ] **5a. Give it an icon** *(provisional — found by running it)* — the springboard shows
       the default blank tile. `Dioxus.toml`'s `[bundle].icon` is a `dx bundle` key and dx
       0.7.9's iOS path never reads it, so this is a gap in the port rather than a setting

@@ -976,8 +976,10 @@ off-screen at rest, which is **Step 5** and unchanged.
 
 ## Step 5 — Fit the device
 
-> **Status:** in progress — 123 tests green, clippy clean on both targets, driven on the
-> iPhone 17 simulator.
+> **Status:** done — committed in `5e0f82e` (123 tests green, clippy clean on both targets,
+> driven on the iPhone 17 simulator). The desktop half is an eyeball and is the learner's to
+> close; every `env()` is `0` there and the height chain is the same, so the expectation is no
+> visible change.
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
 
