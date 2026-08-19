@@ -974,6 +974,13 @@ would mean rewriting the `key:` path this step did not touch.
 **It does not fix the layout.** The page label this step reads its evidence from is still
 off-screen at rest, which is **Step 5** and unchanged.
 
+> **Amended after use — it turns the page on a text selection.** The tiebreak above reasons
+> carefully about *ambiguous* gestures and then misses the one that is not ambiguous at all: a
+> drag to select text is long, horizontal and single-pointer, so it satisfies every clause of
+> `of_swipe` and turns the page. The argument was made entirely in the geometry of the gesture,
+> and the thing that separates these two gestures is not geometric — it is what the document
+> did in between. **Step 5c** carries the fix.
+
 ## Step 5 — Fit the device
 
 > **Status:** done — committed in `5e0f82e` (123 tests green, clippy clean on both targets,

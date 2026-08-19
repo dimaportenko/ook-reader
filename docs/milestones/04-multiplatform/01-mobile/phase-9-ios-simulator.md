@@ -121,6 +121,18 @@ Detail for each lives in
 - [ ] **5b. Size it for a thumb** *(split out of Step 5)* — the other half: `Prev`/`Next` are
       20pt tall against the 44pt minimum touch target, and the library grid is still the
       six-column desktop layout Step 2a found cramped into the top-left corner.
+- [ ] **5c. Let a reader select text** *(bug, reported from use — regression on Step 4)* —
+      **dragging to select text turns the page.** A selection drag and a page swipe are the
+      same pointer event to `swipe-listener.js`: long, horizontal, one pointer id — so it
+      clears `SWIPE_MIN_PX`, wins the horizontal-vs-vertical tiebreak, and posts a `swipe:`
+      that `Turn::of_swipe` faithfully honours. The gesture is genuinely ambiguous at
+      `pointerdown`; what disambiguates it is what the document did in between, so the fix
+      is a `pointerup`-time question (did this gesture leave a non-collapsed
+      `getSelection()`?) rather than a new threshold. Note it costs the reader the page they
+      were on as well as the selection, which is why it reads as worse than a missed
+      gesture. Not yet reproduced under `agent-device` — a driven `swipe` synthesises a
+      pointer drag but not necessarily the long-press that starts a selection, so
+      **reproducing it is part of the step**.
 - [ ] **6. Review and refactor** — the phase-closing pass. Carries two parked items: the
       `FRAME_AUTOSAVE_NAME` dead code under iOS (Step 1), and **accessible names for four
       unnamed buttons** — the book cover, and the reader's close/contents/settings — found by
