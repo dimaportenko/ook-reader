@@ -1,0 +1,24 @@
+html {
+  font-size: var(--USER__fontSize) !important;
+}
+body,
+body
+  *:not(h1):not(h2):not(h3):not(h4):not(h5):not(h6):not(sub):not(sup):not(
+    small
+  ) {
+  font-size: inherit !important;
+}
+body {
+  background: var(--USER__backgroundColor) !important;
+  color: var(--USER__textColor) !important;
+}
+body,
+body * {
+  line-height: var(--USER__lineHeight) !important;
+}
+:root[style*="--USER__fontFamily"] body,
+:root[style*="--USER__fontFamily"]
+  body
+  *:not(code):not(kbd):not(samp):not(pre):not(var) {
+  font-family: var(--USER__fontFamily) !important;
+}

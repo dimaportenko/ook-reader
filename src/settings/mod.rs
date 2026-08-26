@@ -3,6 +3,8 @@ pub mod theme;
 
 use crate::settings::{font::FontFamily, theme::Theme};
 
+use crate::web::assets::USER_LAYER_RULES;
+
 #[cfg(test)]
 use crate::web::assets::INJECTED_ASSETS;
 
@@ -156,20 +158,7 @@ impl Settings {
     }
 
     pub(crate) fn user_layer(self) -> String {
-        format!(
-            "{}\nhtml {{ font-size: var(--USER__fontSize) !important; }} \
-                \nbody, body \
-                *:not(h1):not(h2):not(h3):not(h4):not(h5):not(h6):not(sub):not(sup):not(small) \
-                {{ font-size: inherit !important; }} \
-                \nbody {{ background: var(--USER__backgroundColor) !important; \
-                color: var(--USER__textColor) !important; }} \
-                \nbody, body * {{ line-height: var(--USER__lineHeight) !important; }} \
-                \n:root[style*='--USER__fontFamily'] body, \
-                :root[style*='--USER__fontFamily'] \
-                body *:not(code):not(kbd):not(samp):not(pre):not(var) \
-                {{ font-family: var(--USER__fontFamily) !important; }}",
-            self.vars()
-        )
+        format!("{}\n{USER_LAYER_RULES}", self.vars())
     }
 
     pub(crate) fn inline_styles(self) -> String {

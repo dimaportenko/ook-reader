@@ -38,6 +38,8 @@ pub(crate) const INJECTED_ASSETS: &str = concat!(
 
 pub(crate) const READING_SYSTEM_DEFAULTS: &str = wrap_css!("./assets/reading-system.css");
 
+pub(crate) const USER_LAYER_RULES: &str = include_str!("./assets/user-layer.css");
+
 pub(crate) fn wrap_css_str(css: &str) -> String {
     format!("<style type=\"text/css\">\n/*<![CDATA[*/\n{css}\n/*]]>*/\n</style>\n")
 }
