@@ -275,6 +275,28 @@ implementation → why. Smallest-first:
       and a routing table for which step owns which possible failure are in the
       [build log](phase-4-theming-steps.md#the-closing-check--one-dx-serve-pass-two-open-items).
 
+## Reported from use, after the phase closed
+
+The phase stays ✅ — these are not unfinished steps, they are defects found by reading books
+the phase never saw. Each is a sitting in the [build log](phase-4-theming-steps.md), scheduled
+against whatever phase is open when it is picked up.
+
+- [x] **The publisher's absolute sizes defeat `--USER__fontSize`** *(2026-08-26, from book 31 —
+      Interesting Times)*. `html { font-size: … }` moves text by **inheritance**, and a book
+      that declares `font-size: medium` — an absolute keyword, resolved from the UA default and
+      blind to the root — is not overriding the setting so much as ignoring it. Fifteen such
+      declarations in that book's stylesheet, one of them on the class carried by 4984
+      paragraphs. The tell is that its *headings* still resize (`200%`, `130%` — relative, on
+      real `<h*>`) while the prose does not, and that 5d's leading works on the same book,
+      because 5d overrides the paragraph directly instead of asking to be inherited. Fixed by
+      restoring inheritance — `body, body *:not(h1)…:not(small) { font-size: inherit
+      !important }` — sparing the elements whose size is already a fraction of their parent.
+      Readium's type-scale alternative is recorded in the build log and rejected for needing an
+      opt-in flag, which is a second step's worth of work. **Costs** the relative sizes CSS
+      cannot tell apart from the absolute ones: this book's 75% small caps flatten along with
+      its `font-size: small` spans. Committed in `e699e08`, **125 tests green**, both books
+      walked on screen.
+
 ## Known constraints (from research)
 
 - **Layer, don't replace.** User settings win via `--USER__*` + minimal, scoped `!important`;

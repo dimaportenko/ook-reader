@@ -5278,3 +5278,146 @@ actually has.
 and is correct; only the test is missing. So this one is the learner's to write if it is taken,
 which is the opposite of every other step in this log. That is also a fair reason to drop it:
 `108 → 109` for an arm that is already right.
+
+---
+
+## Sitting — the publisher's absolute sizes defeat `--USER__fontSize`
+
+> **Status:** done — committed in `e699e08`, **125 tests green** (123 → 125),
+> `cargo clippy --all-targets` clean, and the on-screen half of the check
+> confirmed on both books.
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+Reported from use, three phases after the phase closed: on **book 31, *Interesting Times***,
+the font-size control moves the number and leaves the text where it was. Not a regression —
+Step 5b never worked on this book, and nothing since touched it. It sits here rather than in
+Phase 9 because it is a typography defect on every platform, and Phase 9 is a port.
+
+### The crux: `medium` is not a size, it is a *lookup*
+
+Step 5b's rule is the whole mechanism:
+
+```css
+html { font-size: var(--USER__fontSize) !important; }
+```
+
+That moves text by **inheritance**. Every book that expresses its sizes relatively — `em`,
+`rem`, `%`, or no rule at all — follows the root, which is why the step's own note called the
+percentage "doing real work": a `2em` heading stays twice the body at every setting.
+
+A book can decline. `font-size: medium` is one of CSS's **absolute-size keywords**: it resolves
+against the user agent's default size table, *not* against the parent and not against the root.
+An element that declares it is disconnected from `html` entirely — it computes to 16px at 75%
+and at 250% alike. Book 31 declares it fifteen times in `standard_style.css`, once on
+`.bodytext`, which is the class on **4984 paragraphs** — the whole novel.
+
+Two things this predicts, both checkable without running anything:
+
+- **The headings still move.** `.h1` is `200%` and `.h2_1` is `130%`, both on real `<h*>`
+  elements, both relative to `body`, which the book leaves alone. So on this book the chapter
+  titles resize and the prose does not — that asymmetry is the fingerprint of an absolute size,
+  and distinguishes it from "the setting is not reaching the frame."
+- **The leading works fine.** Step 5d landed `body, body *` with `!important`, which overrides
+  the paragraph *directly* instead of relying on inheritance. Same book, same publisher, same
+  cascade — different result, because 5d never asked to be inherited.
+
+So this is not a specificity contest and `!important` on the root rule cannot win it. There is
+nothing to out-rank: the paragraph is not overriding `html`'s size, it is ignoring it.
+
+### Runnable check first (`cargo test`, then a book that reproduces it)
+
+Two tests, both against `user_layer()` — the same surface every typography step in this phase
+asserts on, because the string *is* the unit under test. Watched red first: the `.expect` fires
+before either assertion runs, and the message is the bug.
+
+```rust
+fn size_rule(layer: &str) -> &str {
+    layer
+        .split('\n')
+        .find(|rule| rule.contains("font-size: inherit"))
+        .expect(
+            "the layer sizes only <html>, so a book whose paragraphs say \
+             `font-size: medium` never moves",
+        )
+}
+
+#[test]
+fn the_size_rule_reaches_the_text_the_publisher_pinned() { … }
+
+#[test]
+fn the_size_rule_spares_the_elements_whose_size_is_relative() { … }
+```
+
+**The eyeball half, which the suite cannot reach.** Open book 31 and step the size control.
+Before: the chapter title moves and the prose does not. After: both move, together. A second
+book — Sherlock Holmes, whose stylesheets are almost entirely `em`/`%` — is the *regression*
+check, because this change can only be judged by what it does to books that already worked.
+
+### Minimal implementation
+
+One rule, in `user_layer()`, immediately after the `html` rule it repairs:
+
+```rust
+\nbody, body \
+*:not(h1):not(h2):not(h3):not(h4):not(h5):not(h6):not(sub):not(sup):not(small) \
+{{ font-size: inherit !important; }} \
+```
+
+### Why it works
+
+**`inherit`, not a length.** `font-size: inherit` on `body` means "whatever `html` computed",
+which is exactly `--USER__fontSize` applied to the UA default — so the value the setting
+produces is not written twice and cannot drift. On a descendant it means "whatever my parent
+computed", which chains back up to `body` for anything the rule covers, and stops correctly at
+anything it does not: a `<span>` inside an `<h2>` inherits the *heading's* size, not the body's.
+A fixed `1rem` would have been a second way of spelling the same number for `body` and simply
+wrong inside the heading.
+
+**Why `body` is in the selector at all.** The rule would still fix book 31 without it, but a
+book that pins `body { font-size: 12pt }` would then have its pin faithfully propagated by
+`inherit` to every descendant — the bug intact, one level up. Naming `body` closes that at the
+only place the chain can be re-anchored.
+
+**Why the exclusions, and why they are not the monospace list.** Step 5g excludes
+`code`/`kbd`/`samp`/`pre`/`var` from the *family* rule because their font is structural. Size is
+not: a code sample should grow with the setting like everything else, so this rule deliberately
+covers them. What it excludes instead is the set whose size is *already* a fraction of its
+parent — `h1`–`h6`, `sub`, `sup`, `small`. They track the setting for free, and flattening them
+to `inherit` would cost the author's hierarchy (and the UA's) while buying nothing. On book 31
+that is the difference between a 200% chapter title and a novel with no headings.
+
+**What it costs, stated plainly.** CSS cannot tell an absolute size from a relative one at the
+selector, so the rule cannot either. Book 31's `span.smallcaps { font-size: 75% }` — 23 of
+them — is relative, meaningful, and gets flattened along with `span.small { font-size: small }`,
+which is the thing we came for. Both are spans. That is the whole price of this approach, and
+it is why Readium gates its equivalent behind an opt-in rather than shipping it on.
+
+### The fork not taken: Readium's type scale
+
+[`ReadiumCSS-fs_normalize.css`](https://github.com/readium/css/blob/master/css/src/modules/ReadiumCSS-fs_normalize.css)
+solves the same problem the other way: rather than restoring inheritance, it *replaces* the
+publisher's sizes with a scale of its own — `1rem` on `p`/`li`/`div`/`pre`/`dd`/`h4`–`h6`, and
+`h1`–`h3` derived from a `--USER__typeScale` — the whole module gated behind
+`:root[style*="readium-advanced-on"]`.
+
+It is strictly more faithful (small caps and superscripts keep a size, because the scale names
+them) and strictly more opinionated (the hierarchy becomes ours, not the author's). It also
+needs a settings flag to hide behind, which is a field, a control, a DB column and a migration —
+a second idea, and the reason this sitting is `inherit` and not that.
+
+### Scope note
+
+Four things this deliberately does not do:
+
+- **No opt-in gate.** The rule is on for every book, so a publisher who sized things absolutely
+  and meant it loses. The `--USER__fontFamily` gate (5h) is the pattern if this ever needs one;
+  it is not free, since a gate is a setting.
+- **Nothing for `line-height`, which never had this problem** — 5d's rule already lands on the
+  elements directly.
+- **No re-anchor work.** 5c's handler re-anchors after any `ook-set-theme`, and this rule
+  changes nothing about *when* a reflow happens, only how much text moves in it.
+- **The page-count and reading-position paths are untouched**, which is also the thing most
+  worth watching on screen: a book whose body text finally resizes reflows *further* than it
+  used to, so if 5c's re-anchor has a weakness, this is the change that will show it.
