@@ -323,7 +323,13 @@ mod test {
 
         let summary = library.add_all(&[missing, source], 1_000);
 
-        assert_eq!(summary, ImportSummary { added: 1, failed: 1 });
+        assert_eq!(
+            summary,
+            ImportSummary {
+                added: 1,
+                failed: 1
+            }
+        );
         assert_eq!(library.list().expect("list succeeds").len(), 1);
     }
 

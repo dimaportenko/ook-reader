@@ -47,7 +47,11 @@ impl Turn {
         if dx.unsigned_abs() < SWIPE_MIN_PX || dx.unsigned_abs() <= dy.unsigned_abs() {
             return None;
         }
-        Some(if dx.is_negative() { Turn::Next } else { Turn::Prev })
+        Some(if dx.is_negative() {
+            Turn::Next
+        } else {
+            Turn::Prev
+        })
     }
 
     fn apply(self, state: ReaderState) {
@@ -499,7 +503,10 @@ mod test {
         assert_eq!(BridgeMsg::parse("swipe:-140"), None);
 
         assert_eq!(Turn::of_swipe(i32::MIN, 0), Some(Turn::Next));
-        assert_eq!(BridgeMsg::parse("swipe:-2147483648,0"), Some(BridgeMsg::Turn(Turn::Next)));
+        assert_eq!(
+            BridgeMsg::parse("swipe:-2147483648,0"),
+            Some(BridgeMsg::Turn(Turn::Next))
+        );
     }
 
     #[test]

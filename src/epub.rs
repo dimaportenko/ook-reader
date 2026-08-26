@@ -570,7 +570,10 @@ mod test {
             .expect("the fixture declares a toc.ncx");
 
         assert_eq!(served.content_type, "application/x-dtbncx+xml");
-        assert_eq!(content_type_for("/OEBPS/toc.ncx"), "application/octet-stream");
+        assert_eq!(
+            content_type_for("/OEBPS/toc.ncx"),
+            "application/octet-stream"
+        );
     }
 
     #[test]

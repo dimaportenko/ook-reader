@@ -221,9 +221,7 @@ mod test {
         // 100vw and the transform drifts from `pageOf` again, which is the exact bug
         // 5e was built to make unreachable.
         assert_eq!(
-            INJECTED_ASSETS
-                .matches("var(--USER__maxLineLength")
-                .count(),
+            INJECTED_ASSETS.matches("var(--USER__maxLineLength").count(),
             1,
             "the cap belongs in one place — every other number derives from it",
         );
@@ -242,4 +240,3 @@ mod test {
         assert!(out.contains("body > p { color: red }"));
     }
 }
-
