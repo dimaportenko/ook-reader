@@ -158,6 +158,9 @@ impl Settings {
     pub(crate) fn user_layer(self) -> String {
         format!(
             "{}\nhtml {{ font-size: var(--USER__fontSize) !important; }} \
+                \nbody, body \
+                *:not(h1):not(h2):not(h3):not(h4):not(h5):not(h6):not(sub):not(sup):not(small) \
+                {{ font-size: inherit !important; }} \
                 \nbody {{ background: var(--USER__backgroundColor) !important; \
                 color: var(--USER__textColor) !important; }} \
                 \nbody, body * {{ line-height: var(--USER__lineHeight) !important; }} \
@@ -390,6 +393,45 @@ mod test {
             "the layer declares a size it never applies — the number would move \
              and the text would not",
         );
+    }
+
+    fn size_rule(layer: &str) -> &str {
+        layer
+            .split('\n')
+            .find(|rule| rule.contains("font-size: inherit"))
+            .expect(
+                "the layer sizes only <html>, so a book whose paragraphs say \
+                 `font-size: medium` never moves",
+            )
+    }
+
+    #[test]
+    fn the_size_rule_reaches_the_text_the_publisher_pinned() {
+        let layer = Settings::default().user_layer();
+        let rule = size_rule(&layer);
+
+        assert!(
+            rule.starts_with("body, body *"),
+            "`{}` does not reach the elements the book sized itself",
+            rule.split('{').next().unwrap_or(rule).trim(),
+        );
+        assert!(
+            rule.contains("!important"),
+            "the book's own `font-size` is a later, equally weighted declaration and wins",
+        );
+    }
+
+    #[test]
+    fn the_size_rule_spares_the_elements_whose_size_is_relative() {
+        let layer = Settings::default().user_layer();
+
+        for tag in ["h1", "h2", "h3", "h4", "h5", "h6", "sub", "sup", "small"] {
+            assert!(
+                size_rule(&layer).contains(&format!(":not({tag})")),
+                "<{tag}> is sized as a fraction of its parent, so it already tracks the \
+                 setting — flattening it to `inherit` costs the hierarchy and buys nothing",
+            );
+        }
     }
 
     #[test]
