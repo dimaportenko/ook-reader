@@ -384,25 +384,40 @@ mod test {
         );
     }
 
-    fn size_rule(layer: &str) -> &str {
+    fn compact(css: &str) -> String {
+        css.chars()
+            .filter(|c| !c.is_whitespace() && *c != '\'' && *c != '"')
+            .collect()
+    }
+
+    fn rule_declaring<'a>(layer: &'a str, declaration: &str) -> &'a str {
         layer
-            .split('\n')
-            .find(|rule| rule.contains("font-size: inherit"))
-            .expect(
-                "the layer sizes only <html>, so a book whose paragraphs say \
-                 `font-size: medium` never moves",
-            )
+            .split_inclusive('}')
+            .find(|rule| {
+                rule.split_once('{')
+                    .is_some_and(|(_, block)| block.contains(declaration))
+            })
+            .unwrap_or_else(|| panic!("no rule in the layer declares `{declaration}`"))
+    }
+
+    fn selectors_of(rule: &str) -> &str {
+        rule.split_once('{').expect("a rule has a block").0
+    }
+
+    fn size_rule(layer: &str) -> &str {
+        rule_declaring(layer, "font-size: inherit")
     }
 
     #[test]
     fn the_size_rule_reaches_the_text_the_publisher_pinned() {
         let layer = Settings::default().user_layer();
         let rule = size_rule(&layer);
+        let selectors = selectors_of(rule);
 
         assert!(
-            rule.starts_with("body, body *"),
+            compact(selectors).starts_with("body,body*"),
             "`{}` does not reach the elements the book sized itself",
-            rule.split('{').next().unwrap_or(rule).trim(),
+            selectors.trim(),
         );
         assert!(
             rule.contains("!important"),
@@ -416,7 +431,7 @@ mod test {
 
         for tag in ["h1", "h2", "h3", "h4", "h5", "h6", "sub", "sup", "small"] {
             assert!(
-                size_rule(&layer).contains(&format!(":not({tag})")),
+                compact(size_rule(&layer)).contains(&format!(":not({tag})")),
                 "<{tag}> is sized as a fraction of its parent, so it already tracks the \
                  setting — flattening it to `inherit` costs the hierarchy and buys nothing",
             );
@@ -635,10 +650,7 @@ mod test {
         // with a proportional face is how a code sample or an ASCII table stops being
         // readable — a change nobody asked for and nobody can undo.
         let layer = Settings::default().user_layer();
-        let rule = layer
-            .split('\n')
-            .find(|rule| rule.contains("font-family:"))
-            .expect("the layer applies the family");
+        let rule = compact(rule_declaring(&layer, "font-family:"));
 
         for tag in ["code", "kbd", "samp", "pre", "var"] {
             assert!(
@@ -682,15 +694,11 @@ mod test {
         // only on the descendants — i.e. on every paragraph, which is all the text there
         // is. Check each comma-separated selector, not the rule.
         let layer = Settings::default().user_layer();
-        let rule = layer
-            .split('\n')
-            .find(|rule| rule.contains("font-family:"))
-            .expect("the layer applies the family");
-        let (selectors, _) = rule.split_once('{').expect("a rule has a block");
+        let rule = rule_declaring(&layer, "font-family:");
 
-        for selector in selectors.split(',') {
+        for selector in selectors_of(rule).split(',') {
             assert!(
-                selector.contains("[style*='--USER__fontFamily']"),
+                compact(selector).contains("[style*=--USER__fontFamily]"),
                 "`{}` overrides the font unconditionally",
                 selector.trim(),
             );
