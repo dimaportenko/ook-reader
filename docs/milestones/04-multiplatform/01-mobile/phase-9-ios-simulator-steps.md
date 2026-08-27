@@ -1320,8 +1320,25 @@ behaviour. Fixed as its own commit, `7d878e0`, ahead of this one: `rule_declarin
 containment checks. Each of the four was mutated and watched go red, so none was softened to
 reach green.
 
-**`simctl install` over the app loses the imported EPUB.** Twice, with a fresh data-container
-UUID each time, while the library's SQLite row survived and pointed at the now-missing file —
-so the reader opens onto `UnreadableArchive ... No such file or directory`. Worth knowing
-before it is mistaken for an import bug, and worth asking whether the library should notice a
-book whose file has gone. Not scheduled.
+**~~`simctl install` over the app loses the imported EPUB.~~ It does not — the stored path
+goes stale.** Diagnosed after the step closed, and the first reading above was wrong: nothing
+is deleted. Every imported EPUB is still on disk. `BookFiles::import` returns an *absolute*
+path and `books.path` stores it verbatim; on iOS that path runs through the app's data
+container, whose UUID iOS regenerates on each install while migrating the contents to the new
+directory. Measured: the data lives in container `131366EC` and the DB row names `85CEE5A3`,
+with the file present and intact under the former.
+
+The asymmetry that made it read as selective deletion is the tell — the **database** is opened
+at a path recomputed every launch (`Config::app_dir()`, `src/main.rs:60`) and so is always
+found, while the **book file** is opened at a path read back out of the DB and frozen at import
+time. One is recalculated, the other is remembered, and only the remembered one can rot. It
+never showed on desktop because macOS's `data_dir()` is stable for the life of the account;
+iOS is the first platform where the app's own home directory moves.
+
+Not a simulator artifact: reinstalling from Xcode, or shipping a user a new build, does the
+same thing. The fix is to store the path **relative to `books_dir`** and rejoin it on read, the
+way the DB is already located. `cover_path` carries the identical bug (`files.rs:33`).
+`source_path` is a third case and a different question — it is an external path used for dedup
+through a `UNIQUE` constraint, and the iOS picker hands back a temp-inbox URL. **Not scheduled**
+— it wants a step of its own, and it is a `03-reader-enhancements`-flavoured data bug rather
+than one of Phase 9's layout items.
