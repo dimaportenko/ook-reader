@@ -19,7 +19,7 @@ window.addEventListener("message", (e) => {
     dioxus.send("key:" + e.data.key);
   }
   if (e.data.kind === "ook-swipe") {
-    dioxus.send("swipe:" + e.data.dx + "," + e.data.dy);
+    dioxus.send("swipe:" + e.data.dx + "," + e.data.dy + "," + e.data.selected);
   }
   if (e.data.kind === "ook-pointerdown") {
     const frame = document.getElementById("reader-frame");

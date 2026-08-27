@@ -130,9 +130,10 @@ Detail for each lives in
       is a `pointerup`-time question (did this gesture leave a non-collapsed
       `getSelection()`?) rather than a new threshold. Note it costs the reader the page they
       were on as well as the selection, which is why it reads as worse than a missed
-      gesture. Not yet reproduced under `agent-device` — a driven `swipe` synthesises a
-      pointer drag but not necessarily the long-press that starts a selection, so
-      **reproducing it is part of the step**.
+      gesture. ~~Not yet reproduced under `agent-device`~~ — `longpress` **does** start a
+      real selection, and the driven A/B on the fixed build separates a vetoed drag from
+      two swipes of the same shape. The pre-fix repro was defeated by `simctl install`
+      dropping the imported book, not by the gesture.
 - [ ] **6. Review and refactor** — the phase-closing pass. Carries two parked items: the
       `FRAME_AUTOSAVE_NAME` dead code under iOS (Step 1), and **accessible names for four
       unnamed buttons** — the book cover, and the reader's close/contents/settings — found by

@@ -1170,3 +1170,158 @@ eyeball checks" is the phase's own rule, and the second check is outstanding.
 launches; `agent-device`'s macOS runner would not attach and screen capture is unavailable to
 this process, so "the window still looks right" is the learner's to confirm. Every `env()` is `0`
 there and the height chain is the same, so the expectation is *no visible change at all*.
+
+## Step 5c — Let a reader select text
+
+> **Status:** done — committed in `COMMITHASH` (126 tests green), clippy clean on desktop and
+> clean on `aarch64-apple-ios-sim` apart from the `FRAME_AUTOSAVE_NAME` warning parked for Step
+> 6. Driven on the iPhone 17 simulator.
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+Reported from use, and a regression on [Step 4](#step-4--turn-pages-by-touch): **dragging to
+select text turns the page**, losing both the selection and the place the reader was in.
+
+### The crux
+
+Step 4's tiebreak reasoned entirely in the *geometry* of the gesture — long enough, more
+horizontal than vertical, one pointer id — and a selection drag satisfies every clause of it.
+That is not a threshold that was set too low; it is a question asked of the wrong thing. **A
+page swipe and a selection drag are indistinguishable at `pointerdown` and indistinguishable
+in their deltas.** What separates them is not the shape of the path but *what the document did
+while the finger was down*: one left a selection behind and the other did not.
+
+So the fix is a new **observation** taken at `pointerup`, not a new threshold. And because the
+frame is the only place that can see a selection, the observation has to travel — which puts
+the interesting decision back where the phase has been putting it all along.
+
+### The check
+
+```rust
+#[test]
+fn a_drag_that_leaves_a_selection_is_not_a_swipe() {
+    assert!(crate::web::assets::INJECTED_ASSETS.contains("isCollapsed"));
+
+    assert_eq!(Turn::of_swipe(-140, 6, true), None);
+    assert_eq!(Turn::of_swipe(-140, 6, false), Some(Turn::Next));
+
+    assert_eq!(BridgeMsg::parse("swipe:-140,6,true"), None);
+}
+```
+
+Red before the change on its first line — nothing in the injected assets asked about a
+selection — and red on the third for the same reason the wire had no field to carry the
+answer.
+
+### The code
+
+`swipe-listener.js` takes the observation at `pointerup`, where the answer exists:
+
+```js
+  const selection = window.getSelection();
+  const selected = !!selection && !selection.isCollapsed;
+  window.parent.postMessage({ kind: "ook-swipe", dx, dy, selected }, "*");
+```
+
+`ook-events-listener.js` widens the wire to carry it, and `Turn::of_swipe` gains the veto:
+
+```diff
+-    dioxus.send("swipe:" + e.data.dx + "," + e.data.dy);
++    dioxus.send("swipe:" + e.data.dx + "," + e.data.dy + "," + e.data.selected);
+```
+
+```diff
+-    fn of_swipe(dx: i32, dy: i32) -> Option<Turn> {
+-        if dx.unsigned_abs() < SWIPE_MIN_PX || dx.unsigned_abs() <= dy.unsigned_abs() {
++    fn of_swipe(dx: i32, dy: i32, selected: bool) -> Option<Turn> {
++        if selected || dx.unsigned_abs() < SWIPE_MIN_PX || dx.unsigned_abs() <= dy.unsigned_abs() {
+```
+
+### Why it works
+
+**The veto is in Rust, not in the listener, and that is the whole design question of this
+step.** Suppressing the `postMessage` inside `swipe-listener.js` would fix the bug in one line
+and no wire change — and it would make `of_swipe` a lie. Step 4's claim is that `of_swipe` is
+*the* place that decides what a swipe means; a second, silent decider in JavaScript is how that
+claim stops being true. The rule the codebase already follows is visible one branch up:
+`key-listener.js` posts the DOM key *name* and `Turn::of` decides what an arrow means. JS
+observes, Rust decides. A selection is an observation; vetoing a page turn is a decision. So
+the observation crosses the wire and the decision stays put — and stays unit-testable, which
+the JS half is not.
+
+**`isCollapsed` is the right question, and "is there a selection object" is not.**
+`getSelection()` returns a live `Selection` at essentially all times, with a collapsed range —
+a caret — when nothing is selected. Testing for the object's existence would veto every swipe.
+`isCollapsed` is false exactly when start and end differ, which is exactly "there is text
+selected."
+
+**`!!selection` is doing real work despite the `&&` after it.** `selection && !selection.isCollapsed`
+evaluates to `null`, not `false`, when `getSelection()` returns null — and `null` crosses the
+wire as the string `"null"`, which `bool::from_str` rejects, which makes the whole message
+unparseable and silently kills paging. The coercion is what keeps the field a boolean.
+
+**The bool crosses the wire as `"true"`/`"false"` by construction.** JS string-concatenates a
+boolean to exactly those two spellings and `bool::from_str` accepts exactly those two — so
+there is no hand-written mapping between the two languages to drift. Anything else is a parse
+failure and no turn, which is the safe direction to fail.
+
+**A stale selection blocks the next swipe, and that is correct rather than tolerated.** The
+veto asks about the selection at the *end* of the gesture, so a swipe begun while an older
+selection still stands is also refused. That is the desirable answer: on iOS a drag over live
+selection UI is the reader adjusting their selection, not paging. Tapping elsewhere collapses
+the caret first, and the swipe after that is unvetoed — measured below.
+
+### Driven on the device
+
+iPhone 17, `agent-device`, on the fixed build. The A/B is the point: three horizontal drags,
+all well past `SWIPE_MIN_PX`, separated only by whether a selection stood at `pointerup`.
+
+| gesture | selection at `pointerup` | page |
+|---|---|---|
+| `swipe 340 500 60 500` (−280px, fast) | none | 2 → **3** |
+| `gesture pan 300 500 -240 0 1600` (−240px, slow) | none | 3 → **4** |
+| `longpress 200 400 900` | — | 4 (Copy/Look Up callout up) |
+| `gesture pan 200 400 160 0 900` (+160px) | **live** | 4 → **4** |
+
+The last row is the bug. Same class of gesture as the first two, +160px against a 40px
+threshold, and the page does not move.
+
+### Scope note
+
+**It does not reproduce the bug on the pre-fix build under `agent-device`.** The step planned
+to, and the attempt is written up in *Left standing* — it was defeated by the simulator losing
+the imported book on every reinstall, not by the gesture. The A/B above is the substitute
+control, and the pre-fix behaviour is determined by inspection: the fourth row's `dx` is +160
+with `dy` 0, which old `of_swipe` maps unconditionally to `Turn::Prev`.
+
+**It does not distinguish "this gesture made the selection" from "a selection was already
+there."** Recording the collapsed state at `pointerdown` as well would allow that, at the cost
+of a second field and a subtler rule. The simpler question is the right one until a real
+gesture argues otherwise — see the *why* above.
+
+**It does not merge `key:` and `swipe:` into one `turn:` message.** Still Step 6's, and this
+step made the case marginally stronger by giving `swipe:` a third positional field that `key:`
+has no analogue for.
+
+**It does not touch the desktop mouse path.** A mouse drag to select text on desktop reaches
+the same listener and is now vetoed there too, which is the same fix and the same intent; it is
+an eyeball the learner has not been asked for, since desktop paging is normally by arrow key.
+
+### Left standing
+
+**Four `settings::test` failures blocked the commit gate, and did *not* predate this step** —
+an earlier reading of them said so and was wrong. Measured against both commits: `05ff6bb` is
+green and `ed8ce0d`, the extraction of the layer into `user-layer.css`, is red. The formatter
+that ran over the new file reflowed its selector lists across newlines and flipped
+`[style*='…']` to double quotes, and all four tests located their rule with
+`layer.split('\n')` — so they were pinning the layer's formatting while claiming to pin its
+behaviour. Fixed as its own commit, `7d878e0`, ahead of this one: `rule_declaring` splits on
+`}` and matches inside the block, `compact` strips whitespace and quotes before the
+containment checks. Each of the four was mutated and watched go red, so none was softened to
+reach green.
+
+**`simctl install` over the app loses the imported EPUB.** Twice, with a fresh data-container
+UUID each time, while the library's SQLite row survived and pointed at the now-missing file —
+so the reader opens onto `UnreadableArchive ... No such file or directory`. Worth knowing
+before it is mistaken for an import bug, and worth asking whether the library should notice a
+book whose file has gone. Not scheduled.

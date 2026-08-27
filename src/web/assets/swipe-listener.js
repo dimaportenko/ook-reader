@@ -10,5 +10,7 @@ document.addEventListener("pointerup", function (e) {
   const dy = Math.round(e.clientY - swipeFrom.y);
   swipeFrom = null;
   if (dx === 0 && dy === 0) return;
-  window.parent.postMessage({ kind: "ook-swipe", dx, dy }, "*");
+  const selection = window.getSelection();
+  const selected = !!selection && !selection.isCollapsed;
+  window.parent.postMessage({ kind: "ook-swipe", dx, dy, selected }, "*");
 });
