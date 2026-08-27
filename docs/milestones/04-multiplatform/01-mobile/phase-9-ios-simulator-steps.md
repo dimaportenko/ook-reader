@@ -1173,7 +1173,7 @@ there and the height chain is the same, so the expectation is *no visible change
 
 ## Step 5c — Let a reader select text
 
-> **Status:** done — committed in `COMMITHASH` (126 tests green), clippy clean on desktop and
+> **Status:** done — committed in `be6cdcd` (126 tests green), clippy clean on desktop and
 > clean on `aarch64-apple-ios-sim` apart from the `FRAME_AUTOSAVE_NAME` warning parked for Step
 > 6. Driven on the iPhone 17 simulator.
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,

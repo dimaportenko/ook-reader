@@ -121,7 +121,7 @@ Detail for each lives in
 - [ ] **5b. Size it for a thumb** *(split out of Step 5)* — the other half: `Prev`/`Next` are
       20pt tall against the 44pt minimum touch target, and the library grid is still the
       six-column desktop layout Step 2a found cramped into the top-left corner.
-- [ ] **5c. Let a reader select text** *(bug, reported from use — regression on Step 4)* —
+- [x] **5c. Let a reader select text** *(bug, reported from use — regression on Step 4)* —
       **dragging to select text turns the page.** A selection drag and a page swipe are the
       same pointer event to `swipe-listener.js`: long, horizontal, one pointer id — so it
       clears `SWIPE_MIN_PX`, wins the horizontal-vs-vertical tiebreak, and posts a `swipe:`
@@ -133,7 +133,7 @@ Detail for each lives in
       gesture. ~~Not yet reproduced under `agent-device`~~ — `longpress` **does** start a
       real selection, and the driven A/B on the fixed build separates a vetoed drag from
       two swipes of the same shape. The pre-fix repro was defeated by `simctl install`
-      dropping the imported book, not by the gesture.
+      dropping the imported book, not by the gesture. — `be6cdcd`
 - [ ] **6. Review and refactor** — the phase-closing pass. Carries two parked items: the
       `FRAME_AUTOSAVE_NAME` dead code under iOS (Step 1), and **accessible names for four
       unnamed buttons** — the book cover, and the reader's close/contents/settings — found by
