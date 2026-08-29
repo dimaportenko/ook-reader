@@ -1687,6 +1687,9 @@ and the third row rules it out.
 
 ---
 
+> **Status:** done — committed in `e2f0f94` (127 tests green; no `src/` diff, so the
+> count is unchanged by design).
+
 ## Step 5e — Install a signed release build on a real device
 
 > **Added at the user's request**, mid-5a. It corrects a claim this log made earlier — that a
@@ -1883,3 +1886,6 @@ like a provisioning problem from the outside.
   in would imply the project builds through Xcode, which it does not.
 - **`serve-ios` is unchanged and still iconless.** 5a's wall is about `dx serve` owning the
   build→install moment, and nothing here opens it.
+
+> **Status:** done — committed in `e2f0f94` (127 tests green; no `src/` diff, so the
+> count is unchanged by design).

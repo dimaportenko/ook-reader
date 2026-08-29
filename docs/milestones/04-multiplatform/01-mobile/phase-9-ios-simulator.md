@@ -114,7 +114,7 @@ Detail for each lives in
       is the viewport — `viewport-fit=cover`, `env()` insets on `body`, and `100vh` → `100%`
       down an unbroken chain. Driven on the iPhone 17: `62 + 778 + 34 = 874`, zero scroll range,
       both bars reachable at once. — `5e0f82e`
-- [ ] **5a. Give it an icon** *(provisional — found by running it)* — the springboard showed
+- [x] **5a. Give it an icon** *(provisional — found by running it)* — the springboard showed
       the default blank tile, and the gap is **a missing stage, not a missing setting**.
       Four builds established it: `[ios].icon` and `[ios].resources` both parse and are
       ignored, `dx bundle --package-types ios` is a passthrough, and the macOS pair on disk
@@ -122,8 +122,8 @@ Detail for each lives in
       and it has no iOS path. `[ios.plist]` carries the `CFBundleIcons` declaration; the PNGs
       need a copy into the bundle root that a rebuild wipes, so it lives in a new
       `just install-ios` and `serve-ios` keeps hot reload and the blank tile. Verified on the
-      iPhone 17 springboard and an iPad Pro 13" (M5). No `src/` diff; 127 tests unchanged.
-- [ ] **5e. Install it on a real device** *(added at the user's request, mid-5a)* — **corrects
+      iPhone 17 springboard and an iPad Pro 13" (M5). No `src/` diff; 127 tests unchanged. — `e2f0f94`
+- [x] **5e. Install it on a real device** *(added at the user's request, mid-5a)* — **corrects
       5a's inference that dx has no signing pipeline.** It has one: `--device` selects the
       `aarch64-apple-ios` triple *and* implies `--codesign` (`request.rs:726`), after which dx
       picks a provisioning profile, embeds it as `embedded.mobileprovision`, and signs. Two
@@ -140,7 +140,7 @@ Detail for each lives in
       entry to release it from — so the profile expires every **seven days**; and the signing
       identity must be *derived from the embedded profile*, not taken as the first
       `Apple Development` line, because three teams are valid on this keychain and dx guesses
-      wrong. No `src/` diff; 127 tests unchanged.
+      wrong. No `src/` diff; 127 tests unchanged. — `e2f0f94`
 - [ ] **5b. Size it for a thumb** *(split out of Step 5)* — the other half: `Prev`/`Next` are
       20pt tall against the 44pt minimum touch target, and the library grid is still the
       six-column desktop layout Step 2a found cramped into the top-left corner.
