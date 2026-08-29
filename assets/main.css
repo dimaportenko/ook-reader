@@ -12,6 +12,8 @@ body {
 html {
   /* prevent scroll bounce behavior */
   overscroll-behavior: none;
+  background-color: var(--USER__backgroundColor);
+  color: var(--USER__textColor);
 }
 
 html,

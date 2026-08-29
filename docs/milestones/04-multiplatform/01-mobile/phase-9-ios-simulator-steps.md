@@ -1889,3 +1889,161 @@ like a provisioning problem from the outside.
 
 > **Status:** done — committed in `e2f0f94` (127 tests green; no `src/` diff, so the
 > count is unchanged by design).
+
+---
+
+## Step 5f — Paint the safe area
+
+> **Added at the user's request**, from a screenshot: the strip above the status bar and
+> below the home indicator is white while the book is sepia.
+>
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+### The crux
+
+Step 5 gave the app its box: `body` pads itself by `env(safe-area-inset-*)`, so nothing the
+app draws lands under the status bar or the home indicator. That is the *layout* half of the
+safe area, and it is correct. The half it left behind is **who paints the strip that padding
+carves out** — and the answer CSS gives is *the element that owns the padding*, because an
+element's background fills its padding box, not just its content box.
+
+`body` owns the padding and owns no colour. The theme's colour lives two boxes further in,
+on `.reader-root`, put there by `Settings::inline_styles()`. So the strip falls through
+`body` (transparent) to `html` (transparent) to the canvas, whose default is white — and a
+sepia book gets white bars top and bottom.
+
+That framing decides the fix. The strip is *outside* every box the component tree can reach,
+so no component can colour it; the colour has to be given to a box that covers the insets,
+and the only such box is the canvas. Which means the theme has to stop being a fact about
+one component and become **a fact about the document** — declared at `:root`, where `html`
+can read it.
+
+### The check
+
+Three assertions, one per seam that can silently come apart:
+
+```rust
+#[test]
+fn the_theme_paints_the_safe_area_strip() {
+    let canvas = MAIN_CSS_SOURCE
+        .split('}')
+        .find(|rule| rule.contains("var(--USER__backgroundColor)"))
+        .expect("nothing outside the reader's own box carries the theme");
+
+    assert!(
+        canvas
+            .split_once('{')
+            .is_some_and(|(selector, _)| selector.trim() == "html"),
+        "the theme is painted inside the inset box, so the strip the padding \
+         leaves keeps the canvas default",
+    );
+
+    assert!(
+        settings::Settings::default().vars().starts_with(":root {"),
+        "the canvas can only read a variable declared at the document root",
+    );
+
+    assert!(
+        ROOT_THEME_JS.contains("getElementById"),
+        "a push per settings change appends a new <style> every time unless it \
+         finds the one it wrote last",
+    );
+}
+```
+
+Red before the fix, on the first assertion: *nothing outside the reader's own box carries the
+theme.* The selector assertion is the load-bearing one — a rule that paints
+`--USER__backgroundColor` on `.reader-root` would satisfy a naive "does the CSS mention the
+variable" check while leaving the bug exactly where it was.
+
+### The code
+
+`assets/main.css` — the canvas takes the theme:
+
+```css
+html {
+  /* prevent scroll bounce behavior */
+  overscroll-behavior: none;
+  background-color: var(--USER__backgroundColor);
+  color: var(--USER__textColor);
+}
+```
+
+`src/web/assets/root-theme.js` — a `<style>` the app owns and rewrites:
+
+```js
+const css = await dioxus.recv();
+
+let style = document.getElementById("ook-theme");
+
+if (!style) {
+  style = document.createElement("style");
+  style.id = "ook-theme";
+  document.head.append(style);
+}
+
+style.textContent = css;
+```
+
+`src/main.rs` — pushed from `App`, not from `Reader`:
+
+```rust
+use_effect(move || {
+    let push = document::eval(ROOT_THEME_JS);
+    _ = push.send(settings().vars());
+});
+```
+
+### Why a push and not a `<style>` in the tree
+
+Dioxus has `document::Style`, which renders a `<style>` into the head and would take
+`settings().vars()` as its child in one line. **It cannot be used here**, and the reason is
+in its own doc comment: *"Any updates to the props after the first render will not be
+reflected in the head."* It is a `use_hook` — it inserts once. The theme picker changes the
+theme *live*, so a head component would paint the canvas with whatever theme was loaded at
+launch and then never move again. The bug would look fixed until you touched the picker.
+
+So the theme reaches the host document the same way it already reaches the frame: pushed
+through `document::eval` from an effect that reads `settings()`, which is what subscribes it.
+
+**What is pushed is the whole `:root` block, not a list of properties.** `theme-listener.js`
+inside the frame loops over `css_vars()` calling `setProperty`/`removeProperty`, and it has
+to, because it is patching a root it does not own. The host owns its `<style>` outright, so
+replacing `textContent` gets removal for free: `Settings::vars()` already filters empty
+values out of the block, so switching the font back to Publisher simply stops declaring
+`--USER__fontFamily`. One assignment, no loop, and it reuses a function that was already
+written and already tested.
+
+### Why `html` and not `body`
+
+Either works for the strip — `body`'s background would paint its own padding box, and with
+`html` transparent it would propagate to the canvas as well. `html` is chosen because that
+propagation rule is genuinely surprising CSS that depends on `html` having no background of
+its own, and because the canvas is also what shows during rubber-band overscroll. Naming the
+box you mean is cheaper to read than relying on a rule that silently stops applying the day
+someone gives `html` a colour.
+
+### Verified — on the iPhone 17 simulator
+
+| | |
+|---|---|
+| reader, sepia | both strips sepia, continuous with the page — the reported bug is gone |
+| library, sepia | same, and the library is themed for the first time |
+| live switch to night, driven through the picker | canvas and both strips go dark **without a reload** |
+| back to sepia | returns |
+| tests | **128 green** (was 127), clippy clean |
+
+### Scope note
+
+- **The theme now reaches the library screen too.** That is a consequence, not creep: the
+  colour had to move to the document to cover the strip, and the document is what the library
+  renders into. `color` travels with it deliberately — painting the canvas dark under Night
+  while leaving the library's text at the UA default black is a worse bug than the one being
+  fixed.
+- **`Settings::inline_styles()` is now redundant** — `.reader-root` re-declares at component
+  scope every variable `:root` already carries, and re-applies a background and colour it
+  would otherwise inherit. Removing it touches four tests in `settings/mod.rs` that are not
+  about this bug, so it is left for **Step 6**'s refactor pass.
+- **Not the chrome's sizing.** Step 5b still owns the 20pt `Prev`/`Next` targets and the
+  six-column library grid.

@@ -168,10 +168,19 @@ Detail for each lives in
       the covers handler was already using, which is why covers kept rendering for books that
       would not open. Ships no migration for rows already written: the only such rows are the
       developer's own, repaired by hand, and there are no users yet. — `36052ba`
-- [ ] **6. Review and refactor** — the phase-closing pass. Carries two parked items: the
-      `FRAME_AUTOSAVE_NAME` dead code under iOS (Step 1), and **accessible names for four
-      unnamed buttons** — the book cover, and the reader's close/contents/settings — found by
-      Step 2a and not a mobile bug at all.
+- [ ] **5f. Paint the safe area** *(bug, reported from a screenshot)* — **the strip above the
+      status bar and below the home indicator is white while the book is sepia.** Step 5 gave
+      `body` the insets as padding, and an element's background fills its padding box — so the
+      strip belongs to `body`, which owns no colour, while the theme sits two boxes in on
+      `.reader-root`. No component can reach outside its own box, so the colour has to move to
+      the one box that covers the insets: the canvas. `html` takes
+      `var(--USER__backgroundColor)`, and the `:root` block `Settings::vars()` already builds is
+      pushed into a `<style>` the app owns — a push and not `document::Style`, which inserts
+      once and would freeze the canvas at the launch theme.
+- [ ] **6. Review and refactor** — the phase-closing pass. Carries three parked items: the
+      `FRAME_AUTOSAVE_NAME` dead code under iOS (Step 1), **`Settings::inline_styles()`**, made
+      redundant by Step 5f, and **accessible names for four unnamed buttons** — the book cover,
+      and the reader's close/contents/settings — found by Step 2a and not a mobile bug at all.
 
 ## Out of scope
 

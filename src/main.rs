@@ -40,6 +40,8 @@ const FAVICON: Asset = asset!("/assets/favicon.ico");
 const MAIN_CSS: Asset = asset!("/assets/main.css");
 const DIOXUS_PRIMITIVES_CSS: Asset = asset!("/assets/dx-components-theme.css");
 
+const ROOT_THEME_JS: &str = include_str!("web/assets/root-theme.js");
+
 const VIEWPORT: &str =
     "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover";
 
@@ -90,6 +92,11 @@ fn App() -> Element {
         move || {
             _ = db.save_settings(&settings()).or_log("save your settings");
         }
+    });
+
+    use_effect(move || {
+        let push = document::eval(ROOT_THEME_JS);
+        _ = push.send(settings().vars());
     });
 
     epub::use_register_covers_handler(config.books_dir.clone());
@@ -148,6 +155,33 @@ mod test {
         assert!(VIEWPORT.contains("width=device-width"));
         assert!(VIEWPORT.contains("initial-scale=1.0"));
         assert!(VIEWPORT.contains("user-scalable=no"));
+    }
+
+    #[test]
+    fn the_theme_paints_the_safe_area_strip() {
+        let canvas = MAIN_CSS_SOURCE
+            .split('}')
+            .find(|rule| rule.contains("var(--USER__backgroundColor)"))
+            .expect("nothing outside the reader's own box carries the theme");
+
+        assert!(
+            canvas
+                .split_once('{')
+                .is_some_and(|(selector, _)| selector.trim() == "html"),
+            "the theme is painted inside the inset box, so the strip the padding \
+             leaves keeps the canvas default",
+        );
+
+        assert!(
+            settings::Settings::default().vars().starts_with(":root {"),
+            "the canvas can only read a variable declared at the document root",
+        );
+
+        assert!(
+            ROOT_THEME_JS.contains("getElementById"),
+            "a push per settings change appends a new <style> every time unless it \
+             finds the one it wrote last",
+        );
     }
 
     #[test]
