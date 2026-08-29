@@ -2218,3 +2218,5 @@ an 874pt screen, not 699.
   been driven in portrait; a rotated phone is unverified.
 - **Not the iPad.** At 1024pt it is above the breakpoint and keeps the dropdown unchanged —
   reasoned, not driven.
+
+> **Status:** done — committed in `0a135fc` (129 tests green).
