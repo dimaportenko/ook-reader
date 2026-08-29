@@ -29,7 +29,7 @@ pub fn PopoverRoot(props: PopoverRootProps) -> Element {
 #[component]
 pub fn PopoverTrigger(props: PopoverTriggerProps) -> Element {
     let base = attributes!(button {
-        class: "icon-button"
+        class: "icon-button glass"
     });
     let merged = merge_attributes(vec![base, props.attributes]);
 
@@ -43,11 +43,11 @@ pub fn PopoverTrigger(props: PopoverTriggerProps) -> Element {
 
 #[component]
 pub fn PopoverContent(props: PopoverContentProps) -> Element {
-    let class = if let Some(class) = props.class {
-        format!("{} {}", Styles::dx_popover_content, class)
-    } else {
-        Styles::dx_popover_content.to_string()
-    };
+    let class = format!(
+        "{} glass {}",
+        Styles::dx_popover_content,
+        props.class.unwrap_or_default()
+    );
 
     let base = attributes!(div {
         tabindex: "-1",

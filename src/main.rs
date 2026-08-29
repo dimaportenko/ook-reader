@@ -197,4 +197,64 @@ mod test {
              resolves against an auto-height ancestor and the screen collapses",
         );
     }
+
+    #[test]
+    fn every_backdrop_filter_is_paired_with_its_webkit_spelling() {
+        let prefixed = MAIN_CSS_SOURCE.matches("-webkit-backdrop-filter:").count();
+        let all = MAIN_CSS_SOURCE.matches("backdrop-filter:").count();
+
+        assert!(prefixed > 0, "the glass has no blur to speak of");
+        assert_eq!(
+            all, prefixed * 2,
+            "WebKit is the engine that can refuse, and it is the one an unprefixed \
+             declaration is invisible on",
+        );
+    }
+
+    #[test]
+    fn the_glass_fill_is_declared_after_the_button_it_overrides() {
+        let button = MAIN_CSS_SOURCE
+            .find(".icon-button {")
+            .expect("the primitive the glass composes onto");
+        let glass = MAIN_CSS_SOURCE
+            .find(".glass {")
+            .expect("the material itself");
+
+        assert!(
+            button < glass,
+            "one class each is a specificity tie, so only source order decides \
+             which background-color the button ends up with",
+        );
+    }
+
+    #[test]
+    fn a_surface_can_set_its_own_blur_radius() {
+        let (_, after) = MAIN_CSS_SOURCE
+            .split_once(".glass {")
+            .expect("the material itself");
+        let block = after.split_once('}').expect("an unclosed rule").0;
+
+        assert!(
+            !block.contains("--glass-blur:"),
+            "a default declared inside .glass beats every consumer that declares \
+             the same knob earlier at one class of specificity, so .icon-button's \
+             radius never reaches the filter",
+        );
+    }
+
+    #[test]
+    fn transparency_can_be_turned_off_without_turning_the_chrome_off() {
+        let (_, reduced) = MAIN_CSS_SOURCE
+            .split_once("@media (prefers-reduced-transparency: reduce)")
+            .expect("a reading app owes the setting an answer");
+
+        assert!(
+            reduced.contains("backdrop-filter: none"),
+            "leaving the blur on is the whole thing the setting asks you not to do",
+        );
+        assert!(
+            reduced.contains("--glass-fallback"),
+            "each surface names its own opaque colour, or they all collapse to one",
+        );
+    }
 }
