@@ -2047,3 +2047,5 @@ someone gives `html` a colour.
   about this bug, so it is left for **Step 6**'s refactor pass.
 - **Not the chrome's sizing.** Step 5b still owns the 20pt `Prev`/`Next` targets and the
   six-column library grid.
+
+> **Status:** done — committed in `da2cacd` (128 tests green).
