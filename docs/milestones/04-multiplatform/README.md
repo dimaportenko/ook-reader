@@ -23,7 +23,7 @@ a rewrite.
 
 | # | Feature | Outcome | Status |
 |---|---|---|---|
-| 1 | [Mobile (iOS/Android)](01-mobile/README.md) | The reader running on a phone/tablet | 🚧 — [Phase 9](01-mobile/phase-9-ios-simulator.md) takes iOS/iPadOS on the simulator; Android is not in it |
+| 1 | [Mobile (iOS/Android)](01-mobile/README.md) | The reader running on a phone/tablet | 🚧 — [Phase 9](01-mobile/phase-9-ios-simulator.md) took iOS/iPadOS to **done**, on the simulator and on real hardware; Android has no phase yet |
 | 2 | Web (WASM) | The reader running in the browser | ⏸ |
 
 ## What each platform needs

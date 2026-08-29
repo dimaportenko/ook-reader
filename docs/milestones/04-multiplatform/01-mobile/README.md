@@ -3,7 +3,9 @@
 [← Milestone 4: Multi-platform](../README.md)
 
 **Outcome:** the reader you built on the desktop, running on an iPhone and an iPad, with a
-book open and pages turning under your thumb. **Status:** 🚧 in progress.
+book open and pages turning under your thumb. **Status:** 🚧 in progress — the
+iOS/iPadOS half is **done** ([Phase 9](phase-9-ios-simulator.md)); Android has no phase
+yet.
 
 ## Why now
 
@@ -78,7 +80,7 @@ visible at all.
 
 | # | Phase | Outcome | Status |
 |---|-------|---------|--------|
-| 9 | [Run on the iOS simulator](phase-9-ios-simulator.md) | It builds, launches, opens a book, and turns pages by touch on iPhone and iPad | 🚧 |
+| 9 | [Run on the iOS simulator](phase-9-ios-simulator.md) | It builds, launches, opens a book, and turns pages by touch on iPhone and iPad | ✅ |
 
 ## Reference
 

@@ -999,6 +999,9 @@ off-screen at rest, which is **Step 5** and unchanged.
 > visible change.
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+>
+> **Status:** done — committed in `64966a5` (134 tests green, clippy clean on the host
+> and on `aarch64-apple-ios-sim`), driven on the iPhone 17 simulator.
 
 The step [Finding B](#finding-b--the-top-safe-area-is-not-handled-and-step-2-was-wrong-about-it)
 scheduled. At rest on a tablet the reader opened with **no way to turn a page**: the nav row sat

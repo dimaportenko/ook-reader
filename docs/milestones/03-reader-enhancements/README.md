@@ -5,12 +5,11 @@
 **Goal:** the reason this project exists — features missing from other readers. A backlog
 to refine once the basic reader (Milestone 2) works.
 
-**Status:** 🚧 in progress — Milestone 2 shipped, so this is now the current focus. Themes &
-Typography (Phase 4) and ToC & Navigation (Phase 8) are both **done**. **No phase is
-currently open**, but the next one is now chosen and planned:
-[Chrome Material → Phase 10](06-chrome-material/phase-10-liquid-glass.md). It waits behind
-[Phase 9 Step 6](../04-multiplatform/01-mobile/phase-9-ios-simulator.md), the iOS port's
-closing review pass, which still owns "next".
+**Status:** 🚧 in progress — and now the current focus outright. Themes & Typography
+(Phase 4) and ToC & Navigation (Phase 8) are both **done**. The open phase is
+[Chrome Material → Phase 10](06-chrome-material/phase-10-liquid-glass.md), whose Step 1 has
+landed; [Phase 9](../04-multiplatform/01-mobile/phase-9-ios-simulator.md), the iOS port it
+was waiting behind, closed with its review pass.
 
 ## Candidate features (to prioritize later)
 

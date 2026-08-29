@@ -49,23 +49,25 @@ reader can use (open a book, see text, turn a page, resume). The MVP slice seque
 
 ## Current focus
 
-**Milestone 4 → [Phase 9 — Run on the iOS simulator](milestones/04-multiplatform/01-mobile/phase-9-ios-simulator.md), Step 1.**
-Read the book on the iPad. The crux is that **the UI ports for free and the assumptions do
-not**: `dioxus::desktop` and `dioxus::mobile` are the same crate under two feature-gated
-names, so the entire dependency graph — bundled `rusqlite` included — cross-compiled on the
-first try and the whole crate failed on *five identifiers*. What the compiler cannot see is
-everything the app assumes about being a desktop process: that a picked file has a path, that
-a window has a size worth remembering, that pages turn on arrow keys, that the viewport is a
-rectangle. So Step 1 is the compiler's half of the phase and Step 2 launches the thing and
-writes down what actually breaks.
+**Milestone 3 → [Phase 10 — Liquid glass chrome](milestones/03-reader-enhancements/06-chrome-material/phase-10-liquid-glass.md), Step 2 or 3.**
+Give the reader's floating surfaces a glass material that behaves the same in WebKit and
+Chromium. The crux is a ceiling and a prerequisite. The ceiling: Dioxus renders into two
+engine families, so cross-platform means *must work in WebKit* — which rules out both
+`backdrop-filter: url(#svg)` (Chromium only) and the private `-apple-visual-effect` (not
+shippable, and Apple-only). The material is therefore built from `blur()`, `saturate()`,
+gradients and shadows, which is enough, because the gap between 2014 frosted glass and
+Liquid Glass is not the blur. The prerequisite: three of the four surfaces are *siblings*
+of the page rather than on top of it, so they have nothing to blur — which is why Step 1
+started at the popovers and floating the bars is its own step.
 
-**Milestone 3 stays open behind it**, with no phase in progress — full-text search,
-annotations, sync, and the **bookmarks** that
-[Phase 8 deferred out](milestones/03-reader-enhancements/05-toc-navigation/README.md) are all
-unclaimed on its [board](milestones/03-reader-enhancements/README.md). Milestone 4 is not
-jumping that queue: its deferral was gated on "until the desktop reader works", and it does.
-[`TODO.md`](../TODO.md) holds the smaller unscheduled items — two of which, swipe-to-turn and
-keyboard paging, Phase 9 walks straight into.
+**Milestone 4's iOS half is closed behind it.**
+[Phase 9](milestones/04-multiplatform/01-mobile/phase-9-ios-simulator.md) is **done**: the
+reader builds, launches, imports, pages by swipe and fits the notch on an iPhone and an
+iPad, and on real hardware. Android has no phase yet, and web (WASM) stays ⏸. Milestone 3's
+other candidates — full-text search, annotations, sync, and the **bookmarks** that
+[Phase 8 deferred out](milestones/03-reader-enhancements/05-toc-navigation/README.md) — are
+still unclaimed on its [board](milestones/03-reader-enhancements/README.md).
+[`TODO.md`](../TODO.md) holds the smaller unscheduled items.
 
 [Phase 8 — ToC & Navigation](milestones/03-reader-enhancements/05-toc-navigation/phase-8-toc-navigation.md)
 **closed 2026-08-18** and was the last one worked: the reader names the chapter you are in

@@ -1,6 +1,6 @@
 # Phase 9 — Run on the iOS simulator
 
-[← Feature: Mobile](README.md) · **Status:** 🚧 in progress ·
+[← Feature: Mobile](README.md) · **Status:** ✅ done ·
 build log: [`phase-9-ios-simulator-steps.md`](phase-9-ios-simulator-steps.md)
 
 ## Goal
@@ -185,7 +185,7 @@ Detail for each lives in
       `min-width` floor reset, and a `75dvh` cap so the sheet stops clear of the chrome
       instead of burying its own trigger. Driven on the iPhone 17: `16 → 386`, top at 128,
       toggle and chapter-jump both good. 129 tests green. — `0a135fc`
-- [ ] **6. Review and refactor** — the phase-closing pass. Carries four parked items: the
+- [x] **6. Review and refactor** — the phase-closing pass. Carries four parked items: the
       `FRAME_AUTOSAVE_NAME` dead code under iOS (Step 1), **`Settings::inline_styles()`**, made
       redundant by Step 5f, **`.dx-popover-content`'s dead `max-width`** — authored for a
       `position: fixed` every `[data-side]` rule then discards, so it measures the trigger and
@@ -195,7 +195,7 @@ Detail for each lives in
       that reads it, `inline_styles()` deleted outright (Step 5f's canvas already carried
       every declaration it built), the popover's `max-width` re-expressed in `dvw` so it
       means the same thing under the `fixed` the base rule declares and the `absolute` every
-      side rule substitutes, and four `aria_label`s. 134 tests green.
+      side rule substitutes, and four `aria_label`s. 134 tests green. — `64966a5`
 
 ## Out of scope
 
