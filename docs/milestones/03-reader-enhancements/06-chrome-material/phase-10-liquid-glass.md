@@ -115,10 +115,15 @@ Detail for each lives in
       simulator, because the cross-platform claim is the point and one engine proves half
       of it. **The iframe question below is answered yes** — the popover blurs real book
       text — so Step 3 is unblocked. — `9f8188b`
-- [ ] **2. Make the light move** — the specular sweep: an `@property`-registered angle
-      driven by pointer position on desktop and `DeviceOrientationEvent` on mobile. This is
-      the layer that reads as *liquid* rather than frosted, and it is the one that can
-      regress scroll performance, so it lands separately and gets measured.
+- [ ] **2. Make the light move** — the specular sweep, split in two because the layer and
+      the input source are different ideas with different risk. The angle is the seam: 2a
+      registers and reads it, 2b drives it.
+  - [ ] **2a. The specular layer** — an `@property`-registered `--glass-angle` and the
+        gradient on `.glass` that reads it, at a fixed angle. Pure CSS, no new inputs, and
+        the registration is what makes the angle interpolable at all.
+  - [ ] **2b. Drive the angle** — pointer position on desktop, `DeviceOrientationEvent` on
+        mobile. This is the half that reads as *liquid* rather than frosted, and the one
+        that can regress scroll performance, so it lands separately and gets measured.
 - [ ] **3. Float the chrome** *(provisional — gated on Step 1's finding)* — give the top bar
       and `NavRow` something to blur by overlaying them on the page instead of stacking
       them beside it. Re-derives Phase 9 Step 5's viewport arithmetic and the safe-area

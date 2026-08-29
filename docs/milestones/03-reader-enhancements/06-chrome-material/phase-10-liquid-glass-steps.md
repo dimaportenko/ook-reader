@@ -213,3 +213,156 @@ the smallest surface in the app. Narrow the window until the centred title runs 
 buttons and the material appears. The full payoff arrives with Step 3.
 
 ---
+
+## Step 2a — The specular layer
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+The fourth material layer: a bright band raked across the glass at an angle that is a
+*registered* `<angle>`, not a token string. The angle stays fixed here. Driving it from the
+pointer and from `DeviceOrientationEvent` is Step 2b.
+
+**Why the split.** The phase doc planned one step. It is two ideas with two different risks:
+the layer is pure CSS that either paints or does not, while the drive adds a JS input source,
+a Dioxus `eval` channel, and a per-frame cost that has to be measured against scrolling text.
+The **angle is the natural seam** — 2a registers and reads it, 2b writes it — and the seam
+falls exactly where the risk changes.
+
+### The check, first
+
+Same idiom as Step 1: `MAIN_CSS_SOURCE` in `src/main.rs`'s test module, because both ways
+this step fails silently are invisible to a screenshot.
+
+| Test | What it stops |
+|---|---|
+| `the_specular_angle_is_registered_with_every_descriptor_it_needs` | An `@property` rule missing `syntax`, `inherits` **or** `initial-value` is **invalid and dropped whole**. Nothing errors: `var(--glass-angle)` then resolves to nothing, the gradient goes invalid at computed-value time, and `background-image` is dropped. The panel looks exactly like Step 1's. The same test also asserts `.glass` actually *reads* `var(--glass-angle)` — a registered property nobody reads is a no-op |
+| `transparency_can_be_turned_off_without_turning_the_chrome_off` *(extended)* | The reduced-transparency branch keeping the highlight. Losing the blur does not remove the specular, and a lit streak raking across a flat opaque panel is precisely the glass cue the setting asks you to drop |
+
+Watched fail first, as two separate tests: `134 passed; 2 failed`, on *"an unregistered
+custom property is a token string, not an angle"* and *"a reading app owes the setting an
+answer"*. The second was then folded into Step 1's existing reduced-transparency test during
+the `simplify` pass — the invariant it asserts is that test's whole subject, and a second
+test grepping the same `@media` block was duplication. After the merge: **135 passed, 0
+failed**, clippy clean on the host and on `aarch64-apple-ios-sim`.
+
+### What landed
+
+**`assets/main.css`**, immediately above `.glass` — the registration:
+
+```css
+@property --glass-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 100deg;
+}
+```
+
+and inside `.glass`, one declaration:
+
+```css
+  background-image: linear-gradient(
+    var(--glass-angle),
+    transparent 34%,
+    rgb(255 255 255 / 0.3) 47%,
+    rgb(255 255 255 / 0.07) 57%,
+    transparent 70%
+  );
+```
+
+plus `background-image: none` in the `prefers-reduced-transparency` block. That is the
+entire diff outside the tests. No new file, no pseudo-element, no Rust.
+
+### Why it works
+
+**The specular is a `background-image`, not a `::after`.** This is the fork worth arguing
+with, and the reason is a landmine in the neighbouring stylesheet:
+`src/ui/components/popover/style.css` already carries four
+`.dx-popover-content[data-side="…"]::after` rules — a tooltip arrow that was **never
+finished**, because nothing anywhere declares `content` for that pseudo-element, so it is
+never generated. Adding `.glass::after { content: "" }` would have *brought those rules to
+life*: at `(0, 2, 1)` they outrank `.glass::after` at `(0, 1, 1)`, so they would have
+overridden `top` and `left` out of the specular's `inset: 0` and left a sliver hanging off
+the panel's edge. A layer on the element's own `background-image` sidesteps all of it, and is
+strictly less machinery besides — no generated box, no `pointer-events: none` needed, no
+extra paint layer per glass surface. `::before` was not available either; the gradient border
+owns it, and its `mask-composite: exclude` would have ring-masked a specular sharing the box.
+
+**`background-image` paints over `background-color`, and both paint over the filtered
+backdrop.** `backdrop-filter` operates on what is *behind* the element; the element's own
+background layers then composite on top of that result. So the specular sits above the
+blurred book text without disturbing it, and the existing `--glass-tint` fill still shows
+through wherever the gradient is `transparent`.
+
+**Registering the property is the load-bearing half, even though nothing animates yet.**
+An unregistered custom property is an untyped token string: it substitutes textually and
+**cannot be interpolated**, so Step 2b could not `transition` it. Registration also buys two
+things now — `initial-value` means `var(--glass-angle)` always resolves, so no `var()`
+fallback is needed at the point of use, and a bad value is rejected at *parse* time rather
+than poisoning the gradient into invalid-at-computed-value-time and silently dropping the
+whole declaration.
+
+**`@property`'s `initial-value` is not a declaration, so it does not fight consumers.** This
+matters because Step 1 got burned by exactly that: `--glass-blur: 20px` declared *inside*
+`.glass` tied `.icon-button`'s `6px` on specificity and won on source order. An
+`initial-value` lives outside the cascade entirely — it is the property's definition, not a
+rule that matches an element — so any consumer that declares `--glass-angle` beats it with no
+specificity contest at all. It is a *third* pattern alongside the two the material already
+uses (`var()` fallback at point of use for the knobs, last-declared-wins for the fill), and
+it is the cleanest of the three.
+
+**`inherits: false` is the right answer, not the safe one.** An angle is a property of *this
+surface's* relationship to the light, not something a child glass panel should adopt from its
+parent. It also stops the value walking down into the popover's contents, where nothing reads
+it and every element would carry a computed copy.
+
+**The four stops are asymmetric on purpose.** `transparent → 0.3 → 0.07 → transparent`
+gives a bright leading edge with a long dim trail. Three symmetric stops read as a *stripe*;
+the trailing shoulder is what makes it read as light glancing off a curved surface.
+
+### Verified — driven on the iPhone 17 simulator
+
+Measured rather than eyeballed, because on a cream theme the effect is real but small and a
+screenshot is not evidence.
+
+On a text-free row inside the open contents panel, luminance sampled left-to-right:
+
+| Row | Left edge | Peak | Right edge | Peak at x |
+|---|---|---|---|---|
+| `y=290` (panel gap) | 228.8 | **236.3** | 229.2 | 226 |
+| `y=690` (panel gap) | ~229 | 237.4 | ~231 | 151 |
+| `y=845` (backdrop, control) | 242.0 | 242.0 | 242.0 | — flat, spread **0.7** |
+
+Three things fall out of that:
+
+1. **The gradient is live and at full strength.** A `0.3` white stop over a base of 230 has a
+   predicted lift of `0.3 × (255 − 230) = 7.5`. Measured lift: **7.5**. So `@property` is
+   supported in this WKWebView, the rule was not dropped, and no stop is being clamped.
+2. **The band is tilted the way `100deg` says.** 100° points right and slightly *down*, so
+   the same gradient position occurs at a smaller `x` as `y` grows. The peak moves left —
+   x=226 at y=290, x=151 at y=690.
+3. **The variation is the material, not the content.** The backdrop strip below the panel is
+   uniform across the identical x range (spread 0.7 ≈ noise), so nothing in the source image
+   could have produced the hump.
+
+**And it confirms Step 1's open problem rather than fixing it.** The reason a +7.5 lift is
+the *most* this can do on a sepia theme is that the backdrop is already at 230 of 255 — there
+are only 25 levels of headroom, and a white specular can only spend them. On a dark theme the
+same declaration lifts ~70. The material's light model still assumes a dark backdrop; that is
+the next step's problem, not this one's.
+
+### Scope note
+
+Not in this step: **driving the angle** (2b — pointer + `DeviceOrientationEvent`, a JS input
+source and the first thing in this phase that costs per-frame work); the **white-tint
+saturation on light themes**, which Step 1 pencilled in here and which this step has now
+*measured* instead of fixed — it is a change to the material's **fill**, not its
+**highlight**, and it wants the app's `--USER__*` theme rather than the dx-components
+`--light`/`--dark` switch, which tracks the OS colour scheme and not the reader's chosen
+theme; and any **performance measurement**, which belongs with 2b where motion arrives.
+
+**Found, not fixed:** the dead `.dx-popover-content[data-side="…"]::after` arrow rules
+described above. Four rules that style a pseudo-element nothing generates — inert today, and
+a trap for the next person who reaches for `::after` on a popover. Candidate for Step 4.
+
+---

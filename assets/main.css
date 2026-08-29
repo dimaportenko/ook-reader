@@ -182,8 +182,21 @@ body,
   --glass-fallback: var(--primary-color-4);
 }
 
+@property --glass-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 100deg;
+}
+
 .glass {
   background-color: var(--glass-tint, rgb(255 255 255 / 0.12));
+  background-image: linear-gradient(
+    var(--glass-angle),
+    transparent 34%,
+    rgb(255 255 255 / 0.3) 47%,
+    rgb(255 255 255 / 0.07) 57%,
+    transparent 70%
+  );
   -webkit-backdrop-filter: blur(var(--glass-blur, 20px)) saturate(1.8);
   backdrop-filter: blur(var(--glass-blur, 20px)) saturate(1.8);
   box-shadow:
@@ -221,6 +234,7 @@ body,
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
     background-color: var(--glass-fallback, var(--primary-color));
+    background-image: none;
   }
 
   .glass::before {

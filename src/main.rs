@@ -205,7 +205,8 @@ mod test {
 
         assert!(prefixed > 0, "the glass has no blur to speak of");
         assert_eq!(
-            all, prefixed * 2,
+            all,
+            prefixed * 2,
             "WebKit is the engine that can refuse, and it is the one an unprefixed \
              declaration is invisible on",
         );
@@ -255,6 +256,40 @@ mod test {
         assert!(
             reduced.contains("--glass-fallback"),
             "each surface names its own opaque colour, or they all collapse to one",
+        );
+        assert!(
+            reduced.contains("background-image: none"),
+            "a highlight raking across an opaque panel is the lit-glass cue the \
+             setting asks you to drop, and losing the blur does not remove it",
+        );
+    }
+
+    #[test]
+    fn the_specular_angle_is_registered_with_every_descriptor_it_needs() {
+        let (_, property) = MAIN_CSS_SOURCE
+            .split_once("@property --glass-angle {")
+            .expect("an unregistered custom property is a token string, not an angle");
+        let block = property.split_once('}').expect("an unclosed rule").0;
+
+        for descriptor in ["syntax:", "inherits:", "initial-value:"] {
+            assert!(
+                block.contains(descriptor),
+                "an @property rule missing {descriptor} is dropped whole, and the \
+                 gradient reading it then goes invalid at computed-value time",
+            );
+        }
+
+        let (_, glass) = MAIN_CSS_SOURCE
+            .split_once(".glass {")
+            .expect("the material itself");
+
+        assert!(
+            glass
+                .split_once('}')
+                .expect("an unclosed rule")
+                .0
+                .contains("var(--glass-angle)"),
+            "a registered property nothing reads is a no-op",
         );
     }
 }
