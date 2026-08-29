@@ -1,5 +1,6 @@
 {
-  "commands": {
+  "commands": {},
+  "commands-old": {
     "dx:bundle": "dx bundle --bundle macos --release",
     "desktop:dx:serve": "dx serve --platform desktop",
     "ios:dx:serve": "dx serve --platform ios",
