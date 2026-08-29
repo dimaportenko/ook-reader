@@ -9,7 +9,7 @@ The phase doc holds the crux, the design decisions and the step index.
 
 ## Step 1 — The static material
 
-**Status:** 🚧 written, uncommitted — 132 tests green, clippy clean, driven on the iPhone 17 simulator
+> **Status:** done — committed in `9f8188b` (133 tests green), driven on the iPhone 17 simulator.
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.

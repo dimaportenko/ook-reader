@@ -107,13 +107,14 @@ step looks at, not a footnote.
 Detail for each lives in
 [`phase-10-liquid-glass-steps.md`](phase-10-liquid-glass-steps.md).
 
-- [ ] **1. The static material** — a `.glass` primitive (blur + saturate, rim highlight,
+- [x] **1. The static material** — a `.glass` primitive (blur + saturate, rim highlight,
       masked gradient border, reduced-transparency fallback) applied to the two popovers,
       which already float over the book, **and to `.icon-button`**, whose three instances
       sit partly over the absolutely-positioned title. Also answers the iframe question
       above. Eyeball under `dx serve` **and** a driven screenshot on the iPhone 17
       simulator, because the cross-platform claim is the point and one engine proves half
-      of it.
+      of it. **The iframe question below is answered yes** — the popover blurs real book
+      text — so Step 3 is unblocked. — `9f8188b`
 - [ ] **2. Make the light move** — the specular sweep: an `@property`-registered angle
       driven by pointer position on desktop and `DeviceOrientationEvent` on mobile. This is
       the layer that reads as *liquid* rather than frosted, and it is the one that can
