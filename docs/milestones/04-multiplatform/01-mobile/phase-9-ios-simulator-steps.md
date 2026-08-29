@@ -1339,6 +1339,148 @@ Not a simulator artifact: reinstalling from Xcode, or shipping a user a new buil
 same thing. The fix is to store the path **relative to `books_dir`** and rejoin it on read, the
 way the DB is already located. `cover_path` carries the identical bug (`files.rs:33`).
 `source_path` is a third case and a different question — it is an external path used for dedup
-through a `UNIQUE` constraint, and the iOS picker hands back a temp-inbox URL. **Not scheduled**
-— it wants a step of its own, and it is a `03-reader-enhancements`-flavoured data bug rather
-than one of Phase 9's layout items.
+through a `UNIQUE` constraint, and the iOS picker hands back a temp-inbox URL. ~~**Not
+scheduled**~~ — **scheduled and fixed as [Step 5d](#step-5d--let-the-library-survive-a-move)**,
+at the user's request. It is a `03-reader-enhancements`-flavoured data bug rather than one of
+Phase 9's layout items, and it is here because iOS is what exposed it.
+
+## Step 5d — Let the library survive a move
+
+> **Status:** done — 127 tests green, clippy clean.
+>
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+*Bug, diagnosed after Step 5c and scheduled at the user's request. Not a layout item, and not
+strictly a Phase 9 item either — but iOS is the platform that exposed it, so it is logged
+where it was found.*
+
+### The crux — one path is recalculated, the other is remembered
+
+The app knows two locations, and it learns them in two different ways.
+
+The **database** is found by recomputing `Config::app_dir()` on every launch
+(`src/main.rs:60`). Whatever `directories` says today is where the app looks today.
+
+The **book file** is found by reading a string back out of that database — a string frozen at
+import time, because `BookFiles::import` returned an absolute `PathBuf` and
+`Library::add_from_path` stored it verbatim.
+
+On every desktop platform those two agree forever, because `data_dir()` is stable for the life
+of the account. On iOS they do not: the app's data container is a directory whose name is a
+UUID, and **iOS regenerates that UUID on each install**, migrating the contents into the new
+one. So the bytes survive and the remembered path does not.
+
+Measured on the simulator before the fix: exactly one container on disk,
+`131366EC-B726-4E3E-A1F9-B40FDCFFC44E`, holding all three imported EPUBs intact — while the
+`books` rows named `85CEE5A3-…`, a container that no longer existed. Nothing had been deleted.
+The library was pointing at an address the reader had moved out of.
+
+That framing is the whole step. The bug is not "the file went missing" and the fix is not
+"handle a missing file"; the bug is **that a path was stored at all**, and the fix is to store
+the one part of it that cannot rot — the file name — and rejoin it with a freshly computed
+`books_dir` on every read. The same trick the database itself already uses, and the same trick
+`use_register_covers_handler` already used for cover images, which is why covers kept rendering
+on a build where books would not open.
+
+### The check
+
+One test in `src/library/mod.rs`'s test module, simulating the container rename with
+`fs::rename` on a tempdir.
+
+**The bug, reproduced.** `books_reopen_after_the_app_directory_moves` imports into
+`container-a`, moves the whole directory to `container-b`, reopens the database from its new
+home, and asks the row to open its book. Watched fail before any implementation existed, with
+precisely the simulator's error:
+
+```
+Archive(UnreadableArchive { source: Os { code: 2, kind: NotFound,
+  message: "No such file or directory" },
+  path: Some("…/container-a/books/644d5dde-0c71-4e62-a618-fb544d515456.epub") })
+```
+
+That is the prize of this step independent of the fix: a bug that previously needed a
+simulator, a reinstall and a hand-driven import to observe is now a unit test that runs in
+10ms.
+
+### The code
+
+`BookFiles` stops dealing in paths and starts dealing in **names**, with one method that knows
+where the directory is:
+
+```rust
+pub(crate) fn path_of(&self, name: &str) -> PathBuf {
+    self.dir.join(name)
+}
+
+pub(crate) fn import(&self, source: &Path) -> Result<String, std::io::Error> {
+    let name = format!("{}.epub", Uuid::new_v4());
+
+    if let Err(error) = fs::copy(source, self.path_of(&name)) {
+        self.remove(&name);
+        return Err(error);
+    }
+
+    Ok(name)
+}
+```
+
+`write_cover` and `remove` take names too, so every filesystem touch in the module routes
+through `path_of`. `Library` re-exports it as `book_path`, which is what the UI calls.
+
+`Book`'s fields are renamed to say what they now hold — `path` → `file_name`,
+`cover_path` → `cover_name` — so the compiler finds every consumer rather than letting a
+`String` quietly change meaning. `Book::cover_name()`, the helper that existed only to strip a
+directory off the stored cover path for the `/covers/` URL, **dissolves**: the field is already
+the name.
+
+### Why it works
+
+**The rename is doing real work.** A `String` field that changes meaning while keeping its name
+is the exact shape that re-rots six months later. `path` → `file_name` turned a silent semantic
+change into ~20 compiler errors, every one of them a place that had to be re-read and decided.
+
+**Covers survived the move all along, and that was the clue.** `use_register_covers_handler`
+serves `/covers/<name>` by joining the name onto a freshly computed `books_dir`. It never read
+the stored path, so it never rotted — the app rendered a perfect grid of book covers it could
+not open. The fix generalises what the covers handler was already doing.
+
+### Scope note
+
+**It ships no migration for rows already on disk.** An earlier draft of this step carried a
+`Db::shorten_paths_to_names` that ran from `migrate()` and rewrote every stored `path` and
+`cover_path` down to its file name. It was cut at commit time: the only databases holding
+absolute paths are the developer's own, they were repaired by hand, and the app has no users
+yet. Writing migration code for zero rows is code that can only rot before it can ever run.
+
+Worth knowing if that decision is ever revisited — a stale row is *invisible on desktop*.
+`PathBuf::join` discards its receiver when the argument is absolute, so for an un-migrated row
+`book_path()` returns the old absolute path unchanged, which on a desktop platform is still a
+valid path to a real file. Nothing looks wrong. The breakage is iOS-only, because that is the
+only platform where the old container is genuinely gone. Any future need for this migration
+will therefore surface as a device bug, not a failing test.
+
+**It does not touch `source_path`.** That column is a genuinely different thing: an *external*
+path, to a file the app does not own, used only as the `UNIQUE` key that makes reimport
+idempotent. It cannot become a name — two books named `book.epub` in different folders are two
+books. On iOS it is worse than stale, it is meaningless: the document picker hands back a
+temp-inbox URL that is deleted shortly after. Reimport dedup on iOS therefore does not really
+work yet, and that is a separate step with a separate question ("what identifies a book?"), not
+a path-joining fix.
+
+**It does not rename the `path` and `cover_path` columns.** The struct fields say `file_name`
+and `cover_name`; the schema still says `path` and `cover_path`, so the SQL in `books.rs` is
+now the one place where the two vocabularies meet. `ALTER TABLE … RENAME COLUMN` would close
+the gap and is cheap on SQLite 3.25+; it was left out because it is schema churn for
+readability, not for correctness.
+
+**It does not verify on the simulator.** The failure is now a unit test, and the fix is a
+join — there is nothing about it that a device could show that the test does not. What the
+device would still answer is a question this step deliberately dropped: whether books imported
+by an *older* build come back. They do not, and are not meant to — see the migration note
+above. A fresh import on the simulator exercises everything this step actually changed.
+
+**It does not add a repair path for a genuinely missing file.** A row whose managed copy really
+was deleted still fails at `Epub::open` with a raw error in the status line. That was true
+before and is unchanged; `reimport_repairs_a_missing_managed_copy` covers the recovery route
+that exists.

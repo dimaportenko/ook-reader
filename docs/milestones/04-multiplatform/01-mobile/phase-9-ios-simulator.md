@@ -134,6 +134,17 @@ Detail for each lives in
       real selection, and the driven A/B on the fixed build separates a vetoed drag from
       two swipes of the same shape. The pre-fix repro was defeated by `simctl install`
       dropping the imported book, not by the gesture. — `be6cdcd`
+- [x] **5d. Let the library survive a move** *(bug, diagnosed after 5c — scheduled at the
+      user's request)* — **the imported book stops opening after a reinstall.** Nothing is
+      deleted: `BookFiles::import` returned an absolute path and `books.path` stored it
+      verbatim, and on iOS that path runs through the data container whose UUID iOS
+      regenerates on every install while migrating the contents. The database is found by
+      *recomputing* `Config::app_dir()` each launch and so is always found; the book file is
+      found by a path *remembered* at import time, and only the remembered one can rot. The
+      fix stores the file name alone and rejoins it with a fresh `books_dir` — the same trick
+      the covers handler was already using, which is why covers kept rendering for books that
+      would not open. Ships no migration for rows already written: the only such rows are the
+      developer's own, repaired by hand, and there are no users yet.
 - [ ] **6. Review and refactor** — the phase-closing pass. Carries two parked items: the
       `FRAME_AUTOSAVE_NAME` dead code under iOS (Step 1), and **accessible names for four
       unnamed buttons** — the book cover, and the reader's close/contents/settings — found by

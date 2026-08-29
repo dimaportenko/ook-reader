@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use rusqlite::{params, OptionalExtension, Row};
 
 use crate::db::Db;
@@ -7,29 +5,20 @@ use crate::db::Db;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Book {
     pub(crate) id: i64,
-    pub(crate) path: String,
+    pub(crate) file_name: String,
     pub(crate) title: String,
     pub(crate) author: Option<String>,
-    pub(crate) cover_path: Option<String>,
+    pub(crate) cover_name: Option<String>,
     pub(crate) added_at: i64,
     pub(crate) last_opened_at: Option<i64>,
 }
 
-impl Book {
-    pub(crate) fn cover_name(&self) -> Option<&str> {
-        self.cover_path
-            .as_deref()
-            .and_then(|cover| Path::new(cover).file_name())
-            .and_then(|name| name.to_str())
-    }
-}
-
 pub(crate) struct NewBook<'a> {
-    pub(crate) path: &'a str,
+    pub(crate) file_name: &'a str,
     pub(crate) source_path: &'a str,
     pub(crate) title: &'a str,
     pub(crate) author: Option<&'a str>,
-    pub(crate) cover_path: Option<&'a str>,
+    pub(crate) cover_name: Option<&'a str>,
     pub(crate) added_at: i64,
 }
 
@@ -37,16 +26,16 @@ impl Db {
     fn read_book(row: &Row<'_>) -> rusqlite::Result<Book> {
         Ok(Book {
             id: row.get(0)?,
-            path: row.get(1)?,
+            file_name: row.get(1)?,
             title: row.get(2)?,
             author: row.get(3)?,
-            cover_path: row.get(4)?,
+            cover_name: row.get(4)?,
             added_at: row.get(5)?,
             last_opened_at: row.get(6)?,
         })
     }
 
-    fn read_managed_paths(row: &Row<'_>) -> rusqlite::Result<(String, Option<String>)> {
+    fn read_managed_names(row: &Row<'_>) -> rusqlite::Result<(String, Option<String>)> {
         Ok((row.get(0)?, row.get(1)?))
     }
 
@@ -72,11 +61,11 @@ impl Db {
                 cover_path = excluded.cover_path
             RETURNING id, path, title, author, cover_path, added_at, last_opened_at",
             params![
-                book.path,
+                book.file_name,
                 book.source_path,
                 book.title,
                 book.author,
-                book.cover_path,
+                book.cover_name,
                 book.added_at
             ],
             Self::read_book,
@@ -92,7 +81,7 @@ impl Db {
         Ok(updated == 1)
     }
 
-    pub(crate) fn managed_paths_for_source(
+    pub(crate) fn managed_names_for_source(
         &self,
         source_path: &str,
     ) -> Result<Option<(String, Option<String>)>, rusqlite::Error> {
@@ -100,7 +89,7 @@ impl Db {
             .query_row(
                 "SELECT path, cover_path FROM books WHERE source_path = ?1",
                 params![source_path],
-                Self::read_managed_paths,
+                Self::read_managed_names,
             )
             .optional()
     }
@@ -113,7 +102,7 @@ impl Db {
             .query_row(
                 "DELETE FROM books WHERE id = ?1 RETURNING path, cover_path",
                 params![id],
-                Self::read_managed_paths,
+                Self::read_managed_names,
             )
             .optional()
     }

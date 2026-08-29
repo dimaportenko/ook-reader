@@ -15,29 +15,34 @@ impl BookFiles {
         BookFiles { dir }
     }
 
-    pub(crate) fn dir(&self) -> &Path {
-        self.dir.as_path()
+    pub(crate) fn path_of(&self, name: &str) -> PathBuf {
+        self.dir.join(name)
     }
 
-    pub(crate) fn import(&self, source: &Path) -> Result<PathBuf, std::io::Error> {
-        let managed = self.dir().join(format!("{}.epub", Uuid::new_v4()));
+    pub(crate) fn import(&self, source: &Path) -> Result<String, std::io::Error> {
+        let name = format!("{}.epub", Uuid::new_v4());
 
-        if let Err(error) = fs::copy(source, &managed) {
-            self.remove(&managed);
+        if let Err(error) = fs::copy(source, self.path_of(&name)) {
+            self.remove(&name);
             return Err(error);
         }
 
-        Ok(managed)
+        Ok(name)
     }
 
-    pub(crate) fn write_cover(&self, managed: &Path, ext: &str, bytes: &[u8]) -> Option<String> {
-        let path = managed.with_extension(format!("cover.{ext}"));
-        fs::write(&path, bytes).ok()?;
-        Some(path.to_string_lossy().into_owned())
+    pub(crate) fn write_cover(&self, book: &str, ext: &str, bytes: &[u8]) -> Option<String> {
+        let name = Path::new(book)
+            .with_extension(format!("cover.{ext}"))
+            .to_string_lossy()
+            .into_owned();
+        fs::write(self.path_of(&name), bytes).ok()?;
+        Some(name)
     }
 
-    pub(crate) fn remove(&self, path: &Path) {
-        match fs::remove_file(path) {
+    pub(crate) fn remove(&self, name: &str) {
+        let path = self.path_of(name);
+
+        match fs::remove_file(&path) {
             Ok(()) => {}
             Err(error) if error.kind() == ErrorKind::NotFound => {}
             Err(error) => {

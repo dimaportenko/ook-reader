@@ -48,10 +48,10 @@ pub(crate) fn LibraryBooks() -> Element {
                                 let library = Rc::clone(&library);
                                 let id = book.id;
                                 let title = book.title;
-                                let path = book.path;
+                                let file_name = book.file_name;
 
                                 move |_| {
-                                    match epub::open_with_spine(std::path::Path::new(&path))
+                                    match epub::open_with_spine(&library.book_path(&file_name))
                                     {
                                         Ok((epub, docs)) => {
                                             status.set(None);
@@ -110,7 +110,7 @@ pub(crate) fn LibraryBooks() -> Element {
 #[component]
 fn BookCover(book: Book) -> Element {
     rsx! {
-        if let Some(name) = book.cover_name() {
+        if let Some(name) = &book.cover_name {
             div {
                 class: "book-cover__container",
                 img {
