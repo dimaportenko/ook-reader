@@ -107,7 +107,7 @@ Rules for using it here:
   wrong. A refusal like *"off-screen and not safe to press"* is a finding, not an obstacle.
 
 The bundle identifier is `com.dimaportenko.ook-reader`; the simulator build is
-`dx build --platform ios` (or `ios:dx:serve` in `.nvim/config.json`). Context for all of this
+`dx build --platform ios` (or `just serve-ios`). Context for all of this
 lives in [`docs/milestones/04-multiplatform/01-mobile/`](docs/milestones/04-multiplatform/01-mobile/README.md).
 
 ## Skills
