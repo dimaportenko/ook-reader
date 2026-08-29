@@ -121,6 +121,7 @@ pub(crate) fn SettingsPopover() -> Element {
     rsx! {
         PopoverRoot {
             PopoverTrigger {
+                aria_label: "Reading settings",
                 Icon { icon: icon::SETTINGS }
             }
             PopoverContent {

@@ -44,6 +44,7 @@ pub(crate) fn LibraryBooks() -> Element {
 
                         button {
                             class: "book-cover",
+                            aria_label: "Open {book.title}",
                             onclick: {
                                 let library = Rc::clone(&library);
                                 let id = book.id;

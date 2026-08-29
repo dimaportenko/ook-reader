@@ -37,6 +37,7 @@ pub(crate) fn ContentsPopover(
             open: open(),
             on_open_change: move |v| open.set(v),
             PopoverTrigger {
+                aria_label: "Table of contents",
                 Icon { icon: icon::LIST }
             }
             PopoverContent {
@@ -90,6 +91,28 @@ mod test {
     #[test]
     fn the_depth_variable_is_spelled_the_same_on_both_sides_of_the_css_gap() {
         assert!(TOC_CSS.contains(&format!("var({DEPTH_VAR}")));
+    }
+
+    #[test]
+    fn the_popover_is_bounded_by_the_viewport_and_not_by_its_trigger() {
+        let base = POPOVER_CSS
+            .split_once(".dx-popover-content {")
+            .expect("the rule every popover starts from")
+            .1
+            .split_once('}')
+            .expect("an unclosed rule")
+            .0;
+
+        assert!(
+            !base.contains("max-width: calc(100%"),
+            "every [data-side] rule re-positions the panel to absolute, where a \
+             percentage max-width resolves against the 40px trigger",
+        );
+        assert!(
+            base.contains("dvw"),
+            "only a viewport unit means the same thing under both position \
+             schemes the rules disagree about",
+        );
     }
 
     #[test]

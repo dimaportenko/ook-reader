@@ -179,7 +179,6 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
     rsx! {
         div {
             class: "reader-root",
-            style: "{settings().inline_styles()}",
             tabindex: "0",
             onmounted: move |e| async move {
                 _ = e.set_focus(true).await;
@@ -198,6 +197,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
 
                     button {
                         class: "icon-button glass",
+                        aria_label: "Close book",
                         onclick: move |_| open_book.set(None),
                         Icon { icon: icon::CLOSE }
                     }

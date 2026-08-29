@@ -1,7 +1,5 @@
 use crate::renderer::tao::window::Window;
 
-pub(crate) const FRAME_AUTOSAVE_NAME: &str = "ook-reader-main";
-
 /// Hands the window's frame to AppKit's autosave, which persists it to
 /// `NSUserDefaults` on every move and resize and constrains it to a visible
 /// screen on the way back in.
@@ -19,6 +17,8 @@ pub(crate) fn remember_frame(window: &Window) {
     use crate::renderer::tao::platform::macos::WindowExtMacOS;
     use objc2_app_kit::NSWindow;
     use objc2_foundation::NSString;
+
+    const FRAME_AUTOSAVE_NAME: &str = "ook-reader-main";
 
     let ptr = window.ns_window().cast::<NSWindow>();
     let Some(ns_window) = (unsafe { ptr.as_ref() }) else {

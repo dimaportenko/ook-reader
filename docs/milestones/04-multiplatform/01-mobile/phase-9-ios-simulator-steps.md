@@ -2220,3 +2220,141 @@ an 874pt screen, not 699.
   reasoned, not driven.
 
 > **Status:** done — committed in `0a135fc` (129 tests green).
+
+## Step 6 — Review and refactor
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+The phase-closing pass. Four items were parked across Steps 1, 2a, 5f and 5g, and the
+thing they have in common is that **each one is a leftover of a decision the phase later
+reversed** — not sloppiness, but the sediment a port leaves when it changes its mind about
+where something lives. That is the frame worth holding: the punch-list is short because the
+reversals were few, and every item is "the old owner never let go", not "nobody wrote this
+properly".
+
+### The check
+
+Three of the four items have no assertion available, and it is worth being exact about
+why rather than calling the whole step eyeball-only:
+
+| item | check | why not a `#[test]` |
+|---|---|---|
+| `FRAME_AUTOSAVE_NAME` | `cargo clippy --target aarch64-apple-ios-sim --no-default-features --features mobile` — **zero warnings** | the defect *is* a warning; the compiler is the assertion, and it only fires on a target `cargo test` never builds |
+| `Settings::inline_styles()` | it compiles with no callers, and `the_theme_paints_the_safe_area_strip` still passes | a test that greps for a function you just deleted asserts nothing |
+| `.dx-popover-content`'s `max-width` | **new test**, below | the source text is the behavior — the repo's existing CSS idiom |
+| four unnamed buttons | a driven accessibility snapshot | `rsx!` has no unit-test seam, and the accessibility tree is the *only* place the defect was ever visible |
+
+The one real test, in `src/ui/toc.rs`'s existing test module (which already reads
+`POPOVER_CSS`):
+
+```rust
+#[test]
+fn the_popover_is_bounded_by_the_viewport_and_not_by_its_trigger() {
+    let base = POPOVER_CSS
+        .split_once(".dx-popover-content {")
+        .expect("the rule every popover starts from")
+        .1
+        .split_once('}')
+        .expect("an unclosed rule")
+        .0;
+
+    assert!(
+        !base.contains("max-width: calc(100%"),
+        "every [data-side] rule re-positions the panel to absolute, where a \
+         percentage max-width resolves against the 40px trigger",
+    );
+    assert!(
+        base.contains("dvw"),
+        "only a viewport unit means the same thing under both position \
+         schemes the rules disagree about",
+    );
+}
+```
+
+Watched red before the fix: *"every [data-side] rule re-positions the panel to absolute,
+where a percentage max-width resolves against the 40px trigger"*.
+
+### The punch-list
+
+**1. `FRAME_AUTOSAVE_NAME` moved inside the function that uses it** (`src/window.rs`).
+It was a `pub(crate) const` at module scope, read from exactly one place — the
+`#[cfg(target_os = "macos")]` body of `remember_frame`. On every other target that body
+does not exist, so the const has no readers and `#[warn(dead_code)]` fires; it was the
+only warning in the iOS build. The fix is not a `#[cfg]` on the const (which would be a
+second copy of the same condition, free to drift from the first) but moving the const
+*into* the `cfg`-gated body. A `const` inside a function is a perfectly ordinary item in
+Rust — same compile-time evaluation, same `&'static str` — it just inherits the gate from
+its enclosing scope instead of restating it.
+
+**2. `Settings::inline_styles()` deleted** (`src/settings/mod.rs`, `src/ui/reader.rs`).
+It built `<declarations> background-color: … color: …` for a `style="…"` attribute on
+`.reader-root`. Step 5f moved the whole theme onto the canvas: `root-theme.js` pushes
+`:root { … }` into a `<style>` the app owns, and `main.css` gives `html` the background
+and text colour. From that moment the inline copy declared the same custom properties, on
+a descendant of the element that already had them, to the same values — a second channel
+carrying identical cargo. Removing it also drops a `format!` over the full `css_vars()`
+list from the reader's render body, which runs on every page turn.
+
+**3. `.dx-popover-content`'s `max-width` made viewport-relative**
+(`src/ui/components/popover/style.css`). `calc(100% - 2rem)` was authored against the base
+rule's `position: fixed`, where `100%` is the viewport. Every `[data-side]` rule then sets
+`position: absolute`, and a percentage `max-width` on an absolutely-positioned box resolves
+against its containing block — `.dx-popover`, the `position: relative` wrapper around a
+**40pt** trigger. So the declaration was computing `calc(40px - 2rem)` ≈ 8px. It never
+showed, because `min-width` beats `max-width` in the CSS box algorithm and both panels
+declare one (140px settings, 24rem contents). `100dvw` is the fix rather than deletion:
+deleting leaves the panels with no upper bound at all, which is strictly worse than a wrong
+one, and a viewport unit means the same thing under `fixed` and `absolute` alike — which is
+the property the rule needed and never had.
+
+**4. Accessible names for four buttons** (`library.rs`, `reader.rs`, `toc.rs`,
+`settings.rs`). Found by Step 2a and, as that step noted, not a mobile bug — the book
+cover and the reader's close/contents/settings buttons contain an `<img>` or an inline
+SVG icon and no text, so they had no accessible name on any platform. `aria_label` on
+each. The cover interpolates the title (`"Open {book.title}"`), because a shelf of
+buttons all named "Open" is the same defect one rename later.
+
+### Forks taken
+
+- **The const moved into the function, not `#[cfg]`-gated in place.** Gating it would work
+  and reads as the smaller diff, but it duplicates the `target_os = "macos"` condition —
+  and a duplicated condition is one that can drift. Scope is the mechanism that cannot
+  drift.
+- **`100dvw`, not deleting the declaration.** Step 5g explicitly parked "repair it" here
+  and the temptation is to call a wrong bound a dead bound. But the two are not the same:
+  the settings popover on a phone has `min-width: 140px` and no other ceiling, so removing
+  the `max-width` would let long content push it off the right edge. Bounding to the
+  viewport is what the author meant, written so that it survives the positioning switch.
+  Note this is the pass's **one behaviour change** — the rest are pure refactors.
+- **Named the contents trigger `"Table of contents"`, the same string the `nav` landmark
+  inside the panel already carries.** Considered hoisting to a shared const; rejected,
+  because they name different things — a control and a landmark — and a const would imply
+  they must stay equal. A screen reader announcing "Table of contents, button" and then
+  "Table of contents, navigation" is correct, not duplicated.
+
+### Verified — on the iPhone 17 simulator
+
+| | before | after |
+|---|---|---|
+| accessible names | cover / close / contents / settings all anonymous | **"Open The Adventures of Sherlock Holmes"**, **"Close book"**, **"Table of contents"**, **"Reading settings"** |
+| reader theme after dropping the inline styles | sepia | **sepia** — unchanged; `html` carries it |
+| settings panel geometry | `x=246, w=140` | `x=246, w=140` — the `min-width` was always the binding constraint |
+| iOS clippy warnings | 1 (`FRAME_AUTOSAVE_NAME` never used) | **0** |
+| tests | 133 | **134 green**, clippy clean on both targets |
+
+### Scope note
+
+- **Not the commented-out `/* min-width: 200px; */`** left in `popover/style.css`. It is
+  dead scaffolding and a candidate for a sweep, but it is the user's own comment and this
+  step does not delete those.
+- **Not `settings/mod.rs`'s `no_stack_quotes_a_family_with_double_quotes` comment**, which
+  justifies itself by naming `inline_styles()`. The test is still live — the stack also
+  travels through `bootstrap_js`, into a JS string literal that a `"` would close early —
+  but its stated reason is now the wrong one. Worth a one-line rewrite by hand.
+- **Not the chapter title's missing `text-overflow`.** It still clips mid-word under the
+  chrome buttons on a phone (visible as *"The Adventures of Sherlock Holr"*). Pre-existing,
+  cosmetic, and it belongs to whichever step next touches the reader's header — a candidate
+  for Phase 10 Step 3, which re-lays that row out anyway.
+- **Not landscape, not the iPad, not Android.** Same standing gaps the phase has carried
+  throughout.

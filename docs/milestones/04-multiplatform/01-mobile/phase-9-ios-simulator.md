@@ -191,7 +191,11 @@ Detail for each lives in
       `position: fixed` every `[data-side]` rule then discards, so it measures the trigger and
       no popover is viewport-bounded (Step 5g) — and **accessible names for four unnamed
       buttons** — the book cover, and the reader's close/contents/settings — found by Step 2a
-      and not a mobile bug at all.
+      and not a mobile bug at all. *Landed:* the const moved inside the one `cfg`-gated body
+      that reads it, `inline_styles()` deleted outright (Step 5f's canvas already carried
+      every declaration it built), the popover's `max-width` re-expressed in `dvw` so it
+      means the same thing under the `fixed` the base rule declares and the `absolute` every
+      side rule substitutes, and four `aria_label`s. 134 tests green.
 
 ## Out of scope
 

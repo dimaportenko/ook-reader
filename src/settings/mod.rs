@@ -160,13 +160,6 @@ impl Settings {
     pub(crate) fn user_layer(self) -> String {
         format!("{}\n{USER_LAYER_RULES}", self.vars())
     }
-
-    pub(crate) fn inline_styles(self) -> String {
-        format!(
-            "{} background-color: var(--USER__backgroundColor); color: var(--USER__textColor)",
-            self.declarations()
-        )
-    }
 }
 
 #[cfg(test)]
