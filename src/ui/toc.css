@@ -35,3 +35,18 @@
 .contents-popover__entry[aria-current="page"] {
   font-weight: 700;
 }
+
+@media (width < 40rem) {
+  .contents-popover__content[data-side][data-align][data-state] {
+    position: fixed;
+    top: auto;
+    right: calc(1rem + env(safe-area-inset-right));
+    bottom: calc(1rem + env(safe-area-inset-bottom));
+    left: calc(1rem + env(safe-area-inset-left));
+    min-width: 0;
+  }
+
+  .contents-popover__list {
+    max-height: 75dvh;
+  }
+}

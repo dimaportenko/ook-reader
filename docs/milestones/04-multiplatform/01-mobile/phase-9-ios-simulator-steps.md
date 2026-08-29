@@ -64,8 +64,6 @@ phase spends one step on the compiler and the rest on running the thing.
 5a. **Give it an icon** *(provisional)* — the springboard tile is blank. Found by Step 2.
    Installing an icon turns out to be a `dx bundle` stage that has no iOS path, so the PNGs
    go in by `just install-ios`. **Written, awaiting `lbb:commit`.**
-5b. **Size it for a thumb** *(split out of Step 5)* — the other half: 20pt `Prev`/`Next`
-   against the 44pt minimum, and the six-column desktop library grid.
 5c. ~~**Let a reader select text**~~ *(bug, reported from use — regression on Step 4)* — a
    selection drag and a page swipe are the same pointer event; vetoed at `pointerup`.
    **Done** — `be6cdcd`.
@@ -2049,3 +2047,174 @@ someone gives `html` a colour.
   six-column library grid.
 
 > **Status:** done — committed in `da2cacd` (128 tests green).
+
+---
+
+## Step 5g — Fit the contents panel to the phone
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**Bug, reported from use.** On the iPhone the contents popover hangs off the left edge of
+the screen: every chapter title is clipped mid-word, and the top-level entries lose their
+numerals entirely.
+
+### The crux — a `max-width` that measures the wrong box
+
+The popover is not too wide by accident. Three CSS facts compose into the bug, and only the
+third is in this repo's own stylesheet:
+
+1. `.dx-popover-content`'s base rule is `position: fixed` with
+   `max-width: calc(100% - 2rem)`. Those two belong together: for a fixed box the containing
+   block *is* the viewport, so `100%` means "the screen".
+2. Every `[data-side="…"]` rule then overrides it to `position: absolute`. The containing
+   block becomes the nearest positioned ancestor — `.dx-popover`, which is
+   `position: relative; display: inline-block`, i.e. **the 40pt icon button**. The base
+   `max-width` silently starts meaning "100% of the trigger minus 2rem", which is negative,
+   and stops bounding anything.
+3. `.contents-popover__content` declares `min-width: 24rem`. Per CSS §10.4 `min-width` beats
+   `max-width` unconditionally, so the panel takes 384px whatever the viewport says.
+
+`ContentAlign::End` then pins the panel's **right** edge to the trigger's right edge. Driven
+measurement (`agent-device snapshot -i --json`, iPhone 17, 402pt viewport):
+
+| box | x | width | right |
+|---|---|---|---|
+| viewport | 0 | 402 | 402 |
+| contents trigger | 290 | 44 | **334** |
+| contents panel | **−50** *(reported clamped to 0)* | 384 | 334 |
+| a chapter row | −30 | 344 | 314 |
+
+`334 − 384 = −50`: fifty points of every row are off the left edge. The accessibility tree
+clamps a negative `x` to `0` while keeping `width`, which is why the panel *reports*
+`x=0, width=384` — the screenshot, not the number, is what shows the clipping.
+
+So the panel is not merely too wide; it is **measured against the wrong box**. No width alone
+can fix it — the trigger sits 68pt in from the right edge, so even a panel exactly `100vw`
+wide would start at −68. The panel has to stop being anchored to the trigger.
+
+### The check — driven, not asserted
+
+There is no Rust here to unit-test; the whole change is CSS, and CSS's effect on a phone is
+what `agent-device` exists for in this repo. The **red** is the table above: right edge at
+the trigger's 334, left edge at −50.
+
+The regression guard that *is* assertable is the new cross-file coupling — the ToC now splits
+its layout at the same viewport width the shared popover stylesheet already widens at, and it
+must reset the `min-width` floor when it does:
+
+```rust
+#[test]
+fn the_panel_becomes_a_sheet_below_the_width_the_popover_widens_at() {
+    assert!(POPOVER_CSS.contains(&format!("@media (width >= {NARROW_MAX})")));
+
+    let sheet = TOC_CSS
+        .split_once(&format!("@media (width < {NARROW_MAX})"))
+        .expect("the contents panel has a narrow-viewport rule")
+        .1;
+
+    assert!(
+        sheet.contains("min-width: 0"),
+        "the 24rem floor outgrows the viewport the sheet is pinned to",
+    );
+}
+```
+
+It fails on the pre-fix tree at the `expect`: *the contents panel has a narrow-viewport rule*.
+
+### The code
+
+```css
+@media (width < 40rem) {
+  .contents-popover__content[data-side][data-align][data-state] {
+    position: fixed;
+    top: auto;
+    right: calc(1rem + env(safe-area-inset-right));
+    bottom: calc(1rem + env(safe-area-inset-bottom));
+    left: calc(1rem + env(safe-area-inset-left));
+    min-width: 0;
+  }
+
+  .contents-popover__list {
+    max-height: 75dvh;
+  }
+}
+```
+
+### Why it works
+
+**`position: fixed` is the whole fix.** It restores the containing block the base stylesheet
+originally assumed: the viewport. Once the panel is measured against the screen, `left` and
+`right` are gutters off the screen's edges rather than offsets from a 40pt button, and
+overflow becomes impossible by construction — the trigger's position stops mattering.
+
+**Why three attribute selectors.** The declarations being overridden live at
+`.dx-popover-content[data-side="bottom"]` (`position`, `top`) — specificity (0,2,0) — and
+`…[data-side="bottom"][data-align="end"]` (`left`, `right`) — (0,3,0). A single class is
+(0,1,0) and loses. `[data-side][data-align][data-state]` brings the ToC's rule to (0,4,0),
+which wins outright. A tie would *not* have been safe: `dx` copies `toc.css` before
+`popover/style.css`, so on equal weight the shared file's anchoring would win on source
+order. All three attributes are always present — the primitive emits `data-state` on every
+popover for its open/closed animation.
+
+**`min-width: 0` is not tidying.** With both `left` and `right` set, the used width is
+`402 − 16 − 16 = 370`. A 384px floor would override that and put the panel back over the
+right edge. Resetting it is what lets the gutters actually hold.
+
+**`env(safe-area-inset-*)` because fixed boxes escape `body`.** Step 5 paid the insets as
+padding on `body`; a `position: fixed` box is laid out against the viewport and never sees
+them. The sheet has to re-inset itself, which is why the same four `env()`s reappear here.
+(`main.rs`'s test counts them in `main.css` only, so it stays green.)
+
+**`75dvh` protects the chrome.** The first driven build was correct horizontally and wrong
+vertically: with `top: auto` the panel grew to the content's full height and landed at
+`y = 84`, on top of the header — covering its own trigger, so the toggle could not be
+toggled back, with only a 22pt strip left to dismiss by. Capping the scroller drops the
+panel's top to `y = 128`, clear of the title's `126`. `dvh` and not `vh` for Step 5's
+reason: on iOS `vh` measures the *large* viewport, so the existing `80vh` was really 733pt on
+an 874pt screen, not 699.
+
+### Forks taken
+
+- **Scoped to the contents panel, not to every popover.** The obvious deeper fix is to make
+  `.dx-popover-content` itself viewport-bounded in the shared stylesheet. Rejected on
+  measurement: the settings popover renders at `x=246, width=140, right=386` — a dropdown
+  that fits with room to spare. Turning it into a full-width sheet would redesign a component
+  nobody reported broken. The general defect (a `max-width` that means "the trigger") is real
+  and is noted for Step 6.
+- **A bottom sheet, not a top one.** Anchoring to the top would need a `top` equal to the
+  chrome's height, and the chrome's height is an inline style in `reader.rs` over a
+  two-line title — a number CSS cannot name without a shared custom property. `bottom` needs
+  only the home-indicator inset, which `env()` already gives.
+- **Overriding the anchor rules rather than dropping `position: relative` from
+  `.dx-popover`.** Making the trigger un-positioned would hand the panel to the next
+  positioned ancestor — the reader's header row, which happens to be full-width and would
+  have given a *correct* `top: 100%` for free. Rejected because it silently depends on an
+  inline style in a different file: change `reader.rs`'s header and the popover moves.
+
+### Verified — on the iPhone 17 simulator
+
+| | | |
+|---|---|---|
+| | before | after |
+| panel x → right | −50 → 334 | **16 → 386** |
+| panel y → bottom | 130 → 870 | **128 → 825** |
+| chapter row x → right | −30 → 314 | 36 → 366 |
+| trigger covered | — | no (panel top 128 > title bottom 126) |
+| toggle closed by re-pressing the trigger | — | yes |
+| picking a chapter | — | jumps to *I. A Scandal in Bohemia* and closes |
+| tests | 128 | **129 green**, clippy clean |
+
+### Scope note
+
+- **Not the shared popover stylesheet.** `.dx-popover-content`'s `max-width: calc(100% - 2rem)`
+  is dead as written — it is authored for the `position: fixed` the base rule declares and
+  every side rule then discards. Repairing it is Step 6 material, and it is now the third item
+  on that list.
+- **Not the `80vh` on the wide-screen path.** `.contents-popover__list` still caps at `80vh`
+  above 40rem, and `vh` is the wrong unit there too. Changing it moves the desktop panel, which
+  is not this bug.
+- **Not landscape.** The `env()` left/right insets are declared, but the phase has only ever
+  been driven in portrait; a rotated phone is unverified.
+- **Not the iPad.** At 1024pt it is above the breakpoint and keeps the dropdown unchanged —
+  reasoned, not driven.

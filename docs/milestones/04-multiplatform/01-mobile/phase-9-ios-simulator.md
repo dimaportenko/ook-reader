@@ -141,9 +141,6 @@ Detail for each lives in
       identity must be *derived from the embedded profile*, not taken as the first
       `Apple Development` line, because three teams are valid on this keychain and dx guesses
       wrong. No `src/` diff; 127 tests unchanged. — `e2f0f94`
-- [ ] **5b. Size it for a thumb** *(split out of Step 5)* — the other half: `Prev`/`Next` are
-      20pt tall against the 44pt minimum touch target, and the library grid is still the
-      six-column desktop layout Step 2a found cramped into the top-left corner.
 - [x] **5c. Let a reader select text** *(bug, reported from use — regression on Step 4)* —
       **dragging to select text turns the page.** A selection drag and a page swipe are the
       same pointer event to `swipe-listener.js`: long, horizontal, one pointer id — so it
@@ -177,10 +174,24 @@ Detail for each lives in
       `var(--USER__backgroundColor)`, and the `:root` block `Settings::vars()` already builds is
       pushed into a `<style>` the app owns — a push and not `document::Style`, which inserts
       once and would freeze the canvas at the launch theme. — `da2cacd`
-- [ ] **6. Review and refactor** — the phase-closing pass. Carries three parked items: the
+- [ ] **5g. Fit the contents panel to the phone** *(bug, reported from use)* — **the contents
+      popover hangs 50pt off the left edge** and clips every chapter title. Not a width
+      mistake: `.dx-popover-content`'s base `max-width: calc(100% - 2rem)` is written for the
+      `position: fixed` the base rule declares, and every `[data-side]` rule then flips it to
+      `absolute`, so it silently measures the **40pt trigger** instead of the screen — while
+      `min-width: 24rem` overrides it anyway. Aligned to the trigger's right edge at 334 on a
+      402pt viewport, a 384pt panel starts at −50. Fixed by putting the panel back on the
+      viewport below `40rem`: `position: fixed`, `env()` gutters on all four sides, the
+      `min-width` floor reset, and a `75dvh` cap so the sheet stops clear of the chrome
+      instead of burying its own trigger. Driven on the iPhone 17: `16 → 386`, top at 128,
+      toggle and chapter-jump both good. 129 tests green.
+- [ ] **6. Review and refactor** — the phase-closing pass. Carries four parked items: the
       `FRAME_AUTOSAVE_NAME` dead code under iOS (Step 1), **`Settings::inline_styles()`**, made
-      redundant by Step 5f, and **accessible names for four unnamed buttons** — the book cover,
-      and the reader's close/contents/settings — found by Step 2a and not a mobile bug at all.
+      redundant by Step 5f, **`.dx-popover-content`'s dead `max-width`** — authored for a
+      `position: fixed` every `[data-side]` rule then discards, so it measures the trigger and
+      no popover is viewport-bounded (Step 5g) — and **accessible names for four unnamed
+      buttons** — the book cover, and the reader's close/contents/settings — found by Step 2a
+      and not a mobile bug at all.
 
 ## Out of scope
 

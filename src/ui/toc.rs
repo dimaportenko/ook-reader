@@ -83,10 +83,27 @@ pub(crate) fn ContentsPopover(
 mod test {
     use super::*;
 
+    const NARROW_MAX: &str = "40rem";
     const TOC_CSS: &str = include_str!("toc.css");
+    const POPOVER_CSS: &str = include_str!("components/popover/style.css");
 
     #[test]
     fn the_depth_variable_is_spelled_the_same_on_both_sides_of_the_css_gap() {
         assert!(TOC_CSS.contains(&format!("var({DEPTH_VAR}")));
+    }
+
+    #[test]
+    fn the_panel_becomes_a_sheet_below_the_width_the_popover_widens_at() {
+        assert!(POPOVER_CSS.contains(&format!("@media (width >= {NARROW_MAX})")));
+
+        let sheet = TOC_CSS
+            .split_once(&format!("@media (width < {NARROW_MAX})"))
+            .expect("the contents panel has a narrow-viewport rule")
+            .1;
+
+        assert!(
+            sheet.contains("min-width: 0"),
+            "the 24rem floor outgrows the viewport the sheet is pinned to",
+        );
     }
 }
