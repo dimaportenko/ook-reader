@@ -46,6 +46,7 @@ reader can use (open a book, see text, turn a page, resume). The MVP slice seque
 | 2 | [Basic EPUB Reader](milestones/02-basic-reader/README.md) | Open an `.epub` and read it with paging + saved position | ✅ |
 | 3 | [Reader Enhancements](milestones/03-reader-enhancements/README.md) | The features missing from other readers | 🚧 |
 | 4 | [Multi-platform](milestones/04-multiplatform/README.md) | Mobile (iOS/Android) + web (WASM) from the same codebase | 🚧 |
+| 5 | [Sync](milestones/05-sync/README.md) | Reading position and library converge across devices — with no server | ⬜ |
 
 ## Current focus
 
@@ -68,6 +69,22 @@ other candidates — full-text search, annotations, sync, and the **bookmarks** 
 [Phase 8 deferred out](milestones/03-reader-enhancements/05-toc-navigation/README.md) — are
 still unclaimed on its [board](milestones/03-reader-enhancements/README.md).
 [`TODO.md`](../TODO.md) holds the smaller unscheduled items.
+
+**Milestone 5 — Sync is designed and queued.** A grilling session on 2026-08-29 turned
+"build a backend app with login and cross-device sync" inside out. Drive offers **no
+optimistic concurrency** — `files.update` has no `If-Match` — so one shared state file would
+silently clobber itself, and arbitrating that is precisely what a server would be for. But
+arbitration is only needed when two writers share a file: give **every device its own file**
+and conflicts become structurally impossible, the server has nothing left to do, and what
+remains is a pure merge function that tests offline. "Log in to an account" survives as
+*connect your Google account*. Decisions:
+[ADR-0005](adr/0005-backendless-sync-google-drive-per-device-shards.md) and
+[ADR-0006](adr/0006-migrate-local-store-rusqlite-to-sqlx.md), which together **supersede
+[ADR-0004](adr/0004-local-store-rusqlite-with-libsql-sync-path.md)** — the libSQL/Turso path
+is dropped, and the local store moves to `sqlx`. Six phases, starting with a store migration
+and ending with book-file mirroring; the merge engine sits third, deliberately ahead of auth,
+because it needs no network. It queues behind
+[Phase 10](milestones/03-reader-enhancements/06-chrome-material/phase-10-liquid-glass.md).
 
 [Phase 8 — ToC & Navigation](milestones/03-reader-enhancements/05-toc-navigation/phase-8-toc-navigation.md)
 **closed 2026-08-18** and was the last one worked: the reader names the chapter you are in

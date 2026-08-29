@@ -1,6 +1,14 @@
 # ADR-0004 — Local store on `rusqlite` now, with a libSQL/Turso sync path later
 
-**Status:** accepted · 2026-07-05
+**Status:** **superseded** · 2026-07-05 · superseded 2026-08-29 by
+[ADR-0005](0005-backendless-sync-google-drive-per-device-shards.md) (the libSQL/Turso sync
+path is dropped for backend-less sync over Google Drive) and
+[ADR-0006](0006-migrate-local-store-rusqlite-to-sqlx.md) (the store moves to `sqlx`; this
+ADR's rejection of `sqlx` rested on there being no async runtime in the tree, and tokio is
+now a normal dependency via `dioxus-desktop`).
+
+The reasoning below is kept as written — it records what was known in July 2026, including
+the "focused research pass owed *before* the sync milestone" that ADR-0005 discharges.
 
 ## Context
 

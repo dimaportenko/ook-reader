@@ -20,7 +20,7 @@ was waiting behind, closed with its review pass.
 | [Chrome material](06-chrome-material/README.md) | Liquid-glass app chrome — one `.glass` primitive that behaves the same in WebKit and Chromium | Easy-ish — the material is CSS; the hard part is that the bars have nothing behind them to blur | 🚧 **planned** ([Phase 10](06-chrome-material/phase-10-liquid-glass.md)) |
 | Full-text search | Search within / across the library | Easy with [`tantivy`](https://crates.io/crates/tantivy); jump-to-hit is hard | ⬜ |
 | Annotations | Highlights & notes, exportable | Hard — needs a WebView JS bridge for DOM-precise positions | ⬜ |
-| Sync | Reading position across devices | Later (depends on persistence backend) | ⬜ |
+| Sync | Reading position across devices | Promoted off this board — it is OAuth, a merge engine and a store migration, not a feature row | ➡️ **moved to [Milestone 5](../05-sync/README.md)** ([ADR-0005](../../adr/0005-backendless-sync-google-drive-per-device-shards.md)) |
 | _(your missing features)_ | Capture the specific gaps you hit | — | ⬜ |
 
 ## Notes

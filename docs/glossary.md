@@ -68,3 +68,49 @@ theming model) and [ADR-0003](adr/0003-reader-controlled-theming-injected-layer.
 - **Reading position** — where the user currently is. To survive reopening it must be
   expressed durably (which spine item + an offset/fragment within it). The spec's canonical
   scheme for this is **EPUB CFI** (Canonical Fragment Identifier).
+
+## Sync
+
+Grounded in [ADR-0005](adr/0005-backendless-sync-google-drive-per-device-shards.md). These
+terms describe syncing **without a server**: every device writes only its own file, so
+nothing needs arbitrating and the whole problem becomes a pure merge function.
+
+- **Shard** — one device's state file in the remote store, named `state-<device-id>.json`.
+  The defining rule is that **exactly one device ever writes a given shard**, and every
+  device reads all of them. That single constraint is what makes a backend unnecessary:
+  two writers never touch one file, so a storage layer with no conditional writes (Drive has
+  none) is still safe.
+- **Snapshot (vs operation log)** — a shard holds the device's *current* value for each
+  field, not the history of how it got there. Bounded by library size rather than by time,
+  self-healing (the next write replaces a corrupt shard), and no compaction scheme to design.
+  The rejected alternative, an append-only log, would buy history — "where was I last
+  Tuesday" — which nothing needs yet.
+- **Merge** — assembling the app's view by reading every shard and taking, per field, the
+  value with the highest clock. A pure function over shards: no network, no OAuth, and
+  therefore the part of sync that is almost entirely `#[test]`-able.
+- **Last-write-wins (LWW)** — the merge rule: newest stamp for a field wins. For a reading
+  position this is not a compromise but the *correct* semantic — you want where you most
+  recently were.
+- **Hybrid logical clock (HLC)** — the stamp LWW compares. Wall-clock seconds for human
+  meaning, plus a Lamport counter (`max(seen) + 1`) that provides the actual ordering.
+  Wall clock alone is not enough: a device whose clock is wrong stamps the future and pins a
+  stale position permanently.
+- **Tombstone** — a deletion recorded as a stamped `deleted` flag on the entry rather than
+  by removing it. Necessary because in a merged world a plain local delete is simply undone
+  by the next merge, the other device's shard still listing the book. Being a field of the
+  snapshot rather than a separate log, it needs no garbage collection scheme.
+- **Content hash (book identity)** — the SHA-256 of the EPUB's bytes, and the key a position
+  is stored against. `books.id` is a local autoincrement and `books.path` / `source_path`
+  are local filesystem paths, so none of them name the same thing on two devices. Contrast
+  the OPF **`dc:identifier`**, which is *semantic* but untrustworthy — often missing, often
+  duplicated across unrelated books, sometimes regenerated per build. It is recorded but not
+  used as a key.
+- **Device identity** — a uuid v4 minted on first run and stored locally, plus a
+  human-readable name. Names the shard. A reinstall makes a new device; the old shard becomes
+  inert until *forget this device* deletes it.
+- **`appDataFolder`** — Drive's per-app hidden folder, invisible to the user and to other
+  apps. Non-sensitive scope, so no Google verification. Its sharp edge: revoking the app's
+  access **permanently deletes it, skipping Trash** — no grace period, no undo.
+- **`RemoteStore`** — the project's own four-method boundary (list / get / put / delete) with
+  Drive behind it. Its purpose is not provider-swapping but **testability**: an in-memory
+  fake lets the merge engine be exercised with no network and no OAuth.
