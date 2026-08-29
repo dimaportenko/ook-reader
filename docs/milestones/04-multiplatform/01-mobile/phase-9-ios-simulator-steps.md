@@ -1346,7 +1346,7 @@ Phase 9's layout items, and it is here because iOS is what exposed it.
 
 ## Step 5d — Let the library survive a move
 
-> **Status:** done — 127 tests green, clippy clean.
+> **Status:** done — committed in `36052ba` (127 tests green, clippy clean).
 >
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.

@@ -144,7 +144,7 @@ Detail for each lives in
       fix stores the file name alone and rejoins it with a fresh `books_dir` — the same trick
       the covers handler was already using, which is why covers kept rendering for books that
       would not open. Ships no migration for rows already written: the only such rows are the
-      developer's own, repaired by hand, and there are no users yet.
+      developer's own, repaired by hand, and there are no users yet. — `36052ba`
 - [ ] **6. Review and refactor** — the phase-closing pass. Carries two parked items: the
       `FRAME_AUTOSAVE_NAME` dead code under iOS (Step 1), and **accessible names for four
       unnamed buttons** — the book cover, and the reader's close/contents/settings — found by
