@@ -216,6 +216,9 @@ buttons and the material appears. The full payoff arrives with Step 3.
 
 ## Step 2a — The specular layer
 
+> **Status:** done — committed in `40627fa` (135 tests green, clippy clean on the host and
+> on `aarch64-apple-ios-sim`), measured on the iPhone 17 simulator.
+
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
 

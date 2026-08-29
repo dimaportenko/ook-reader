@@ -118,9 +118,11 @@ Detail for each lives in
 - [ ] **2. Make the light move** — the specular sweep, split in two because the layer and
       the input source are different ideas with different risk. The angle is the seam: 2a
       registers and reads it, 2b drives it.
-  - [ ] **2a. The specular layer** — an `@property`-registered `--glass-angle` and the
+  - [x] **2a. The specular layer** — an `@property`-registered `--glass-angle` and the
         gradient on `.glass` that reads it, at a fixed angle. Pure CSS, no new inputs, and
-        the registration is what makes the angle interpolable at all.
+        the registration is what makes the angle interpolable at all. *Landed:* measured on
+        the simulator at the full predicted amplitude, which also confirmed the white tint
+        has only 25 levels of headroom on a light theme. — `40627fa`
   - [ ] **2b. Drive the angle** — pointer position on desktop, `DeviceOrientationEvent` on
         mobile. This is the half that reads as *liquid* rather than frosted, and the one
         that can regress scroll performance, so it lands separately and gets measured.
