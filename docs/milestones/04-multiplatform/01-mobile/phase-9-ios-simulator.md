@@ -114,10 +114,33 @@ Detail for each lives in
       is the viewport — `viewport-fit=cover`, `env()` insets on `body`, and `100vh` → `100%`
       down an unbroken chain. Driven on the iPhone 17: `62 + 778 + 34 = 874`, zero scroll range,
       both bars reachable at once. — `5e0f82e`
-- [ ] **5a. Give it an icon** *(provisional — found by running it)* — the springboard shows
-      the default blank tile. `Dioxus.toml`'s `[bundle].icon` is a `dx bundle` key and dx
-      0.7.9's iOS path never reads it, so this is a gap in the port rather than a setting
-      that was missed. Eyeball on the home screen.
+- [ ] **5a. Give it an icon** *(provisional — found by running it)* — the springboard showed
+      the default blank tile, and the gap is **a missing stage, not a missing setting**.
+      Four builds established it: `[ios].icon` and `[ios].resources` both parse and are
+      ignored, `dx bundle --package-types ios` is a passthrough, and the macOS pair on disk
+      shows why — `dx build` installs no icon on *any* Apple platform, only `dx bundle` does,
+      and it has no iOS path. `[ios.plist]` carries the `CFBundleIcons` declaration; the PNGs
+      need a copy into the bundle root that a rebuild wipes, so it lives in a new
+      `just install-ios` and `serve-ios` keeps hot reload and the blank tile. Verified on the
+      iPhone 17 springboard and an iPad Pro 13" (M5). No `src/` diff; 127 tests unchanged.
+- [ ] **5e. Install it on a real device** *(added at the user's request, mid-5a)* — **corrects
+      5a's inference that dx has no signing pipeline.** It has one: `--device` selects the
+      `aarch64-apple-ios` triple *and* implies `--codesign` (`request.rs:726`), after which dx
+      picks a provisioning profile, embeds it as `embedded.mobileprovision`, and signs. Two
+      things it gets wrong — it copies a wildcard profile's `application-identifier` (`TEAM.*`)
+      verbatim where iOS wants the concrete bundle id, and it signs *before* 5a's icon copy,
+      which the signature seals. Both are fixed by re-signing with entitlements read back out of
+      the bundle, in a new `just install-device [query]` fronted by a `pick-device` recipe that
+      matches a paired device by name, model or UDID and otherwise prompts. **Both devices now
+      run the release build.** Getting there cost three rejections that look alike and are not:
+      `10005` (Developer Mode off), `0xe8008015` (the signing *certificate* is not in the
+      profile — the wildcard profile carried one that expired 2026-03-04), and `0xe8008012`
+      (this *device* is not in the profile). Two findings worth keeping: App IDs are globally
+      unique across teams, and this one is held by a **free** personal team that has no portal
+      entry to release it from — so the profile expires every **seven days**; and the signing
+      identity must be *derived from the embedded profile*, not taken as the first
+      `Apple Development` line, because three teams are valid on this keychain and dx guesses
+      wrong. No `src/` diff; 127 tests unchanged.
 - [ ] **5b. Size it for a thumb** *(split out of Step 5)* — the other half: `Prev`/`Next` are
       20pt tall against the 44pt minimum touch target, and the library grid is still the
       six-column desktop layout Step 2a found cramped into the top-left corner.
@@ -153,6 +176,7 @@ Detail for each lives in
 ## Out of scope
 
 **Android** (its own toolchain and its own surprises — the feature's second phase, if it
-earns one), **physical devices and code signing**, **web/WASM** (Milestone 4's other
+earns one), ~~**physical devices and code signing**~~ *(partly reclaimed by Step 5e — the
+build and signing side is wired; obtaining a current provisioning profile is not)*, **web/WASM** (Milestone 4's other
 feature, and a genuinely harder port: no custom protocol, no native SQLite), **`dx bundle`
 for the App Store**, and any attempt at **feature parity with the desktop build**.

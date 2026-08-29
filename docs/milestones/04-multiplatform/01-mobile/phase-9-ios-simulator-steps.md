@@ -58,12 +58,24 @@ phase spends one step on the compiler and the rest on running the thing.
    along. **Done** — `badd372`.
 4. ~~**Turn pages by touch**~~ — the buttons already worked under tap, so this was swipe: the
    frame measures the gesture, `Turn::of_swipe` decides. **Done** — `bb18938`.
-5. **Fit the device** *(provisional)* — safe-area insets and thumb-sized chrome.
+5. ~~**Fit the device**~~ — *split on implementation:* this half is the **viewport** —
+   `viewport-fit=cover`, `env()` insets, `100vh` → `100%` down an unbroken chain.
+   **Done** — `5e0f82e`.
 5a. **Give it an icon** *(provisional)* — the springboard tile is blank. Found by Step 2.
-6. **Review and refactor** — the phase-closing pass.
+   Installing an icon turns out to be a `dx bundle` stage that has no iOS path, so the PNGs
+   go in by `just install-ios`. **Written, awaiting `lbb:commit`.**
+5b. **Size it for a thumb** *(split out of Step 5)* — the other half: 20pt `Prev`/`Next`
+   against the 44pt minimum, and the six-column desktop library grid.
+5c. ~~**Let a reader select text**~~ *(bug, reported from use — regression on Step 4)* — a
+   selection drag and a page swipe are the same pointer event; vetoed at `pointerup`.
+   **Done** — `be6cdcd`.
+5d. ~~**Let the library survive a move**~~ *(bug, scheduled at the user's request)* — store the
+   file name, not the container path that iOS regenerates. **Done** — `36052ba`.
+6. **Review and refactor** — the phase-closing pass. Carries `FRAME_AUTOSAVE_NAME` dead code
+   under iOS (Step 1) and accessible names for four unnamed buttons (Step 2a).
 
-Steps 3–5 are written from what the crux predicts, not from observation. Step 2 is expected
-to re-order them.
+Steps 3–5 were written from what the crux predicts, not from observation, and Step 2a duly
+re-ordered them: 5a–5d all arrived from running the thing.
 
 ## Step 1 — Name the renderer once
 
@@ -1484,3 +1496,390 @@ above. A fresh import on the simulator exercises everything this step actually c
 was deleted still fails at `Epub::open` with a raw error in the status line. That was true
 before and is unchanged; `reimport_repairs_a_missing_managed_copy` covers the recovery route
 that exists.
+
+## Step 5a — Give it an icon
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+*Provisional when planned, found by running it: the springboard showed the default blank tile.
+The first step in this phase whose diff contains no Rust at all.*
+
+### The crux — an icon is a declaration, not a file
+
+On iOS an app icon is not something the app *has*. It is two things that have to agree:
+
+1. **`CFBundleIcons` in `Info.plist`**, naming icons by *base name* — `AppIcon60x60`, never a
+   path — with iOS appending `@2x` / `@3x` and `.png` itself;
+2. **the PNGs at the root of the `.app`**, because that base name is resolved against the
+   bundle root and nowhere else.
+
+Neither half existed, and this step turned out to be about *why* the second half is hard.
+
+### The check — the red, and what four builds established
+
+Measured before touching anything:
+
+```sh
+dx build --platform ios
+ls target/dx/ook-reader/debug/ios/OokReader.app     # assets  Info.plist  ook-reader
+plutil -p .../Info.plist | grep -i icon             # exit 1 — no CFBundleIcon* key at all
+```
+
+Three entries, no icon key. Note also what is *not* in `assets/`: `dx` copies the files the
+`asset!()` macro linked, not the `assets/` directory, so `assets/icons/icon.png` — the 1024²
+source this project has had since Milestone 1 — had never shipped in an iOS build.
+
+Then four builds, each answering one question:
+
+| tried | result |
+|---|---|
+| `[ios] icon = ["assets/icons/icon.png"]` | **parsed and ignored.** The key is real in dx 0.7.9's schema — *"Icons for the app. Overrides `bundle.icon` for iOS builds"* — and the build path never reads it. No warning. |
+| `[ios] resources = [...]` | **parsed and ignored**, same way. Nothing reached the bundle. |
+| `[ios.plist]` with nested `CFBundleIcons` tables | **works.** Rendered into the plist as a correct nested dict, `~ipad` variant included. |
+| `dx bundle --platform ios --package-types ios` | **a passthrough.** Same three-entry `.app`, no icon. |
+
+The last row is what turned a guess into a finding. Compare the two macOS outputs already on
+disk:
+
+```
+target/dx/.../debug/macos/OokReader.app/Contents/Resources/    assets            # dx build
+target/dx/.../bundle/macos/macos/OokReader.app/Contents/Resources/
+                                          OokReader.icns  assets                 # dx bundle
+```
+
+**Installing an icon is a *bundler* feature, not a *builder* feature — on every Apple
+platform.** `dx build` has never installed one, not even on macOS; `dx bundle` does it for
+macOS through tauri-bundler, and dx 0.7.9 has **no iOS icon path at either stage**. So the
+phase doc's "gap in the port" was right, and bigger than it looked: it is not a missing key,
+it is a missing stage.
+
+One more measurement decided the shape of the fix. Copying the PNGs in by hand and rebuilding:
+
+```
+--- after rebuild ---
+assets  Info.plist  ook-reader
+```
+
+**A rebuild wipes the bundle root.** So the copy is not a one-time repair; it has to run after
+every build, which is exactly what makes it a recipe rather than a note.
+
+**The gate is an eyeball, and it is a real one** — a plist key is not an icon until the
+springboard draws it. Driven with `agent-device open com.apple.springboard` to reach page 2 on
+the iPhone 17, and `simctl install` on an iPad Pro 13" (M5). Both render the icon; the two
+`rfd` sample apps sitting beside it on the same page still show the blank default tile, which
+is the before-picture preserved by accident.
+
+### The code
+
+Four prescaled PNGs committed under `assets/icons/ios/`, from the 1024² source (`sips -z`),
+named for the base names iOS will ask for:
+
+```
+AppIcon60x60@2x.png      120   iPhone
+AppIcon60x60@3x.png      180   iPhone Plus / Pro Max
+AppIcon76x76@2x.png      152   iPad
+AppIcon83.5x83.5@2x.png  167   iPad Pro
+```
+
+The declaration, in `Dioxus.toml`, through the one hook that works:
+
+```toml
+[ios.plist]
+CFBundleIcons = { CFBundlePrimaryIcon = { CFBundleIconFiles = ["AppIcon60x60"] } }
+"CFBundleIcons~ipad" = { CFBundlePrimaryIcon = { CFBundleIconFiles = ["AppIcon60x60", "AppIcon76x76", "AppIcon83.5x83.5"] } }
+```
+
+And the stage dx does not have, as a `justfile` recipe:
+
+```make
+ios_app := "target/dx/ook-reader/debug/ios/OokReader.app"
+
+install-ios: boot-ios
+    dx build --platform ios
+    cp assets/icons/ios/*.png {{ios_app}}/
+    xcrun simctl install booted {{ios_app}}
+```
+
+### Why it works
+
+**Base names, not paths — which is why `assets/icons/icon.png` can never simply be named.**
+`CFBundleIconFiles` entries are stems. iOS takes `AppIcon60x60`, appends the scale suffix for
+the device it is on and `.png`, and looks in the bundle root. There is no syntax for a
+subdirectory, so an icon living under `assets/` is unreachable no matter what the plist says.
+That single fact is what forces the copy step to exist.
+
+**`~ipad` is a plist convention, not something invented here.** iOS resolves a key suffixed
+`~ipad` in preference to the bare key when running on an iPad, for *any* key — the same
+mechanism as the `UISupportedInterfaceOrientations~ipad` dx already writes into this plist.
+That is how one bundle carries two icon sets, and it is why the iPad check was worth running
+separately: it exercises a key the iPhone never reads.
+
+**The 1024² image alone is not enough on this route.** A single marketing-size icon works when
+`actool` compiles an `Assets.xcassets` into an `Assets.car` and synthesises the plist keys —
+the modern path, and it needs a build stage this project does not have. Without it the
+springboard does no downscaling: it asks for a specific pixel size and draws nothing if the
+file is absent. Hence four files, not one.
+
+**No alpha channel, checked rather than assumed.** iOS rejects an icon with transparency;
+`sips -g hasAlpha assets/icons/icon.png` says `no`, and `sips -z` preserves that.
+
+### The trade this step makes — and it is worse than it first looked
+
+The plan was that `serve-ios` keeps hot reload and keeps the blank tile, while `install-ios`
+is the slower path with a correct springboard. Measured, that framing was too kind.
+`dx serve --platform ios` does not merely *skip* the icon — it **undoes** it:
+
+```
+=== build output after dx serve ===        assets  Info.plist  ook-reader
+=== installed container after dx serve === assets  Info.plist  ook-reader
+```
+
+Serve wipes the bundle root, rebuilds without the PNGs, and reinstalls over the good install.
+The springboard follows immediately — no icon-cache lag, the tile is blank again on the next
+screenshot. Which also explains a wiped build output seen earlier and briefly blamed on
+nothing: that is just what a build does.
+
+So **`install-ios` is a one-shot demo path, not a fix.** The icon is correct until the next
+`dx serve`, and `dx serve` is the command the daily loop is made of. There is no seam to fix
+this in dx 0.7.9: serve builds and installs internally, and the only directory it copies is
+the linked-`asset!()` set, whose hashed names can never satisfy a `CFBundleIconFiles` stem.
+
+**And it cannot be worked around from this side.** Asked directly — can `dx serve` be made to
+show the icon? — the answer is no, and the reason is that **an iOS icon is baked at install
+time**. `installd` renders it into its own cache when the app is installed; the container is
+not re-read afterwards. Three measurements:
+
+| | result |
+|---|---|
+| install *with* the PNGs in the bundle | icon renders |
+| install *without* them — what `dx serve` does | blank tile |
+| copy the PNGs into the *installed container*, then restart SpringBoard | **still blank** |
+
+So the files must be inside the `.app` at the moment `simctl install` runs, and `dx serve`
+owns that moment end to end. Everything that could open a seam was checked and is absent:
+`[ios].icon` and `[ios].resources` parse and are ignored, dx 0.7.9 has no pre/post-build hook
+(the only `hooks` strings in the binary belong to cargo-generate and NSIS), and
+`dx bundle --package-types ios` is a passthrough. Post-install patching was the last candidate
+and the third row rules it out.
+
+`install-ios` is therefore the whole of what is available today, and the blank tile under
+`serve-ios` is not a trade that was chosen so much as one that cannot be refused.
+
+### Scope note
+
+- **No `#[test]`, and that is not a lapse.** There is no Rust in this step. The suite stays at
+  **127 green**, clippy clean, and the check is a build product plus two eyeballs — the same
+  shape as Step 2.
+- **Only the springboard sizes are declared.** The 29pt (Settings) and 40pt (Spotlight) icons
+  are not generated, so those surfaces may still draw blank. They were not verified either way;
+  declaring sizes without checking them is how this kind of config rots.
+- **`[ios].icon` and `[ios].resources` were removed after testing.** Both parse and do nothing.
+  Config that looks load-bearing and is not is worse than no config — the finding belongs in
+  this log, not in `Dioxus.toml`.
+- **Not the launch screen.** The plist names `UILaunchStoryboardName = LaunchScreen` and no such
+  storyboard exists in the bundle; the white flash on launch is that, and it is separate.
+- **Not Android, macOS or Windows.** `[bundle].icon` still feeds `dx bundle` for the desktop
+  targets, unchanged.
+- **Not icon design.** `assets/icons/icon.png` remains the single source; the four files are
+  derived from it and regenerating them is four `sips` lines.
+- **Not the four unnamed buttons.** Accessible names stay parked for Step 6.
+
+---
+
+## Step 5e — Install a signed release build on a real device
+
+> **Added at the user's request**, mid-5a. It corrects a claim this log made earlier — that a
+> device install would need a signing pipeline the project does not have — and replaces it with
+> a measured one.
+
+### The correction
+
+Step 5a's write-up said dx's iOS bundler "only zips a `.app` it refuses to look inside," and
+inferred from that that signing was ours to build. **That was wrong, and it was wrong because
+it was inferred rather than run.** `dx build --help` has three flags the earlier reading missed:
+
+| flag | what it does |
+|---|---|
+| `--device [<DEVICE>]` | targets `aarch64-apple-ios` instead of `…-ios-sim` |
+| `--codesign` | runs `codesign` over the finished bundle |
+| `--apple-entitlements` / `--apple-team-id` | override the auto-provisioned pair |
+
+And `request.rs:726` makes the second implied by the first — `args.codesign || device.is_some()
+|| args.apple_entitlements.is_some()` — so **`--device` alone is the whole device path.** dx
+scans `~/Library/Developer/Xcode/UserData/Provisioning Profiles` (falling back to the pre-Xcode-16
+`~/Library/MobileDevice/…`), picks the best match for the bundle id, ranks *exact app ID >
+more provisioned devices > newer file*, copies the winner in as `embedded.mobileprovision`, and
+signs. One command produces a signed, profile-bearing, arm64 `.app`.
+
+### The two things it still gets wrong
+
+**1. The entitlements are copied verbatim from a wildcard profile.** `auto_provision_entitlements`
+lifts `application-identifier` straight out of the profile, so a `TEAM.*` profile yields a signed
+`application-identifier` of literally `Y5Q5H3AG9D.*`. iOS requires the concrete
+`Y5Q5H3AG9D.com.dimaportenko.ook-reader`. `installd` rejects the install with `0xe8008015`.
+
+**2. It is the wrong side of the icon copy.** Same shape as 5a's finding, one stage later: dx
+signs the bundle, and a signature *seals its contents*, so the four PNGs added afterwards
+invalidate `_CodeSignature` unless the bundle is signed again.
+
+Both are fixed by the same move — **re-sign after copying**, with corrected entitlements. The
+entitlements are not hardcoded: they are read back out of the bundle dx just signed
+(`codesign -d --entitlements - --xml`), and the team prefix out of the profile dx just embedded
+(`ApplicationIdentifierPrefix`), so the recipe follows whatever profile dx chose.
+
+### The code
+
+Two recipes, split so the *choosing* is separable from the *installing*. `pick-device` resolves
+a device to a UDID and prints nothing else on stdout; `install-device` consumes it.
+
+```make
+pick-device query="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    json=$(mktemp)
+    script=$(mktemp)
+    trap 'rm -f "$json" "$script"' EXIT
+    xcrun devicectl list devices --json-output "$json" > /dev/null
+    cat > "$script" <<'PY'
+    ... filter by query, else print a numbered menu and read a choice ...
+    PY
+    QUERY="{{query}}" python3 "$script" "$json"
+
+install-device query="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    udid=$(just pick-device "{{query}}")
+    dx build --platform ios --release --device "$udid"
+    cp assets/icons/ios/*.png "{{ios_device_app}}/"
+    identity=$(security find-identity -v -p codesigning | awk '/Apple Development:/ {print $2; exit}')
+    team=$(security cms -D -i "{{ios_device_app}}/embedded.mobileprovision" \
+      | plutil -extract ApplicationIdentifierPrefix.0 raw -)
+    entitlements=$(mktemp)
+    codesign -d --entitlements - --xml "{{ios_device_app}}" > "$entitlements"
+    plutil -replace application-identifier -string "$team.{{bundle_id}}" "$entitlements"
+    plutil -replace keychain-access-groups -json "[\"$team.{{bundle_id}}\"]" "$entitlements"
+    codesign --force --entitlements "$entitlements" --sign "$identity" "{{ios_device_app}}"
+    xcrun devicectl device install app --device "$udid" "{{ios_device_app}}"
+```
+
+`just install-device` with no argument lists the paired devices and prompts; `just install-device
+ipad` matches on name, model or UDID and skips the prompt when the match is unique; a single
+paired device is taken without asking. **The menu goes to stderr and only the UDID goes to
+stdout**, which is what lets `install-device` capture the answer with `$(...)` while the prompt
+still reaches the terminal.
+
+One bash trap worth remembering, because the first attempt hit it: the picker script is written
+to a temp file rather than piped in with `python3 - <<'PY'`. Feeding a script on **stdin spends
+stdin**, so the interactive `readline()` gets EOF and the prompt silently reads an empty string.
+Reading from `/dev/tty` is the usual fix and is in there as the first choice, but it fails
+outright where there is no controlling terminal — so the script is a file and stdin stays free
+for both.
+
+The picker resolves to a **UDID** and not a name because the name is a trap: `devicectl` prints
+`Dmytro’s iPhone` with a **typographic** apostrophe, and passing the ASCII one straight back to
+`--device` gets `CoreDeviceError 1000 — device not found`. Substring matching sidesteps it — you
+type `iphone`, never the apostrophe — and the UDID it resolves to is unambiguous and is what
+`devicectl device install` wants anyway. Signing by the identity's **SHA-1** rather than its
+common name is the same instinct applied to the keychain, which holds *four* certificates named
+`Apple Development: Dima Portenko (BWUDYFW6A8)`, three of them expired.
+
+### Verified — it installs
+
+Both devices run the release build. Everything below is measured on this machine:
+
+| | |
+|---|---|
+| binary architecture | `arm64`, non-fat — the device triple, not the simulator's |
+| `embedded.mobileprovision` | present in the `.app` |
+| `Info.plist` | carries both `CFBundleIcons` and `CFBundleIcons~ipad` |
+| the four PNGs | present in the bundle root after the copy |
+| `codesign --verify` | *valid on disk*, *satisfies its Designated Requirement* |
+| install — iPhone 13 Pro | **succeeded** |
+| install — iPad Pro 11" | **succeeded** |
+
+Getting there cost three rejections, and **the useful part of this step is that they are three
+different failures wearing nearly the same clothes.** `installd` checks cheapest-first, so they
+arrive in a fixed order and each one only becomes visible once the previous is cleared:
+
+| code | what it actually means | fix |
+|---|---|---|
+| `10005` | Developer Mode is disabled | Settings → Privacy & Security, then restart |
+| `0xe8008015` | the signing **certificate** is not in the profile | refresh the profile |
+| `0xe8008012` | **this device** is not in the profile | register the device |
+
+`0xe8008015` is the one worth slowing down on, because it has three causes that the message
+does not distinguish:
+
+1. the device is not in the profile — *ruled out here;* both UDIDs were listed
+2. the signed `application-identifier` does not match the bundle id — *real, and the recipe
+   fixes it* by rewriting the wildcard dx copies in
+3. the signing certificate is not among the profile's `DeveloperCertificates` — **this was it**
+
+Cause 3 held because the only profile matching this bundle id was the wildcard `Y5Q5H3AG9D.*`,
+in date to 2026-11-06 but carrying exactly one certificate — serial `08576C51…`, **expired
+2026-03-04**. The certificate that signed the app had been renewed since. A profile does not
+go stale when it expires; it goes stale when the certificate inside it does, and nothing in
+the error says so.
+
+### What minting the profile taught
+
+Xcode mints one from a throwaway project — `xcodegen` a single-target app with the right bundle
+id, then `xcodebuild -allowProvisioningUpdates`. Two findings came out of doing it:
+
+**App IDs are globally unique across teams, and a free team can hold one hostage.** The first
+attempt targeted the paid personal team `F2MP7G7FM5` and was refused:
+*"the app identifier … cannot be registered to your development team because it is not
+available."* `com.dimaportenko.ook-reader` was already registered to `HNVBRBU7PH`, the **free**
+personal team, from some earlier experiment. Free-team App IDs are created implicitly by Xcode
+and are not listed in the developer portal — Certificates, Identifiers & Profiles is a paid
+membership feature and the portal's team switcher does not show Personal Teams — so there is no
+UI to release it. The identifier is effectively stuck on the free team. The escape hatch, if the
+free team's terms ever bite, is a bundle id that is still unclaimed.
+
+**Xcode registers the device it is pointed at, and only that one.** Building for
+`generic/platform=iOS` produced a profile containing the iPhone alone, which is why the iPad
+then failed `0xe8008012` rather than succeeding. Re-running against
+`-destination 'platform=iOS,id=<ipad-udid>'` produced a second profile with both. dx picks
+between them correctly without help — its ranking is *exact app ID > more provisioned devices >
+newer file*, and the two-device profile wins on the middle term.
+
+### The identity is derived, not guessed
+
+The first draft of the recipe took the first `Apple Development` line out of
+`security find-identity`, which is exactly what dx does. Both are wrong for the same reason:
+this keychain holds valid identities on **three** teams, and the one that must sign is whichever
+team owns the profile dx just embedded — `HNVBRBU7PH` here, which is neither first nor the one
+dx chose.
+
+So the recipe reads the certificates *out of the embedded profile*, SHA-1 fingerprints each,
+and picks the first that `security find-identity -v` reports as a valid keychain identity. That
+fingerprint is exactly the hash `codesign --sign` wants, so no name lookup is needed. It follows
+whatever dx selects, across every team on the machine, and when nothing matches it says so
+instead of deferring the truth to a hex code from `installd`.
+
+### The seven-day clock
+
+`HNVBRBU7PH` is a **free** personal team, so the profile expires **2026-09-05 — seven days**.
+Both installs stop launching then and need `just install-device <device>` again. That is a
+property of the team, not of this recipe; a paid team issues a year. It is recorded here because
+the failure it produces later — an app that launches for a week and then refuses — looks nothing
+like a provisioning problem from the outside.
+
+### Scope note
+
+- **No `src/` diff and no new test.** The suite stays at **127 green**, clippy clean. There is
+  no Rust in this step; the only honest check is the artifact and the install, and the tables
+  above are it.
+- **Not `.ipa`, not TestFlight, not the App Store.** `dx bundle --package-types ipa` exists and
+  is untouched. Submission additionally needs `CFBundleIconName` and a compiled asset catalog
+  (`actool` → `Assets.car`) that the loose `CFBundleIconFiles` route does not satisfy — the one
+  place 5a's icon mechanism genuinely does not carry.
+- **The icon on hardware is now checkable but unchecked.** It renders on both simulators, and
+  the release build carries the plist keys and the PNGs onto both devices — but nobody has
+  reported back on the springboard, so 5a's claim stays reasoned rather than measured.
+- **The throwaway Xcode project is not in the repo.** It lives in scratch, exists only to make
+  Apple mint a profile, and re-creating it is a `project.yml` and one `xcodebuild`. Checking it
+  in would imply the project builds through Xcode, which it does not.
+- **`serve-ios` is unchanged and still iconless.** 5a's wall is about `dx serve` owning the
+  build→install moment, and nothing here opens it.

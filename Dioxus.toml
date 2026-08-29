@@ -14,6 +14,10 @@ icon = [
     "assets/icons/icon.ico",
 ]
 
+[ios.plist]
+CFBundleIcons = { CFBundlePrimaryIcon = { CFBundleIconFiles = ["AppIcon60x60"] } }
+"CFBundleIcons~ipad" = { CFBundlePrimaryIcon = { CFBundleIconFiles = ["AppIcon60x60", "AppIcon76x76", "AppIcon83.5x83.5"] } }
+
 [web.app]
 
 # HTML title tag content
