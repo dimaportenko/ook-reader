@@ -30,7 +30,7 @@ use crate::{
     config::Config,
     db::Db,
     ui::{
-        library::{ImportControl, LibraryBooks, OpenBook},
+        library::{LibraryBooks, OpenBook},
         reader::Reader,
         OrLog,
     },
@@ -126,7 +126,6 @@ fn App() -> Element {
             }
         } else {
             LibraryBooks {}
-            ImportControl {}
         }
     }
 }

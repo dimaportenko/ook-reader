@@ -66,6 +66,13 @@ body,
 }
 
 /* ---- Library Books ---- */
+.library-books__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 1rem;
+}
+
 .library-books__list {
   display: grid;
   grid-template-columns: repeat(6, 1fr);

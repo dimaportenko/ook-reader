@@ -1,13 +1,20 @@
 use std::{path::PathBuf, rc::Rc};
 
 use dioxus::prelude::*;
+use dioxus_primitives::ContentAlign;
 use rbook::Epub;
 
 use crate::{
     clock::now_secs,
     epub,
     library::{self, Book, Library},
-    ui::OrLog,
+    ui::{
+        components::{
+            icon::{self, Icon},
+            popover::{PopoverContent, PopoverRoot},
+        },
+        OrLog,
+    },
 };
 
 static PLACEHOLDER_2: Asset = asset!("/assets/books/placeholder-2.jpg");
@@ -32,9 +39,53 @@ pub(crate) fn LibraryBooks() -> Element {
     let books = use_context::<Signal<Vec<library::Book>>>();
     let mut open_book = use_context::<Signal<Option<OpenBook>>>();
     let mut status = use_context::<Signal<Option<String>>>();
+    let mut import_status = use_signal(|| None::<String>);
+
+    let import = use_callback({
+        let library = Rc::clone(&library);
+
+        move |sources: Vec<PathBuf>| {
+            if sources.is_empty() {
+                return;
+            }
+
+            let summary = library.add_all(&sources, now_secs());
+
+            refresh_books(&library, books, status);
+            import_status.set(Some(match summary.failed {
+                0 => format!("Imported {} books", summary.added),
+                failed => format!("Imported {} books, {failed} failed", summary.added),
+            }));
+        }
+    });
 
     rsx! {
         div {
+            div {
+                class: "library-books__actions",
+                PopoverRoot {
+                    is_modal: false,
+                    open: import_status().is_some(),
+                    on_open_change: move |open: bool| {
+                        if !open {
+                            import_status.set(None);
+                        }
+                    },
+                    ImportPicker { import }
+                    if let Some(message) = import_status() {
+                        PopoverContent {
+                            align: ContentAlign::End,
+                            role: "status",
+                            "{message}"
+                        }
+                    }
+                }
+                button {
+                    class: "icon-button",
+                    aria_label: "Edit library",
+                    Icon { icon: icon::EDIT }
+                }
+            }
             ul {
                 class: "library-books__list",
                 for book in books() {
@@ -145,43 +196,6 @@ fn BookCover(book: Book) -> Element {
     }
 }
 
-#[component]
-pub(crate) fn ImportControl() -> Element {
-    let library = use_context::<Rc<Library>>();
-    let books = use_context::<Signal<Vec<library::Book>>>();
-    let library_status = use_context::<Signal<Option<String>>>();
-    let mut status = use_signal(|| None::<String>);
-
-    let import = use_callback(move |sources: Vec<PathBuf>| {
-        if sources.is_empty() {
-            return;
-        }
-
-        let summary = library.add_all(&sources, now_secs());
-
-        status.set(Some(match summary.failed {
-            0 => format!("Imported {} books", summary.added),
-            failed => format!("Imported {} books, {failed} failed", summary.added),
-        }));
-
-        refresh_books(&library, books, library_status);
-    });
-
-    rsx! {
-        div {
-            style: "padding: 8px; display: flex; gap: 8px; align-items: center;",
-
-            ImportPicker { import }
-
-            if let Some(message) = status() {
-                span {
-                    "{message}"
-                }
-            }
-        }
-    }
-}
-
 #[cfg(target_os = "ios")]
 #[component]
 fn ImportPicker(import: Callback<Vec<PathBuf>>) -> Element {
@@ -189,10 +203,12 @@ fn ImportPicker(import: Callback<Vec<PathBuf>>) -> Element {
 
     rsx! {
         button {
+            class: "icon-button",
+            aria_label: "Add book",
             onclick: move |_| {
                 crate::document_picker::pick_epubs(&window.window, move |sources| import.call(sources))
             },
-            "Import EPUB"
+            Icon { icon: icon::ADD }
         }
     }
 }
@@ -202,9 +218,13 @@ fn ImportPicker(import: Callback<Vec<PathBuf>>) -> Element {
 fn ImportPicker(import: Callback<Vec<PathBuf>>) -> Element {
     rsx! {
         label {
-            "Import EPUB "
+            class: "icon-button",
+            aria_label: "Add book",
+
+            Icon { icon: icon::ADD }
 
             input {
+                class: "hidden",
                 r#type: "file",
                 accept: ".epub",
                 multiple: true,

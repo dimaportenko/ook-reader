@@ -41,6 +41,20 @@ pub(crate) const LIST: TablerIcon = TablerIcon {
     ],
 };
 
+pub(crate) const ADD: TablerIcon = TablerIcon {
+    name: "plus",
+    paths: &["M12 5l0 14", "M5 12l14 0"],
+};
+
+pub(crate) const EDIT: TablerIcon = TablerIcon {
+    name: "edit",
+    paths: &[
+        "M7 7h-1a2 2 0 0 0 -2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2 -2v-1",
+        "M20.385 6.585a2.1 2.1 0 0 0 -3 -3l-9.385 9.415v3h3l9.385 -9.415z",
+        "M16 5l3 3",
+    ],
+};
+
 #[component]
 pub(crate) fn Icon(icon: TablerIcon) -> Element {
     rsx! {
