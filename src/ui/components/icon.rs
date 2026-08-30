@@ -11,6 +11,16 @@ pub(crate) const CLOSE: TablerIcon = TablerIcon {
     paths: &["M18 6l-12 12", "M6 6l12 12"],
 };
 
+pub(crate) const CHEVRON_LEFT: TablerIcon = TablerIcon {
+    name: "chevron-left",
+    paths: &["M15 6l-6 6l6 6"],
+};
+
+pub(crate) const CHEVRON_RIGHT: TablerIcon = TablerIcon {
+    name: "chevron-right",
+    paths: &["M9 6l6 6l-6 6"],
+};
+
 pub(crate) const SETTINGS: TablerIcon = TablerIcon {
     name: "settings",
     paths: &[

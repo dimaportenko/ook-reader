@@ -115,8 +115,8 @@ fn chapter_label(entries: &[TocEntry], chapter: usize, chapter_count: usize) -> 
 
 fn page_label(page: usize, count: usize) -> String {
     match count {
-        0 => "Page …".to_string(),
-        count => format!("Page {} of {}", page + 1, count),
+        0 => "…".to_string(),
+        count => format!("{} of {}", page + 1, count),
     }
 }
 
@@ -198,7 +198,9 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                     button {
                         class: "icon-button",
                         onclick: move |_| open_book.set(None),
-                        Icon { icon: icon::CLOSE }
+                        Icon {
+                            icon: icon::CLOSE,
+                        }
                     }
                 }
                 div {
@@ -262,10 +264,14 @@ fn NavRow(
 ) -> Element {
     rsx! {
         div {
-            style: "display: flex; gap: 8px; padding: 8px; justify-content: center;",
+            style: "display: flex; gap: 8px; padding: 8px; justify-content: center; align-items: center;",
             button {
+                class: "icon-button",
+                aria_label: "Previous page",
                 onclick: move |e| on_prev.call(e),
-                "Prev"
+                Icon {
+                    icon: icon::CHEVRON_LEFT,
+                }
             }
 
             span {
@@ -273,8 +279,12 @@ fn NavRow(
             }
 
             button {
+                class: "icon-button",
+                aria_label: "Next page",
                 onclick: move |e| on_next.call(e),
-                "Next"
+                Icon {
+                    icon: icon::CHEVRON_RIGHT,
+                }
             }
         }
     }
