@@ -2357,7 +2357,7 @@ buttons all named "Open" is the same defect one rename later.
   but its stated reason is now the wrong one. Worth a one-line rewrite by hand.
 - **Not the chapter title's missing `text-overflow`.** It still clips mid-word under the
   chrome buttons on a phone (visible as *"The Adventures of Sherlock Holr"*). Pre-existing,
-  cosmetic, and it belongs to whichever step next touches the reader's header — a candidate
-  for Phase 10 Step 3, which re-lays that row out anyway.
+  cosmetic, and it belongs to whichever step next touches the reader's header and re-lays
+  that row out.
 - **Not landscape, not the iPad, not Android.** Same standing gaps the phase has carried
   throughout.

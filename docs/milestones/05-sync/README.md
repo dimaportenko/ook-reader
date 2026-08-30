@@ -11,10 +11,8 @@ position, the library and its deletions converging across devices, and **no serv
 
 The gate discussed while planning this — closing the iOS port first — is **already
 satisfied**: [Phase 9](../04-multiplatform/01-mobile/phase-9-ios-simulator.md) closed on
-`54e2fbd`. What sits in front of this milestone instead is
-[Phase 10 — Liquid glass chrome](../03-reader-enhancements/06-chrome-material/phase-10-liquid-glass.md),
-which is 🚧 **in progress** (Step 1 done, Step 2/3 the current focus) rather than merely
-planned. Whether to finish it or park it mid-phase is an open call, not a settled one.
+`54e2fbd`. Nothing else is open in front of this milestone: Milestone 3 has no phase in
+progress, so this one is free to start whenever it is picked up.
 
 ## The idea in one paragraph
 

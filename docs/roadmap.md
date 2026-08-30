@@ -50,24 +50,14 @@ reader can use (open a book, see text, turn a page, resume). The MVP slice seque
 
 ## Current focus
 
-**Milestone 3 → [Phase 10 — Liquid glass chrome](milestones/03-reader-enhancements/06-chrome-material/phase-10-liquid-glass.md), Step 2 or 3.**
-Give the reader's floating surfaces a glass material that behaves the same in WebKit and
-Chromium. The crux is a ceiling and a prerequisite. The ceiling: Dioxus renders into two
-engine families, so cross-platform means *must work in WebKit* — which rules out both
-`backdrop-filter: url(#svg)` (Chromium only) and the private `-apple-visual-effect` (not
-shippable, and Apple-only). The material is therefore built from `blur()`, `saturate()`,
-gradients and shadows, which is enough, because the gap between 2014 frosted glass and
-Liquid Glass is not the blur. The prerequisite: three of the four surfaces are *siblings*
-of the page rather than on top of it, so they have nothing to blur — which is why Step 1
-started at the popovers and floating the bars is its own step.
-
-**Milestone 4's iOS half is closed behind it.**
+**No phase is currently open — the next one has not been chosen.**
 [Phase 9](milestones/04-multiplatform/01-mobile/phase-9-ios-simulator.md) is **done**: the
 reader builds, launches, imports, pages by swipe and fits the notch on an iPhone and an
 iPad, and on real hardware. Android has no phase yet, and web (WASM) stays ⏸. Milestone 3's
-other candidates — full-text search, annotations, sync, and the **bookmarks** that
+candidates — full-text search, annotations, and the **bookmarks** that
 [Phase 8 deferred out](milestones/03-reader-enhancements/05-toc-navigation/README.md) — are
-still unclaimed on its [board](milestones/03-reader-enhancements/README.md).
+still unclaimed on its [board](milestones/03-reader-enhancements/README.md), and
+[Milestone 5 — Sync](milestones/05-sync/README.md) is designed and queued.
 [`TODO.md`](../TODO.md) holds the smaller unscheduled items.
 
 **Milestone 5 — Sync is designed and queued.** A grilling session on 2026-08-29 turned
@@ -83,8 +73,7 @@ remains is a pure merge function that tests offline. "Log in to an account" surv
 [ADR-0004](adr/0004-local-store-rusqlite-with-libsql-sync-path.md)** — the libSQL/Turso path
 is dropped, and the local store moves to `sqlx`. Six phases, starting with a store migration
 and ending with book-file mirroring; the merge engine sits third, deliberately ahead of auth,
-because it needs no network. It queues behind
-[Phase 10](milestones/03-reader-enhancements/06-chrome-material/phase-10-liquid-glass.md).
+because it needs no network.
 
 [Phase 8 — ToC & Navigation](milestones/03-reader-enhancements/05-toc-navigation/phase-8-toc-navigation.md)
 **closed 2026-08-18** and was the last one worked: the reader names the chapter you are in

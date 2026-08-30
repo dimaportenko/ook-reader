@@ -196,8 +196,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                     style: "padding: 0.75rem 1rem; z-index: 1;",
 
                     button {
-                        class: "icon-button glass",
-                        aria_label: "Close book",
+                        class: "icon-button",
                         onclick: move |_| open_book.set(None),
                         Icon { icon: icon::CLOSE }
                     }

@@ -41,7 +41,6 @@ const MAIN_CSS: Asset = asset!("/assets/main.css");
 const DIOXUS_PRIMITIVES_CSS: Asset = asset!("/assets/dx-components-theme.css");
 
 const ROOT_THEME_JS: &str = include_str!("web/assets/root-theme.js");
-const GLASS_ANGLE_JS: &str = include_str!("web/assets/glass-angle.js");
 
 const VIEWPORT: &str =
     "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover";
@@ -98,10 +97,6 @@ fn App() -> Element {
     use_effect(move || {
         let push = document::eval(ROOT_THEME_JS);
         _ = push.send(settings().vars());
-    });
-
-    use_effect(|| {
-        document::eval(GLASS_ANGLE_JS);
     });
 
     epub::use_register_covers_handler(config.books_dir.clone());
@@ -200,149 +195,6 @@ mod test {
             MAIN_CSS_SOURCE.contains("#main"),
             "the Dioxus mount point has to carry the height too, or the percentage \
              resolves against an auto-height ancestor and the screen collapses",
-        );
-    }
-
-    #[test]
-    fn every_backdrop_filter_is_paired_with_its_webkit_spelling() {
-        let prefixed = MAIN_CSS_SOURCE.matches("-webkit-backdrop-filter:").count();
-        let all = MAIN_CSS_SOURCE.matches("backdrop-filter:").count();
-
-        assert!(prefixed > 0, "the glass has no blur to speak of");
-        assert_eq!(
-            all,
-            prefixed * 2,
-            "WebKit is the engine that can refuse, and it is the one an unprefixed \
-             declaration is invisible on",
-        );
-    }
-
-    #[test]
-    fn the_glass_fill_is_declared_after_the_button_it_overrides() {
-        let button = MAIN_CSS_SOURCE
-            .find(".icon-button {")
-            .expect("the primitive the glass composes onto");
-        let glass = MAIN_CSS_SOURCE
-            .find(".glass {")
-            .expect("the material itself");
-
-        assert!(
-            button < glass,
-            "one class each is a specificity tie, so only source order decides \
-             which background-color the button ends up with",
-        );
-    }
-
-    #[test]
-    fn a_surface_can_set_its_own_blur_radius() {
-        let (_, after) = MAIN_CSS_SOURCE
-            .split_once(".glass {")
-            .expect("the material itself");
-        let block = after.split_once('}').expect("an unclosed rule").0;
-
-        assert!(
-            !block.contains("--glass-blur:"),
-            "a default declared inside .glass beats every consumer that declares \
-             the same knob earlier at one class of specificity, so .icon-button's \
-             radius never reaches the filter",
-        );
-    }
-
-    #[test]
-    fn transparency_can_be_turned_off_without_turning_the_chrome_off() {
-        let (_, reduced) = MAIN_CSS_SOURCE
-            .split_once("@media (prefers-reduced-transparency: reduce)")
-            .expect("a reading app owes the setting an answer");
-
-        assert!(
-            reduced.contains("backdrop-filter: none"),
-            "leaving the blur on is the whole thing the setting asks you not to do",
-        );
-        assert!(
-            reduced.contains("--glass-fallback"),
-            "each surface names its own opaque colour, or they all collapse to one",
-        );
-        assert!(
-            reduced.contains("background-image: none"),
-            "a highlight raking across an opaque panel is the lit-glass cue the \
-             setting asks you to drop, and losing the blur does not remove it",
-        );
-    }
-
-    #[test]
-    fn the_specular_angle_is_registered_with_every_descriptor_it_needs() {
-        let (_, property) = MAIN_CSS_SOURCE
-            .split_once("@property --glass-angle {")
-            .expect("an unregistered custom property is a token string, not an angle");
-        let block = property.split_once('}').expect("an unclosed rule").0;
-
-        for descriptor in ["syntax:", "inherits:", "initial-value:"] {
-            assert!(
-                block.contains(descriptor),
-                "an @property rule missing {descriptor} is dropped whole, and the \
-                 gradient reading it then goes invalid at computed-value time",
-            );
-        }
-
-        let (_, glass) = MAIN_CSS_SOURCE
-            .split_once(".glass {")
-            .expect("the material itself");
-
-        assert!(
-            glass
-                .split_once('}')
-                .expect("an unclosed rule")
-                .0
-                .contains("var(--glass-angle)"),
-            "a registered property nothing reads is a no-op",
-        );
-    }
-
-    #[test]
-    fn one_write_at_the_root_moves_the_light_on_every_glass_surface() {
-        let (_, property) = MAIN_CSS_SOURCE
-            .split_once("@property --glass-angle {")
-            .expect("the registration the driver writes through");
-        let block = property.split_once('}').expect("an unclosed rule").0;
-
-        assert!(
-            block.contains("inherits: true"),
-            "a non-inherited property set on the root element stops there, so \
-             every .glass descendant keeps the initial value and the light never \
-             moves",
-        );
-
-        assert!(
-            GLASS_ANGLE_JS.contains("documentElement"),
-            "writing each surface instead means re-finding them every time a \
-             popover mounts, which is the cost inheritance exists to avoid",
-        );
-        assert!(
-            GLASS_ANGLE_JS.contains("--glass-angle"),
-            "a driver that writes some other name leaves the gradient on its \
-             initial value with nothing to show for the work",
-        );
-        assert!(
-            GLASS_ANGLE_JS.contains("requestAnimationFrame"),
-            "pointermove outruns the compositor, and every surplus write repaints \
-             a blurred surface sitting over scrolling text",
-        );
-    }
-
-    #[test]
-    fn a_light_that_follows_you_can_be_asked_to_hold_still() {
-        let (_, reduced) = MAIN_CSS_SOURCE
-            .split_once("@media (prefers-reduced-motion: reduce)")
-            .expect(
-                "a highlight chasing the pointer is motion, and this setting \
-                     is how a reader says no to it",
-            );
-
-        assert!(
-            reduced.contains("--glass-angle: initial"),
-            "a declaration on .glass beats the value it would otherwise inherit \
-             from the root, so pinning here needs no cooperation from the driver \
-             and stops the repaint at its source",
         );
     }
 }

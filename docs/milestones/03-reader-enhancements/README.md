@@ -6,10 +6,10 @@
 to refine once the basic reader (Milestone 2) works.
 
 **Status:** 🚧 in progress — and now the current focus outright. Themes & Typography
-(Phase 4) and ToC & Navigation (Phase 8) are both **done**. The open phase is
-[Chrome Material → Phase 10](06-chrome-material/phase-10-liquid-glass.md), whose Step 1 has
-landed; [Phase 9](../04-multiplatform/01-mobile/phase-9-ios-simulator.md), the iOS port it
-was waiting behind, closed with its review pass.
+(Phase 4) and ToC & Navigation (Phase 8) are both **done**, and
+[Phase 9](../04-multiplatform/01-mobile/phase-9-ios-simulator.md), the iOS port, closed with
+its review pass. **No phase is currently open**: the next feature off the candidate list
+below has not been chosen yet.
 
 ## Candidate features (to prioritize later)
 
@@ -17,7 +17,6 @@ was waiting behind, closed with its review pass.
 |---|---|---|---|
 | [Themes & typography](04-themes-typography/README.md) | Font, size, spacing, light/dark/sepia via injected CSS variables | Easy (optionally vendor [ReadiumCSS](https://github.com/readium/readium-css)) | ✅ **done** ([ADR-0003](../../adr/0003-reader-controlled-theming-injected-layer.md)) |
 | [ToC & navigation](05-toc-navigation/README.md) | Nested TOC (NCX + nav.xhtml), bookmarks, jump-to-chapter | Easy — `rbook` gives the tree | ✅ **done** ([Phase 8](05-toc-navigation/phase-8-toc-navigation.md)) — parsing was the easy half; the real work was that ToC ↔ spine is **many-to-many**. **Bookmarks were deferred out** and are still unscheduled |
-| [Chrome material](06-chrome-material/README.md) | Liquid-glass app chrome — one `.glass` primitive that behaves the same in WebKit and Chromium | Easy-ish — the material is CSS; the hard part is that the bars have nothing behind them to blur | 🚧 **planned** ([Phase 10](06-chrome-material/phase-10-liquid-glass.md)) |
 | Full-text search | Search within / across the library | Easy with [`tantivy`](https://crates.io/crates/tantivy); jump-to-hit is hard | ⬜ |
 | Annotations | Highlights & notes, exportable | Hard — needs a WebView JS bridge for DOM-precise positions | ⬜ |
 | Sync | Reading position across devices | Promoted off this board — it is OAuth, a merge engine and a store migration, not a feature row | ➡️ **moved to [Milestone 5](../05-sync/README.md)** ([ADR-0005](../../adr/0005-backendless-sync-google-drive-per-device-shards.md)) |
@@ -31,10 +30,6 @@ stored position into the **live rendered DOM** — defer and follow Readium's
 "store text context, re-find in the DOM" pattern.
 
 > Add a feature directory + phase files here as each idea is chosen and planned.
-> [Chrome material](06-chrome-material/README.md) is the first one added this way — it came
-> out of a *"can we get Liquid Glass buttons on iOS?"* question during the iOS port, and
-> earned a directory because the answer is two rejected routes and a layout prerequisite,
-> not a snippet.
 
 **Started here:** Themes & typography
 ([Phase 4](04-themes-typography/phase-4-theming.md)) is the first phase of this milestone.
