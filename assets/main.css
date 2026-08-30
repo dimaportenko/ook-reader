@@ -194,3 +194,10 @@ body,
 .icon-button:active {
   transform: scale(0.92);
 }
+
+@media (max-width: 900px) {
+  .reader-control--hidden {
+    visibility: hidden;
+    pointer-events: none;
+  }
+}

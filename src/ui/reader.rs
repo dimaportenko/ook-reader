@@ -199,18 +199,17 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                 div {
                     style: "padding: 0.75rem 1rem; z-index: 1; min-height: 40px;",
 
-                    if show_controls() {
-                        button {
-                            class: "icon-button",
-                            onclick: move |_| open_book.set(None),
-                            Icon {
-                                icon: icon::CLOSE,
-                            }
+                    button {
+                        class: if show_controls() { "icon-button" } else { "icon-button reader-control--hidden" },
+                        onclick: move |_| open_book.set(None),
+                        Icon {
+                            icon: icon::CLOSE,
                         }
                     }
                 }
                 div {
-                    style: "position: absolute; top: 0; left: 0; right: 0; padding: 0.5rem 1rem",
+                    style: "position: absolute; top: 0; left: 0; right: 0; padding: 0.5rem 1rem;",
+                    class: if show_controls() { "reader-control--hidden" },
                     p {
                         style: "text-align: center; margin: 0.5rem 0 0;",
                         "{book.title}"
@@ -223,14 +222,13 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                 }
                 div {
                     style: "padding: 0.5rem 1rem; z-index: 1; display: flex; gap: 0.5rem; min-height: 40px;",
-                    if show_controls() {
-                        ContentsPopover {
-                            entries: entries.clone(),
-                            chapter: chapter(),
-                            on_pick,
-                        }
-                        SettingsPopover {}
+                    class: if !show_controls() { "reader-control--hidden" },
+                    ContentsPopover {
+                        entries: entries.clone(),
+                        chapter: chapter(),
+                        on_pick,
                     }
+                    SettingsPopover {}
                 }
 
             }
@@ -275,14 +273,12 @@ fn NavRow(
     rsx! {
         div {
             style: "display: flex; gap: 8px; padding: 8px; justify-content: center; align-items: center; min-height: 40px;",
-            if show_controls {
-                button {
-                    class: "icon-button",
-                    aria_label: "Previous page",
-                    onclick: move |e| on_prev.call(e),
-                    Icon {
-                        icon: icon::CHEVRON_LEFT,
-                    }
+            button {
+                class: if show_controls { "icon-button" } else { "icon-button reader-control--hidden" },
+                aria_label: "Previous page",
+                onclick: move |e| on_prev.call(e),
+                Icon {
+                    icon: icon::CHEVRON_LEFT,
                 }
             }
 
@@ -290,14 +286,12 @@ fn NavRow(
                 "{label}"
             }
 
-            if show_controls {
-                button {
-                    class: "icon-button",
-                    aria_label: "Next page",
-                    onclick: move |e| on_next.call(e),
-                    Icon {
-                        icon: icon::CHEVRON_RIGHT,
-                    }
+            button {
+                class: if show_controls { "icon-button" } else { "icon-button reader-control--hidden" },
+                aria_label: "Next page",
+                onclick: move |e| on_next.call(e),
+                Icon {
+                    icon: icon::CHEVRON_RIGHT,
                 }
             }
         }
