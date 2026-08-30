@@ -70,6 +70,7 @@ pub(crate) enum BridgeMsg {
     Position(String),
     Reflow(usize),
     Turn(Turn),
+    Tap,
     Ready,
     Warn(String),
 }
@@ -97,6 +98,8 @@ impl BridgeMsg {
             (!selector.is_empty()).then(|| BridgeMsg::Position(selector.to_string()))
         } else if let Some(page) = msg.strip_prefix("reflow:") {
             page.parse().ok().map(BridgeMsg::Reflow)
+        } else if msg == "tap:" {
+            Some(BridgeMsg::Tap)
         } else if msg == "ready:" {
             Some(BridgeMsg::Ready)
         } else {
@@ -145,6 +148,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
 
     let page_label = page_label(page(), page_count());
     let chapter_label = chapter_label(&entries, chapter(), state.chapter_count);
+    let show_controls = use_signal(|| true);
 
     use_effect(move || {
         let push = document::eval(THEME_PUSH_JS);
@@ -174,7 +178,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
     });
 
     use_revoke_blob_on_unmount();
-    use_bridge(state, docs, library, book.id);
+    use_bridge(state, docs, library, book.id, show_controls);
 
     rsx! {
         div {
@@ -193,13 +197,15 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
             div {
                 style: "display: flex; justify-content: space-between; position: relative;",
                 div {
-                    style: "padding: 0.75rem 1rem; z-index: 1;",
+                    style: "padding: 0.75rem 1rem; z-index: 1; min-height: 40px;",
 
-                    button {
-                        class: "icon-button",
-                        onclick: move |_| open_book.set(None),
-                        Icon {
-                            icon: icon::CLOSE,
+                    if show_controls() {
+                        button {
+                            class: "icon-button",
+                            onclick: move |_| open_book.set(None),
+                            Icon {
+                                icon: icon::CLOSE,
+                            }
                         }
                     }
                 }
@@ -216,13 +222,15 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                     }
                 }
                 div {
-                    style: "padding: 0.5rem 1rem; z-index: 1; display: flex; gap: 0.5rem;",
-                    ContentsPopover {
-                        entries: entries.clone(),
-                        chapter: chapter(),
-                        on_pick,
+                    style: "padding: 0.5rem 1rem; z-index: 1; display: flex; gap: 0.5rem; min-height: 40px;",
+                    if show_controls() {
+                        ContentsPopover {
+                            entries: entries.clone(),
+                            chapter: chapter(),
+                            on_pick,
+                        }
+                        SettingsPopover {}
                     }
-                    SettingsPopover {}
                 }
 
             }
@@ -251,6 +259,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                 on_prev: move |_| state.page_prev(),
                 on_next: move |_| state.page_next(),
                 label: page_label,
+                show_controls: show_controls(),
             }
         }
     }
@@ -261,16 +270,19 @@ fn NavRow(
     label: String,
     on_next: EventHandler<MouseEvent>,
     on_prev: EventHandler<MouseEvent>,
+    show_controls: bool,
 ) -> Element {
     rsx! {
         div {
-            style: "display: flex; gap: 8px; padding: 8px; justify-content: center; align-items: center;",
-            button {
-                class: "icon-button",
-                aria_label: "Previous page",
-                onclick: move |e| on_prev.call(e),
-                Icon {
-                    icon: icon::CHEVRON_LEFT,
+            style: "display: flex; gap: 8px; padding: 8px; justify-content: center; align-items: center; min-height: 40px;",
+            if show_controls {
+                button {
+                    class: "icon-button",
+                    aria_label: "Previous page",
+                    onclick: move |e| on_prev.call(e),
+                    Icon {
+                        icon: icon::CHEVRON_LEFT,
+                    }
                 }
             }
 
@@ -278,12 +290,14 @@ fn NavRow(
                 "{label}"
             }
 
-            button {
-                class: "icon-button",
-                aria_label: "Next page",
-                onclick: move |e| on_next.call(e),
-                Icon {
-                    icon: icon::CHEVRON_RIGHT,
+            if show_controls {
+                button {
+                    class: "icon-button",
+                    aria_label: "Next page",
+                    onclick: move |e| on_next.call(e),
+                    Icon {
+                        icon: icon::CHEVRON_RIGHT,
+                    }
                 }
             }
         }
@@ -309,7 +323,13 @@ fn use_revoke_blob_on_unmount() {
     );
 }
 
-fn use_bridge(state: ReaderState, docs: Rc<Vec<String>>, library: Rc<Library>, book_id: i64) {
+fn use_bridge(
+    state: ReaderState,
+    docs: Rc<Vec<String>>,
+    library: Rc<Library>,
+    book_id: i64,
+    mut show_controls: Signal<bool>,
+) {
     use_future(move || {
         let docs = docs.clone();
         let library = Rc::clone(&library);
@@ -340,6 +360,7 @@ fn use_bridge(state: ReaderState, docs: Rc<Vec<String>>, library: Rc<Library>, b
                     }
                     Some(BridgeMsg::Reflow(page)) => state.on_reflow(page),
                     Some(BridgeMsg::Turn(turn)) => turn.apply(state),
+                    Some(BridgeMsg::Tap) => show_controls.set(!show_controls()),
                     Some(BridgeMsg::Ready) => state.on_ready(),
                     Some(BridgeMsg::Warn(message)) => eprintln!("ook: {message}"),
                     None => {}
@@ -537,6 +558,21 @@ mod test {
         assert!(BRIDGE_JS.contains("ook-pointerdown"));
 
         assert!(BRIDGE_JS.contains(FRAME_ID));
+    }
+
+    #[test]
+    fn a_stationary_unselected_pointer_gesture_reaches_rust_as_a_tap() {
+        assert!(crate::web::assets::INJECTED_ASSETS.contains("ook-tap"));
+        assert!(BRIDGE_JS.contains("ook-tap"));
+        assert_eq!(BridgeMsg::parse("tap:"), Some(BridgeMsg::Tap));
+    }
+
+    #[test]
+    fn tap_detection_excludes_other_pointer_gestures() {
+        assert!(crate::web::assets::INJECTED_ASSETS.contains("DOUBLE_TAP_MS"));
+        assert!(crate::web::assets::INJECTED_ASSETS.contains("LONG_PRESS_MS"));
+        assert!(crate::web::assets::INJECTED_ASSETS.contains("selectedAtStart"));
+        assert!(crate::web::assets::INJECTED_ASSETS.contains("pointercancel"));
     }
 
     #[test]

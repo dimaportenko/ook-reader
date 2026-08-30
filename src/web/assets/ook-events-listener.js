@@ -21,6 +21,9 @@ window.addEventListener("message", (e) => {
   if (e.data.kind === "ook-swipe") {
     dioxus.send("swipe:" + e.data.dx + "," + e.data.dy + "," + e.data.selected);
   }
+  if (e.data.kind === "ook-tap") {
+    dioxus.send("tap:");
+  }
   if (e.data.kind === "ook-pointerdown") {
     const frame = document.getElementById("reader-frame");
     if (frame) {
