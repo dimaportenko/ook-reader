@@ -42,7 +42,7 @@ install-ios: boot-ios
     cp assets/icons/ios/*.png {{ios_app}}/
     xcrun simctl install booted {{ios_app}}
 
-bundle-macos:
+release-macos:
     dx bundle --bundle macos --release
 
 devices-ios:
@@ -97,7 +97,7 @@ pick-device query="":
     PY
     QUERY="{{query}}" python3 "$script" "$json"
 
-install-device query="":
+release-ios query="":
     #!/usr/bin/env bash
     set -euo pipefail
     udid=$(just pick-device "{{query}}")
