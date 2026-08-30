@@ -80,7 +80,12 @@ step looks at, not a footnote.
 ## Design decisions (recorded up front)
 
 - **CSS only; no Rust.** The whole phase should move zero tests. If the count changes, the
-  step leaked into logic that belongs elsewhere.
+  step leaked into logic that belongs elsewhere. *Amended at Step 2b:* this held for the
+  material itself and no longer holds for its **input**. A specular that tracks the pointer
+  needs an event source, and CSS has none — 2b adds a JS listener and four lines of Rust to
+  evaluate it. The decision's intent survives in a narrower form: **the material stays pure
+  CSS; only the angle is driven from outside**, and the seam between them is one custom
+  property.
 - **No glass library.** `liquidGL`, `ybouane/liquidglass` and `liquid-glass-js` are all MIT
   and all look good, and all share one architecture: **rasterize the DOM behind the glass
   into a WebGL texture**, then refract it. liquidGL's own figures are 55ms per capture with
@@ -123,9 +128,15 @@ Detail for each lives in
         the registration is what makes the angle interpolable at all. *Landed:* measured on
         the simulator at the full predicted amplitude, which also confirmed the white tint
         has only 25 levels of headroom on a light theme. — `40627fa`
-  - [ ] **2b. Drive the angle** — pointer position on desktop, `DeviceOrientationEvent` on
-        mobile. This is the half that reads as *liquid* rather than frosted, and the one
-        that can regress scroll performance, so it lands separately and gets measured.
+  - [ ] **2b. Drive the angle from the pointer** — a host-document `pointermove` listener
+        that writes `--glass-angle` on the root element, coalesced to one write per frame.
+        Split from the mobile input source because the two carry different risk: this one is
+        unconditional, `DeviceOrientationEvent` is permission-gated. **Reverses 2a's
+        `inherits: false`** — see the build log for why the input source decided that.
+  - [ ] **2c. Drive the angle from device orientation** — the mobile half, where there is no
+        pointer to follow. Gated on whether WKWebView grants
+        `DeviceOrientationEvent.requestPermission()` at all; that needs answering before the
+        step can be planned, the way Step 1 answered the iframe question.
 - [ ] **3. Float the chrome** *(provisional — gated on Step 1's finding)* — give the top bar
       and `NavRow` something to blur by overlaying them on the page instead of stacking
       them beside it. Re-derives Phase 9 Step 5's viewport arithmetic and the safe-area

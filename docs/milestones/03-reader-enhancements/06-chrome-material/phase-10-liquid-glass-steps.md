@@ -369,3 +369,185 @@ described above. Four rules that style a pseudo-element nothing generates — in
 a trap for the next person who reaches for `::after` on a popover. Candidate for Step 4.
 
 ---
+
+## Step 2b — Drive the angle from the pointer
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+### Why 2b split again
+
+The phase doc planned one step for *"pointer position on desktop, `DeviceOrientationEvent` on
+mobile."* Those are one idea only if you look at the output. Look at the input and they are
+two, with very different risk:
+
+| | Pointer | Device orientation |
+|---|---|---|
+| Availability | Unconditional in any webview with a pointer | `DeviceOrientationEvent.requestPermission()` is gated behind a user gesture on iOS, and whether **WKWebView** grants it at all is unanswered |
+| Failure mode | None to speak of | May be flatly unavailable, which would make the step unbuildable as written |
+| What it needs first | Nothing | An investigation, the way Step 1 answered the iframe question |
+
+Shipping the answerable half now also means the plumbing — inheritance, the reduced-motion
+branch, the per-frame budget — is settled and measured before the risky input source arrives.
+So `2c` is now its own step, and it starts with a question rather than a plan.
+
+### The check, first
+
+Two tests in `src/main.rs`, both source-text assertions in the module's existing idiom.
+
+| Test | What it stops |
+|---|---|
+| `one_write_at_the_root_moves_the_light_on_every_glass_surface` | The angle silently never arriving — `inherits: false` plus a write at the root is a no-op that looks like working code; also pins the driver to the root element and to one write per frame |
+| `a_light_that_follows_you_can_be_asked_to_hold_still` | A specular that chases the pointer with `prefers-reduced-motion: reduce` set |
+
+Observed red before any implementation — `135 passed; 2 failed`:
+
+```
+---- test::one_write_at_the_root_moves_the_light_on_every_glass_surface ----
+a non-inherited property set on the root element stops there, so every .glass
+descendant keeps the initial value and the light never moves
+
+---- test::a_light_that_follows_you_can_be_asked_to_hold_still ----
+a highlight chasing the pointer is motion, and this setting is how a reader says no to it
+```
+
+### What landed
+
+**`assets/main.css`** — one descriptor flipped, one media block added.
+
+```css
+@property --glass-angle {
+  syntax: "<angle>";
+  inherits: true;
+  initial-value: 100deg;
+}
+```
+
+```css
+@media (prefers-reduced-motion: reduce) {
+  .glass {
+    --glass-angle: initial;
+  }
+}
+```
+
+**`src/web/assets/glass-angle.js`** — new, and the only new moving part.
+
+```js
+if (!window.ookGlassAngle) {
+  window.ookGlassAngle = true;
+
+  const root = document.documentElement;
+  let queued = false;
+  let x = 0;
+  let y = 0;
+
+  document.addEventListener("pointermove", function (e) {
+    x = e.clientX;
+    y = e.clientY;
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(function () {
+      queued = false;
+      const dx = x - window.innerWidth / 2;
+      const dy = y - window.innerHeight / 2;
+      const deg = Math.atan2(dy, dx) * (180 / Math.PI) + 90;
+      root.style.setProperty("--glass-angle", Math.round(deg) + "deg");
+    });
+  });
+}
+```
+
+**`src/main.rs`** — the established `include_str!` + `document::eval` idiom, next to the
+theme push that also writes at the document root.
+
+```rust
+const GLASS_ANGLE_JS: &str = include_str!("web/assets/glass-angle.js");
+```
+
+```rust
+    use_effect(|| {
+        document::eval(GLASS_ANGLE_JS);
+    });
+```
+
+### Why it works
+
+**2a's `inherits: false` was right for a light model this step does not use.** The build log
+argued it as *"the right answer, not the safe one"* — an angle is a property of *this
+surface's* relationship to the light, so a child glass panel should not adopt its parent's.
+That reasoning assumed a **near light**: each surface lit according to where *it* sits
+relative to the pointer. What actually landed is a **distant light** — one direction, derived
+from the pointer's bearing off the viewport centre, shared by every surface, the way the sun
+is shared by everything outdoors. Under a distant light there is exactly one angle in the
+document, and the property that carries it should inherit.
+
+This is worth being blunt about: it is a reversal, not a refinement. The input source decided
+a question the material had already answered on its own, and the material lost. That is the
+normal direction for this kind of thing, and the reason 2a's decision was cheap to reverse is
+that it was one descriptor.
+
+**A non-inherited custom property set on `:root` reaches nothing.** For a registered property
+with `inherits: false`, an element that does not declare it gets the **initial value** — not
+the parent's computed value. So `documentElement.style.setProperty("--glass-angle", …)` would
+have styled `:root` and stopped there; every `.glass` would have stayed at `100deg` forever.
+Nothing errors, nothing warns, and the CSS *looks* correct. That silence is exactly why this
+is the assertion the first test leads with.
+
+**The escape hatch survives the flip.** `inherits: true` does not take per-surface control
+away — any `.glass` element that declares its own `--glass-angle` still wins over the
+inherited value, because a declaration always beats inheritance. The flip changes the
+*default*, not the ceiling. The alternative shape — keeping `inherits: false` and plumbing a
+second, unregistered `--glass-tilt` down from the root — would have *destroyed* that hatch,
+since `.glass` would then declare `--glass-angle` unconditionally.
+
+**`--glass-angle: initial` is not a magic number.** On a **registered** property, the
+`initial` keyword resolves to the `initial-value` descriptor — so the reduced-motion branch
+pins the angle to whatever 2a declared, and follows it if that ever changes. (On an
+*unregistered* custom property `initial` means something else entirely: the guaranteed-invalid
+value, which makes every `var()` reading it fall back or fail. Registration is what makes this
+spelling mean the useful thing.)
+
+**The reduced-motion branch stops the expensive half without the driver's cooperation.** The
+listener keeps writing `:root` — that cost is a rAF callback and one `setProperty`, which is
+nearly free. What it does *not* do is change the computed value on any `.glass` element,
+because the media rule declares the property directly on `.glass` and a declaration beats
+inheritance. So the **repaint** — the part that actually costs, since it re-rasterises a
+blurred surface sitting over scrolling text — never happens. Doing this in CSS rather than in
+the JS also means it tracks the setting **live**: media queries re-evaluate when the user
+flips the toggle, where a `matchMedia` check at startup would need a change listener to match.
+
+**The rAF coalesce keeps the newest sample, not the first.** `pointermove` can fire several
+times per frame. The handler always overwrites `x`/`y` and only *schedules* on the first one,
+so the frame that runs uses the latest position. Storing the coordinates instead of the event
+also means no `PointerEvent` is retained across the frame boundary.
+
+**The guard is for hot reload.** The effect reads no signal, so Dioxus runs it once per mount
+— but `dx serve` remounts on every edit, and each remount would stack another listener on a
+document that survives it. `root-theme.js` guards itself for the same class of reason, by
+looking for the `<style>` element it wrote last.
+
+**The angle mapping.** `Math.atan2(dy, dx)` measures from the +x axis, clockwise in screen
+coordinates (y grows downward). CSS gradient angles measure from *up*, clockwise. Hence the
+`+ 90`. Pointer at the right edge → `90deg`; at the bottom → `180deg`.
+
+### Scope note
+
+Not in this step:
+
+- **The mobile input source** — 2c, and it opens with an investigation, not a plan.
+- **Pointer position while the cursor is over the book.** The chapter `<iframe>` consumes its
+  own pointer events, so the angle holds its last value whenever the pointer is over text.
+  Fixing it means forwarding `pointermove` across the frame boundary at frame rate, on the
+  bridge that today forwards only discrete events (`ook-pointerdown`, `ook-swipe`). That is a
+  real per-frame `postMessage` cost for an effect visible only in the top bar — worth its own
+  step and its own measurement, if it is worth doing at all.
+- **A transition on `--glass-angle`.** Registration makes the property interpolable, and a
+  short `transition` would give the light the lag that reads as *viscous*. Left out because
+  per-frame input already supplies continuity; it belongs with 2c, where orientation samples
+  arrive coarser and noisier.
+- **Measurement.** The phase doc promised 2b would be measured for scroll regression. The
+  pointer half cannot regress *scrolling* — the reader scrolls by page turn, not by pointer —
+  so the measurement that matters lands with 2c, where the input arrives whether or not you
+  touch anything.
+- **The white-tint saturation on light themes**, still carried from Step 1 and measured in 2a.

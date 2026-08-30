@@ -41,6 +41,7 @@ const MAIN_CSS: Asset = asset!("/assets/main.css");
 const DIOXUS_PRIMITIVES_CSS: Asset = asset!("/assets/dx-components-theme.css");
 
 const ROOT_THEME_JS: &str = include_str!("web/assets/root-theme.js");
+const GLASS_ANGLE_JS: &str = include_str!("web/assets/glass-angle.js");
 
 const VIEWPORT: &str =
     "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover";
@@ -97,6 +98,10 @@ fn App() -> Element {
     use_effect(move || {
         let push = document::eval(ROOT_THEME_JS);
         _ = push.send(settings().vars());
+    });
+
+    use_effect(|| {
+        document::eval(GLASS_ANGLE_JS);
     });
 
     epub::use_register_covers_handler(config.books_dir.clone());
@@ -290,6 +295,54 @@ mod test {
                 .0
                 .contains("var(--glass-angle)"),
             "a registered property nothing reads is a no-op",
+        );
+    }
+
+    #[test]
+    fn one_write_at_the_root_moves_the_light_on_every_glass_surface() {
+        let (_, property) = MAIN_CSS_SOURCE
+            .split_once("@property --glass-angle {")
+            .expect("the registration the driver writes through");
+        let block = property.split_once('}').expect("an unclosed rule").0;
+
+        assert!(
+            block.contains("inherits: true"),
+            "a non-inherited property set on the root element stops there, so \
+             every .glass descendant keeps the initial value and the light never \
+             moves",
+        );
+
+        assert!(
+            GLASS_ANGLE_JS.contains("documentElement"),
+            "writing each surface instead means re-finding them every time a \
+             popover mounts, which is the cost inheritance exists to avoid",
+        );
+        assert!(
+            GLASS_ANGLE_JS.contains("--glass-angle"),
+            "a driver that writes some other name leaves the gradient on its \
+             initial value with nothing to show for the work",
+        );
+        assert!(
+            GLASS_ANGLE_JS.contains("requestAnimationFrame"),
+            "pointermove outruns the compositor, and every surplus write repaints \
+             a blurred surface sitting over scrolling text",
+        );
+    }
+
+    #[test]
+    fn a_light_that_follows_you_can_be_asked_to_hold_still() {
+        let (_, reduced) = MAIN_CSS_SOURCE
+            .split_once("@media (prefers-reduced-motion: reduce)")
+            .expect(
+                "a highlight chasing the pointer is motion, and this setting \
+                     is how a reader says no to it",
+            );
+
+        assert!(
+            reduced.contains("--glass-angle: initial"),
+            "a declaration on .glass beats the value it would otherwise inherit \
+             from the root, so pinning here needs no cooperation from the driver \
+             and stops the repaint at its source",
         );
     }
 }

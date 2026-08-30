@@ -184,7 +184,7 @@ body,
 
 @property --glass-angle {
   syntax: "<angle>";
-  inherits: false;
+  inherits: true;
   initial-value: 100deg;
 }
 
@@ -239,5 +239,11 @@ body,
 
   .glass::before {
     display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glass {
+    --glass-angle: initial;
   }
 }
