@@ -19,26 +19,28 @@ macro_rules! wrap_js {
 }
 
 pub(crate) const INJECTED_ASSETS: &str = concat!(
-    wrap_css!("./assets/pagination.css"),
-    wrap_js!("./assets/warn.js"),
-    wrap_js!("./assets/page-geometry.js"),
-    wrap_js!("./assets/page-listener.js"),
-    wrap_js!("./assets/link-bridge.js"),
-    wrap_js!("./assets/key-listener.js"),
-    wrap_js!("./assets/pointer-listener.js"),
-    wrap_js!("./assets/pointer-gesture-listener.js"),
-    wrap_js!("./assets/page-count.js"),
-    wrap_js!("./assets/fragment-scroll.js"),
-    wrap_js!("./assets/page-position.js"),
-    wrap_js!("./assets/reanchor.js"),
-    wrap_js!("./assets/theme-listener.js"),
-    wrap_js!("./assets/settle.js"),
-    wrap_js!("./assets/boot.js"),
+    wrap_css!("./assets/chapter/presentation/pagination.css"),
+    wrap_js!("./assets/chapter/runtime/warn.js"),
+    wrap_js!("./assets/chapter/navigation/page-geometry.js"),
+    wrap_js!("./assets/chapter/navigation/page-listener.js"),
+    wrap_js!("./assets/chapter/input/link-bridge.js"),
+    wrap_js!("./assets/chapter/input/key-listener.js"),
+    wrap_js!("./assets/chapter/input/pointer-listener.js"),
+    wrap_js!("./assets/chapter/input/pointer-gesture-listener.js"),
+    wrap_js!("./assets/chapter/navigation/page-count.js"),
+    wrap_js!("./assets/chapter/navigation/fragment-scroll.js"),
+    wrap_js!("./assets/chapter/navigation/page-position.js"),
+    wrap_js!("./assets/chapter/navigation/reanchor.js"),
+    wrap_js!("./assets/chapter/presentation/theme-listener.js"),
+    wrap_js!("./assets/chapter/runtime/settle.js"),
+    wrap_js!("./assets/chapter/runtime/boot.js"),
 );
 
-pub(crate) const READING_SYSTEM_DEFAULTS: &str = wrap_css!("./assets/reading-system.css");
+pub(crate) const READING_SYSTEM_DEFAULTS: &str =
+    wrap_css!("./assets/chapter/presentation/reading-system.css");
 
-pub(crate) const USER_LAYER_RULES: &str = include_str!("./assets/user-layer.css");
+pub(crate) const USER_LAYER_RULES: &str =
+    include_str!("./assets/chapter/presentation/user-layer.css");
 
 pub(crate) fn wrap_css_str(css: &str) -> String {
     format!("<style type=\"text/css\">\n/*<![CDATA[*/\n{css}\n/*]]>*/\n</style>\n")

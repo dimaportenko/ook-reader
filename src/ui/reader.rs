@@ -19,10 +19,10 @@ use crate::{
     },
 };
 
-const BRIDGE_JS: &str = include_str!("../web/assets/ook-events-listener.js");
-const CHAPTER_LOADER_JS: &str = include_str!("../web/assets/chapter-loader.js");
-const BLOB_CLEANUP_JS: &str = include_str!("../web/assets/blob-cleanup.js");
-const THEME_PUSH_JS: &str = include_str!("../web/assets/theme-push.js");
+const BRIDGE_JS: &str = include_str!("../web/assets/host/reader/frame-bridge.js");
+const CHAPTER_LOADER_JS: &str = include_str!("../web/assets/host/reader/chapter-loader.js");
+const BLOB_CLEANUP_JS: &str = include_str!("../web/assets/host/reader/blob-cleanup.js");
+const THEME_PUSH_JS: &str = include_str!("../web/assets/host/reader/theme-push.js");
 
 const FRAME_ID: &str = "reader-frame";
 

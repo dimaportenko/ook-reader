@@ -40,7 +40,7 @@ const FAVICON: Asset = asset!("/assets/favicon.ico");
 const MAIN_CSS: Asset = asset!("/assets/main.css");
 const DIOXUS_PRIMITIVES_CSS: Asset = asset!("/assets/dx-components-theme.css");
 
-const ROOT_THEME_JS: &str = include_str!("web/assets/root-theme.js");
+const ROOT_THEME_JS: &str = include_str!("web/assets/host/root-theme.js");
 
 const VIEWPORT: &str =
     "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover";
