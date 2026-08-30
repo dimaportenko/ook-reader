@@ -44,6 +44,7 @@ install-ios: boot-ios
 
 release-macos:
     dx bundle --bundle macos --release
+    open target/dx/ook-reader/bundle/macos/macos
 
 devices-ios:
     xcrun devicectl list devices
