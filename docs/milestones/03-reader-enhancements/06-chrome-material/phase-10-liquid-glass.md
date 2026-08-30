@@ -128,11 +128,13 @@ Detail for each lives in
         the registration is what makes the angle interpolable at all. *Landed:* measured on
         the simulator at the full predicted amplitude, which also confirmed the white tint
         has only 25 levels of headroom on a light theme. — `40627fa`
-  - [ ] **2b. Drive the angle from the pointer** — a host-document `pointermove` listener
+  - [x] **2b. Drive the angle from the pointer** — a host-document `pointermove` listener
         that writes `--glass-angle` on the root element, coalesced to one write per frame.
         Split from the mobile input source because the two carry different risk: this one is
         unconditional, `DeviceOrientationEvent` is permission-gated. **Reverses 2a's
         `inherits: false`** — see the build log for why the input source decided that.
+        *Landed:* the light holds its last value while the cursor is over the chapter
+        iframe, which eats its own pointer events. — `1b6580b`
   - [ ] **2c. Drive the angle from device orientation** — the mobile half, where there is no
         pointer to follow. Gated on whether WKWebView grants
         `DeviceOrientationEvent.requestPermission()` at all; that needs answering before the

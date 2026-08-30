@@ -372,6 +372,9 @@ a trap for the next person who reaches for `::after` on a popover. Candidate for
 
 ## Step 2b — Drive the angle from the pointer
 
+> **Status:** done — committed in `1b6580b` (137 tests green, clippy clean on the host and
+> on `aarch64-apple-ios-sim`).
+>
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
 
