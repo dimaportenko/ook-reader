@@ -73,6 +73,11 @@ body,
   padding: 1rem;
 }
 
+.library-books__edit-button[aria-pressed="true"] {
+  background-color: var(--light, var(--primary-color-4))
+    var(--dark, var(--primary-color-4));
+}
+
 .library-books__list {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
@@ -101,8 +106,133 @@ body,
 }
 
 .library-books__item {
+  position: relative;
   display: grid;
   gap: 0.5rem;
+}
+
+.book-delete-button {
+  position: absolute;
+  z-index: 1;
+  top: -10px;
+  right: -10px;
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.book-delete-button__surface {
+  display: flex;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--light, var(--primary-color-4))
+    var(--dark, var(--primary-color-3));
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.35);
+  color: var(--primary-error-color, #c92a2a);
+}
+
+.book-delete-button .icon {
+  width: 18px;
+  height: 18px;
+}
+
+.book-delete-button:active .book-delete-button__surface {
+  transform: scale(0.9);
+}
+
+.book-delete-button:focus-visible {
+  outline: none;
+}
+
+.book-delete-button:focus-visible .book-delete-button__surface {
+  outline: 2px solid var(--focused-border-color);
+  outline-offset: 2px;
+}
+
+.library-delete-dialog__overlay {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  padding: 1rem;
+  background: rgb(0 0 0 / 0.35);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.library-delete-dialog__content {
+  width: min(24rem, 100%);
+  box-sizing: border-box;
+  padding: 1.25rem;
+  border-radius: 1.75rem;
+  background-color: color-mix(
+    in srgb,
+    var(--light, var(--primary-color)) var(--dark, var(--primary-color-3)) 90%,
+    transparent
+  );
+  box-shadow: 0 16px 48px rgb(0 0 0 / 0.3);
+  color: var(--secondary-color-4);
+}
+
+.library-delete-dialog__title {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.library-delete-dialog__description {
+  margin: 0.75rem 0 1.25rem;
+  color: var(--secondary-color-5);
+  line-height: 1.5;
+}
+
+.library-delete-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
+.library-delete-dialog__cancel,
+.library-delete-dialog__confirm {
+  min-height: 40px;
+  padding: 0.5rem 1rem;
+  border: 0;
+  border-radius: 20px;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+
+.library-delete-dialog__cancel {
+  background: var(--primary-color-6);
+  color: var(--secondary-color-4);
+}
+
+.library-delete-dialog__confirm {
+  background-color: color-mix(
+    in srgb,
+    var(--light, var(--primary-color-6)) var(--dark, var(--primary-color-6)) 90%,
+    transparent
+  );
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+
+  color: var(--primary-error-color);
+}
+
+.library-delete-dialog__cancel:focus-visible,
+.library-delete-dialog__confirm:focus-visible {
+  outline: 2px solid var(--focused-border-color);
+  outline-offset: 2px;
 }
 
 .book-cover {

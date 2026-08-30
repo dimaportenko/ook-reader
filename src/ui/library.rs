@@ -1,7 +1,13 @@
 use std::{path::PathBuf, rc::Rc};
 
 use dioxus::prelude::*;
-use dioxus_primitives::ContentAlign;
+use dioxus_primitives::{
+    alert_dialog::{
+        AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogContent,
+        AlertDialogDescription, AlertDialogRoot, AlertDialogTitle,
+    },
+    ContentAlign,
+};
 use rbook::Epub;
 
 use crate::{
@@ -40,11 +46,15 @@ pub(crate) fn LibraryBooks() -> Element {
     let mut open_book = use_context::<Signal<Option<OpenBook>>>();
     let mut status = use_context::<Signal<Option<String>>>();
     let mut import_status = use_signal(|| None::<String>);
+    let mut edit_mode = use_signal(|| false);
+    let mut pending_delete = use_signal(|| None::<(i64, String)>);
 
     let import = use_callback({
         let library = Rc::clone(&library);
 
         move |sources: Vec<PathBuf>| {
+            edit_mode.set(false);
+
             if sources.is_empty() {
                 return;
             }
@@ -71,7 +81,12 @@ pub(crate) fn LibraryBooks() -> Element {
                             import_status.set(None);
                         }
                     },
-                    ImportPicker { import }
+                    ImportPicker {
+                        import,
+                        on_click: move || {
+                            edit_mode.set(false);
+                        },
+                    }
                     if let Some(message) = import_status() {
                         PopoverContent {
                             align: ContentAlign::End,
@@ -81,9 +96,13 @@ pub(crate) fn LibraryBooks() -> Element {
                     }
                 }
                 button {
-                    class: "icon-button",
+                    class: "icon-button library-books__edit-button",
                     aria_label: "Edit library",
-                    Icon { icon: icon::EDIT }
+                    aria_pressed: edit_mode(),
+                    onclick: move |_| edit_mode.toggle(),
+                    Icon {
+                        icon: if edit_mode() { icon::CLOSE } else { icon::EDIT },
+                    }
                 }
             }
             ul {
@@ -106,6 +125,7 @@ pub(crate) fn LibraryBooks() -> Element {
                                     match epub::open_with_spine(&library.book_path(&file_name))
                                     {
                                         Ok((epub, docs)) => {
+                                            edit_mode.set(false);
                                             status.set(None);
                                             library
                                                 .touch_opened(id, now_secs())
@@ -131,19 +151,23 @@ pub(crate) fn LibraryBooks() -> Element {
                             }
                         }
 
-                        button {
-                            onclick: {
-                                let library = Rc::clone(&library);
-                                let id = book.id;
+                        if edit_mode() {
+                            button {
+                                class: "book-delete-button",
+                                aria_label: "Delete {book.title}",
+                                onclick: {
+                                    let id = book.id;
+                                    let title = book.title.clone();
 
-                                move |_| match library.remove(id) {
-                                    Ok(_) => refresh_books(&library, books, status),
-                                    Err(error) => {
-                                        status.set(Some(format!("Remove failed: {error}")))
+                                    move |_| pending_delete.set(Some((id, title.clone())))
+                                },
+                                span {
+                                    class: "book-delete-button__surface",
+                                    Icon {
+                                        icon: icon::TRASH,
                                     }
                                 }
-                            },
-                            "Remove"
+                            }
                         }
 
                     }
@@ -154,6 +178,62 @@ pub(crate) fn LibraryBooks() -> Element {
         if let Some(message) = status() {
             p {
                 "{message}"
+            }
+        }
+        DeleteBookDialog {
+            book: pending_delete(),
+            on_close: move || pending_delete.set(None),
+            on_confirm: {
+                let library = Rc::clone(&library);
+
+                move |id| match library.remove(id) {
+                    Ok(_) => refresh_books(&library, books, status),
+                    Err(error) => status.set(Some(format!("Remove failed: {error}"))),
+                }
+            },
+        }
+    }
+}
+
+#[component]
+fn DeleteBookDialog(
+    book: Option<(i64, String)>,
+    on_close: Callback,
+    on_confirm: Callback<i64>,
+) -> Element {
+    rsx! {
+        AlertDialogRoot {
+            class: "library-delete-dialog__overlay",
+            open: book.is_some(),
+            on_open_change: move |open: bool| {
+                if !open {
+                    on_close.call(());
+                }
+            },
+            if let Some((id, title)) = book {
+                AlertDialogContent {
+                    class: "library-delete-dialog__content",
+                    AlertDialogTitle {
+                        class: "library-delete-dialog__title",
+                        "Delete book?"
+                    }
+                    AlertDialogDescription {
+                        class: "library-delete-dialog__description",
+                        "Are you sure you want to delete '{title}'? This cannot be undone."
+                    }
+                    AlertDialogActions {
+                        class: "library-delete-dialog__actions",
+                        AlertDialogCancel {
+                            class: "library-delete-dialog__cancel",
+                            "Cancel"
+                        }
+                        AlertDialogAction {
+                            class: "library-delete-dialog__confirm",
+                            on_click: move |_| on_confirm.call(id),
+                            "Delete"
+                        }
+                    }
+                }
             }
         }
     }
@@ -198,7 +278,7 @@ fn BookCover(book: Book) -> Element {
 
 #[cfg(target_os = "ios")]
 #[component]
-fn ImportPicker(import: Callback<Vec<PathBuf>>) -> Element {
+fn ImportPicker(import: Callback<Vec<PathBuf>>, on_click: Callback) -> Element {
     let window = crate::renderer::use_window();
 
     rsx! {
@@ -206,28 +286,39 @@ fn ImportPicker(import: Callback<Vec<PathBuf>>) -> Element {
             class: "icon-button",
             aria_label: "Add book",
             onclick: move |_| {
-                crate::document_picker::pick_epubs(&window.window, move |sources| import.call(sources))
+                on_click.call(());
+                crate::document_picker::pick_epubs(
+                    &window.window,
+                    move |sources| import.call(sources),
+                )
             },
-            Icon { icon: icon::ADD }
+            Icon {
+                icon: icon::ADD,
+            }
         }
     }
 }
 
 #[cfg(not(target_os = "ios"))]
 #[component]
-fn ImportPicker(import: Callback<Vec<PathBuf>>) -> Element {
+fn ImportPicker(import: Callback<Vec<PathBuf>>, on_click: Callback) -> Element {
     rsx! {
         label {
             class: "icon-button",
             aria_label: "Add book",
 
-            Icon { icon: icon::ADD }
+            Icon {
+                icon: icon::ADD,
+            }
 
             input {
                 class: "hidden",
                 r#type: "file",
                 accept: ".epub",
                 multiple: true,
+                onclick: move |_| {
+                    on_click.call(());
+                },
                 onchange: move |event| {
                     import.call(event.files().iter().map(|file| file.path()).collect());
                 },
