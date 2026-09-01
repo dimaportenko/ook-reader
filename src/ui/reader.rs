@@ -20,11 +20,15 @@ use crate::{
 };
 
 const BRIDGE_JS: &str = include_str!("../web/assets/host/reader/frame-bridge.js");
-const CHAPTER_LOADER_JS: &str = include_str!("../web/assets/host/reader/chapter-loader.js");
+const READER_CONTROLLER_JS: &str = include_str!("../web/assets/host/reader/reader-controller.js");
 const BLOB_CLEANUP_JS: &str = include_str!("../web/assets/host/reader/blob-cleanup.js");
 const THEME_PUSH_JS: &str = include_str!("../web/assets/host/reader/theme-push.js");
+const GESTURE_RESULT_JS: &str = r#"
+    const accepted = await dioxus.recv();
+    window.__ookReader?.resolveGesture(accepted);
+"#;
 
-const FRAME_ID: &str = "reader-frame";
+const FRAME_ID: &str = "reader-frame-0";
 
 const SWIPE_MIN_PX: u32 = 40;
 
@@ -54,7 +58,7 @@ impl Turn {
         })
     }
 
-    fn apply(self, state: ReaderState) {
+    fn apply(self, state: ReaderState) -> bool {
         match self {
             Turn::Prev => state.page_prev(),
             Turn::Next => state.page_next(),
@@ -70,6 +74,7 @@ pub(crate) enum BridgeMsg {
     Position(String),
     Reflow(usize),
     Turn(Turn),
+    Swipe(Turn),
     Tap,
     Ready,
     Warn(String),
@@ -89,7 +94,7 @@ impl BridgeMsg {
             let (dx, rest) = gesture.split_once(',')?;
             let (dy, selected) = rest.split_once(',')?;
             Turn::of_swipe(dx.parse().ok()?, dy.parse().ok()?, selected.parse().ok()?)
-                .map(BridgeMsg::Turn)
+                .map(BridgeMsg::Swipe)
         } else if let Some(page) = msg.strip_prefix("scroll:") {
             page.parse().ok().map(BridgeMsg::Scroll)
         } else if let Some(page_count) = msg.strip_prefix("pages:") {
@@ -142,6 +147,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
     let chapter = state.data.chapter();
     let pending = state.data.pending();
     let (page, page_count) = (state.data.page(), state.data.page_count());
+    let animate_page = state.data.animate_page();
     let hidden = nav::chapter_is_hidden(state.data.phase()(), &pending());
     let docs_for_iframe = docs.clone();
     let on_pick = use_callback(move |target| state.follow_link(target));
@@ -149,6 +155,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
     let page_label = page_label(page(), page_count());
     let chapter_label = chapter_label(&entries, chapter(), state.chapter_count);
     let show_controls = use_signal(|| true);
+    let opened = use_signal(|| false);
 
     use_effect(move || {
         let push = document::eval(THEME_PUSH_JS);
@@ -157,28 +164,40 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
 
     use_effect(move || {
         let page_number = page();
+        let chapter_number = chapter();
+        let animate = animate_page();
         let script = format!(
             r#"
-            const iframe = document.getElementById("{FRAME_ID}");
-            if (iframe && iframe.contentWindow) {{
-                iframe.contentWindow.postMessage(
-                    {{ kind: "ook-set-page", page: {page_number} }},
-                    "*"
-                );
-            }}
+            window.__ookReader?.setPage({chapter_number}, {page_number}, {animate});
         "#
         );
         document::eval(&script);
     });
 
     use_effect(move || {
-        let url = epub::chapter_url(&docs_for_iframe[chapter()]);
-        let loader = document::eval(CHAPTER_LOADER_JS);
-        _ = loader.send((url, pending().fragment()));
+        let chapter_number = chapter();
+        let url = epub::chapter_url(&docs_for_iframe[chapter_number]);
+        let pending_value = pending();
+        let seek_last = matches!(&pending_value, nav::Pending::LastPage);
+        let fragment = pending_value.fragment();
+        let controller = document::eval(READER_CONTROLLER_JS);
+        _ = controller.send(("navigate", url, fragment, chapter_number, seek_last));
+    });
+
+    let docs_for_preload = docs.clone();
+    use_effect(move || {
+        let chapter_number = chapter();
+        if state.data.phase()() != nav::Phase::Ready || chapter_number + 1 >= docs_for_preload.len()
+        {
+            return;
+        }
+        let url = epub::chapter_url(&docs_for_preload[chapter_number + 1]);
+        let controller = document::eval(READER_CONTROLLER_JS);
+        _ = controller.send(("preload", url, None::<String>, chapter_number + 1, false));
     });
 
     use_revoke_blob_on_unmount();
-    use_bridge(state, docs, library, book.id, show_controls);
+    use_bridge(state, docs, library, book.id, show_controls, opened);
 
     rsx! {
         div {
@@ -234,16 +253,21 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
             }
 
             div {
-                style: "flex: 1; position: relative; display: flex;",
+                class: "reader-viewport",
 
                 iframe {
                     id: FRAME_ID,
                     "sandbox": "allow-same-origin allow-scripts",
-                    style: "flex: 1; width: 100%; border: none;",
-                    class: if hidden { "invisible" },
+                    class: "reader-frame reader-frame--active",
+                }
+                iframe {
+                    id: "reader-frame-1",
+                    "sandbox": "allow-same-origin allow-scripts",
+                    class: "reader-frame reader-frame--standby",
+                    aria_hidden: "true",
                 }
 
-                if hidden {
+                if hidden && !opened() {
                     div {
                         class: "reader-loading",
                         div {
@@ -254,8 +278,8 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
             }
 
             NavRow {
-                on_prev: move |_| state.page_prev(),
-                on_next: move |_| state.page_next(),
+                on_prev: move |_| { state.page_prev(); },
+                on_next: move |_| { state.page_next(); },
                 label: page_label,
                 show_controls: show_controls(),
             }
@@ -323,6 +347,7 @@ fn use_bridge(
     library: Rc<Library>,
     book_id: i64,
     mut show_controls: Signal<bool>,
+    mut opened: Signal<bool>,
 ) {
     use_future(move || {
         let docs = docs.clone();
@@ -353,9 +378,19 @@ fn use_bridge(
                             .or_log("save the reading position");
                     }
                     Some(BridgeMsg::Reflow(page)) => state.on_reflow(page),
-                    Some(BridgeMsg::Turn(turn)) => turn.apply(state),
+                    Some(BridgeMsg::Turn(turn)) => {
+                        turn.apply(state);
+                    }
+                    Some(BridgeMsg::Swipe(turn)) => {
+                        let accepted = turn.apply(state);
+                        let result = document::eval(GESTURE_RESULT_JS);
+                        _ = result.send(accepted);
+                    }
                     Some(BridgeMsg::Tap) => show_controls.set(!show_controls()),
-                    Some(BridgeMsg::Ready) => state.on_ready(),
+                    Some(BridgeMsg::Ready) => {
+                        opened.set(true);
+                        state.on_ready();
+                    }
                     Some(BridgeMsg::Warn(message)) => eprintln!("ook: {message}"),
                     None => {}
                 }
@@ -409,19 +444,43 @@ mod test {
     }
 
     #[test]
-    fn the_loader_and_the_cleanup_agree_on_where_the_blob_url_lives() {
-        // Two separate files sharing one global by name: rename it in the loader
+    fn the_controller_and_the_cleanup_agree_on_where_the_blob_url_lives() {
+        // Two separate files sharing one global by name: rename it in the controller
         // and the cleanup silently revokes nothing, leaking a chapter per book.
-        assert!(CHAPTER_LOADER_JS.contains("window.__ookBlobUrl"));
-        assert!(BLOB_CLEANUP_JS.contains("window.__ookBlobUrl"));
-        assert!(BLOB_CLEANUP_JS.contains("revokeObjectURL"));
+        assert!(READER_CONTROLLER_JS.contains("blobUrl"));
+        assert!(BLOB_CLEANUP_JS.contains("destroy"));
+        assert!(READER_CONTROLLER_JS.contains("revokeObjectURL"));
+    }
+
+    #[test]
+    fn buffered_frames_are_source_scoped_and_own_separate_blobs() {
+        assert!(READER_CONTROLLER_JS.contains("slotForSource(source)"));
+        assert!(READER_CONTROLLER_JS.contains("const slots = frames.map"));
+        assert!(READER_CONTROLLER_JS.contains("slot.blobUrl"));
+        assert!(READER_CONTROLLER_JS.contains("this.pending?.spineIndex === targetSpine"));
+    }
+
+    #[test]
+    fn page_dragging_paints_locally_and_supports_cancellation() {
+        let assets = crate::web::assets::INJECTED_ASSETS;
+        assert!(assets.contains("requestAnimationFrame"));
+        assert!(assets.contains("--ook-drag-x"));
+        assert!(assets.contains("ook-cancel-swipe"));
+    }
+
+    #[test]
+    fn desktop_mouse_drag_is_disabled_but_horizontal_wheel_turns_pages() {
+        let assets = crate::web::assets::INJECTED_ASSETS;
+        assert!(assets.contains("e.pointerType !== \"mouse\""));
+        assert!(assets.contains("Math.abs(e.deltaX) <= Math.abs(e.deltaY)"));
+        assert!(assets.contains("wheelHandled"));
     }
 
     #[test]
     fn the_theme_push_and_the_chapter_listener_agree_on_the_message_kind() {
         // Two files, one message name, no compiler between them. Rename it on one side
         // and the theme silently stops arriving — nothing errors, the colours just stop.
-        assert!(THEME_PUSH_JS.contains("ook-set-theme"));
+        assert!(READER_CONTROLLER_JS.contains("ook-set-theme"));
         assert!(crate::web::assets::INJECTED_ASSETS.contains("ook-set-theme"));
     }
 
@@ -435,7 +494,7 @@ mod test {
 
     #[test]
     fn bridge_parses_a_position_selector_whole() {
-        assert!(BRIDGE_JS.contains("ook-position"));
+        assert!(READER_CONTROLLER_JS.contains("ook-position"));
 
         // A selector is colon- and space-rich. `strip_prefix` hands back the entire
         // remainder of the message, so nothing here gets split in half.
@@ -459,7 +518,7 @@ mod test {
         // that could not be saved, fonts that never finished — because a trace on
         // every page turn is how a real warning goes unread.
         assert!(crate::web::assets::INJECTED_ASSETS.contains("ook-warn"));
-        assert!(BRIDGE_JS.contains("ook-warn"));
+        assert!(READER_CONTROLLER_JS.contains("ook-warn"));
 
         // Same whole-remainder parse as `position:` — a warning is prose and will
         // contain colons.
@@ -478,7 +537,7 @@ mod test {
         // it, ook-events-listener.js forwards it, `parse` reads it back — same three
         // files, same no-compiler-between-them hazard as `ook-reflow`.
         assert!(crate::web::assets::INJECTED_ASSETS.contains("ook-key"));
-        assert!(BRIDGE_JS.contains("ook-key"));
+        assert!(READER_CONTROLLER_JS.contains("ook-key"));
 
         // The wire carries the DOM key name so both entry points end at one mapping:
         // `Turn::of` decides what an arrow means, whether the press arrived through
@@ -501,20 +560,20 @@ mod test {
     #[test]
     fn a_swipe_inside_the_frame_survives_all_three_hops() {
         assert!(crate::web::assets::INJECTED_ASSETS.contains("ook-swipe"));
-        assert!(BRIDGE_JS.contains("ook-swipe"));
+        assert!(READER_CONTROLLER_JS.contains("ook-swipe"));
 
         for field in ["dx", "dy", "selected"] {
             assert!(crate::web::assets::INJECTED_ASSETS.contains(field));
-            assert!(BRIDGE_JS.contains(&format!("e.data.{field}")));
+            assert!(READER_CONTROLLER_JS.contains(&format!("data.{field}")));
         }
 
         assert_eq!(
             BridgeMsg::parse("swipe:-140,6,false"),
-            Some(BridgeMsg::Turn(Turn::Next))
+            Some(BridgeMsg::Swipe(Turn::Next))
         );
         assert_eq!(
             BridgeMsg::parse("swipe:140,-6,false"),
-            Some(BridgeMsg::Turn(Turn::Prev))
+            Some(BridgeMsg::Swipe(Turn::Prev))
         );
     }
 
@@ -532,7 +591,7 @@ mod test {
         assert_eq!(Turn::of_swipe(i32::MIN, 0, false), Some(Turn::Next));
         assert_eq!(
             BridgeMsg::parse("swipe:-2147483648,0,false"),
-            Some(BridgeMsg::Turn(Turn::Next))
+            Some(BridgeMsg::Swipe(Turn::Next))
         );
     }
 
@@ -549,15 +608,15 @@ mod test {
     #[test]
     fn a_pointerdown_inside_the_frame_survives_the_hop_back_to_the_host() {
         assert!(crate::web::assets::INJECTED_ASSETS.contains("ook-pointerdown"));
-        assert!(BRIDGE_JS.contains("ook-pointerdown"));
+        assert!(READER_CONTROLLER_JS.contains("ook-pointerdown"));
 
-        assert!(BRIDGE_JS.contains(FRAME_ID));
+        assert!(READER_CONTROLLER_JS.contains("slotForSource"));
     }
 
     #[test]
     fn a_stationary_unselected_pointer_gesture_reaches_rust_as_a_tap() {
         assert!(crate::web::assets::INJECTED_ASSETS.contains("ook-tap"));
-        assert!(BRIDGE_JS.contains("ook-tap"));
+        assert!(READER_CONTROLLER_JS.contains("ook-tap"));
         assert_eq!(BridgeMsg::parse("tap:"), Some(BridgeMsg::Tap));
     }
 
@@ -575,7 +634,7 @@ mod test {
         // it back. Three files, one name, and no compiler between any two of them —
         // rename it in one and the count goes stale again, silently.
         assert!(crate::web::assets::INJECTED_ASSETS.contains("ook-reflow"));
-        assert!(BRIDGE_JS.contains("ook-reflow"));
+        assert!(READER_CONTROLLER_JS.contains("ook-reflow"));
 
         assert_eq!(BridgeMsg::parse("reflow:7"), Some(BridgeMsg::Reflow(7)));
         assert_eq!(BridgeMsg::parse("reflow:notanumber"), None);

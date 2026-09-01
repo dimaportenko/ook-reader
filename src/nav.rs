@@ -48,6 +48,7 @@ pub(crate) struct ReaderData {
     pub(crate) chapter: usize,
     pub(crate) page: usize,
     pub(crate) page_count: usize,
+    pub(crate) animate_page: bool,
     pub(crate) pending: Pending,
     pub(crate) phase: Phase,
 }
@@ -83,30 +84,45 @@ pub(crate) fn use_reader_state(chapter_count: usize, start: Option<Locator>) -> 
 }
 
 impl ReaderState {
-    pub(crate) fn page_prev(self) {
+    pub(crate) fn page_prev(self) -> bool {
+        if self.data.phase()() == Phase::Loading {
+            return false;
+        }
         let (page, chapter) = (self.data.page(), self.data.chapter());
-        self.apply(on_prev(page(), chapter()));
+        self.apply(on_prev(page(), chapter()))
     }
 
-    pub(crate) fn page_next(self) {
+    pub(crate) fn page_next(self) -> bool {
+        if self.data.phase()() == Phase::Loading {
+            return false;
+        }
         let (page, page_count, chapter) = (
             self.data.page(),
             self.data.page_count(),
             self.data.chapter(),
         );
-        self.apply(on_next(page(), page_count(), chapter(), self.chapter_count));
+        self.apply(on_next(page(), page_count(), chapter(), self.chapter_count))
     }
 
-    fn apply(self, nav: Nav) {
-        let (mut page, mut chapter) = (self.data.page(), self.data.chapter());
+    fn apply(self, nav: Nav) -> bool {
+        let (mut page, mut chapter, mut animate_page) = (
+            self.data.page(),
+            self.data.chapter(),
+            self.data.animate_page(),
+        );
         match nav {
-            Nav::Stay => {}
-            Nav::Page(p) => page.set(p),
+            Nav::Stay => return false,
+            Nav::Page(p) => {
+                animate_page.set(true);
+                page.set(p);
+            }
             Nav::Chapter {
                 index,
                 seek: Seek::First,
             } => {
+                animate_page.set(false);
                 page.set(0);
+                self.data.page_count().set(0);
                 chapter.set(index);
                 self.data.phase().set(Phase::Loading);
             }
@@ -114,17 +130,22 @@ impl ReaderState {
                 index,
                 seek: Seek::Last,
             } => {
+                animate_page.set(false);
+                page.set(0);
+                self.data.page_count().set(0);
                 chapter.set(index);
                 self.data.pending().set(Pending::LastPage);
                 self.data.phase().set(Phase::Loading);
             }
         }
+        true
     }
 
     pub(crate) fn follow_link(self, target: epub::LinkTarget) {
         if *self.data.chapter().peek() != target.spine_index {
             self.data.phase().set(Phase::Loading);
         }
+        self.data.animate_page().set(false);
         self.data.chapter().set(target.spine_index);
         self.data.page().set(0);
         self.data.pending().set(match target.fragment {
@@ -135,6 +156,7 @@ impl ReaderState {
 
     pub(crate) fn on_scroll(self, p: usize) {
         let mut pending = self.data.pending();
+        self.data.animate_page().set(false);
         self.data.page().set(p);
         if matches!(pending(), Pending::Fragment(_)) {
             pending.set(Pending::Nothing);
@@ -145,12 +167,14 @@ impl ReaderState {
         let (mut page, mut pending) = (self.data.page(), self.data.pending());
         self.data.page_count().set(pages);
         if matches!(pending(), Pending::LastPage) {
+            self.data.animate_page().set(false);
             page.set(pages.saturating_sub(1));
             pending.set(Pending::Nothing);
         }
     }
 
     pub(crate) fn on_reflow(self, page: usize) {
+        self.data.animate_page().set(false);
         self.data.page().set(page);
     }
 

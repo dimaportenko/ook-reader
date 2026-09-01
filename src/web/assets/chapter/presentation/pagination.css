@@ -1,5 +1,6 @@
 :root {
   --ook-page: 0;
+  --ook-drag-x: 0px;
   --ook-column: min(
     100vw - 2 * var(--RS__pageGutter) * var(--USER__pageMargins, 1),
     var(--USER__maxLineLength, 100ch)
@@ -9,6 +10,7 @@ html {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
+  touch-action: pan-y;
 }
 body {
   width: 100vw !important;
@@ -22,5 +24,17 @@ body {
   column-width: var(--ook-column) !important;
   column-gap: calc(100vw - var(--ook-column)) !important;
   column-fill: auto;
-  transform: translateX(calc(var(--ook-page) * -100vw));
+  transform: translate3d(
+    calc(var(--ook-page) * -100vw + var(--ook-drag-x)),
+    0,
+    0
+  );
+}
+html.ook-page-settling body {
+  transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  html.ook-page-settling body {
+    transition-duration: 0ms;
+  }
 }

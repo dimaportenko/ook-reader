@@ -703,7 +703,7 @@ mod test {
 
     #[test]
     fn the_chapter_url_is_the_route_plus_the_zip_path() {
-        // The fragment is no longer the URL's business — chapter-loader.js appends
+        // The fragment is no longer the URL's business — reader-controller.js appends
         // it to the blob URL, because fetch would discard a hash anyway.
         assert_eq!(
             chapter_url("OEBPS/c1.xhtml"),
