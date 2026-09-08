@@ -606,6 +606,14 @@ mod test {
     }
 
     #[test]
+    fn a_selection_that_appears_mid_gesture_aborts_the_swipe() {
+        let js = crate::web::assets::INJECTED_ASSETS;
+        assert!(js.contains("isSelecting()"));
+        assert!(js.contains("abortSwipe()"));
+        assert!(js.contains("e.timeStamp - swipeFrom.at >= LONG_PRESS_MS"));
+    }
+
+    #[test]
     fn a_pointerdown_inside_the_frame_survives_the_hop_back_to_the_host() {
         assert!(crate::web::assets::INJECTED_ASSETS.contains("ook-pointerdown"));
         assert!(READER_CONTROLLER_JS.contains("ook-pointerdown"));

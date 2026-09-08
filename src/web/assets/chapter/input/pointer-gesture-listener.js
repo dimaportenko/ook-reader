@@ -56,6 +56,25 @@ function isBoundaryDrag(dx) {
   return (dx > 0 && page === 0) || (dx < 0 && page + 1 >= count);
 }
 
+function isSelecting() {
+  const selection = window.getSelection();
+  return !!selection && !selection.isCollapsed;
+}
+
+function abortSwipe() {
+  if (!swipeFrom) return;
+  if (swipeFrom.horizontal) {
+    if (swipeFrom.boundary) {
+      window.parent.postMessage({ kind: "ook-drag-cancel" }, "*");
+    } else {
+      finishLocalDrag();
+    }
+  }
+  swipeFrom.horizontal = false;
+  swipeFrom.boundary = false;
+  swipeFrom.swipeEnabled = false;
+}
+
 document.addEventListener("pointerdown", function (e) {
   const selection = window.getSelection();
   const selectedAtStart = !!selection && !selection.isCollapsed;
@@ -93,9 +112,16 @@ document.addEventListener("pointermove", function (e) {
     swipeFrom.moved = true;
   }
   if (!swipeFrom.swipeEnabled) return;
+  if (swipeFrom.selectedAtStart || isSelecting()) {
+    abortSwipe();
+    return;
+  }
   if (!swipeFrom.horizontal) {
     if (Math.abs(dx) < DRAG_SLOP_PX || Math.abs(dx) <= Math.abs(dy)) return;
-    if (swipeFrom.selectedAtStart) return;
+    if (e.timeStamp - swipeFrom.at >= LONG_PRESS_MS) {
+      swipeFrom.swipeEnabled = false;
+      return;
+    }
     swipeFrom.horizontal = true;
   }
 
