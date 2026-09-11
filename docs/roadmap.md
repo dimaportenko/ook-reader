@@ -47,17 +47,20 @@ reader can use (open a book, see text, turn a page, resume). The MVP slice seque
 | 3 | [Reader Enhancements](milestones/03-reader-enhancements/README.md) | The features missing from other readers | 🚧 |
 | 4 | [Multi-platform](milestones/04-multiplatform/README.md) | Mobile (iOS/Android) + web (WASM) from the same codebase | 🚧 |
 | 5 | [Sync](milestones/05-sync/README.md) | Reading position and library converge across devices — with no server | ⬜ |
+| 6 | [AI Chat](milestones/06-ai-chat/README.md) | Select a passage, ask an AI about it — Gemini Flash-Lite first, provider-swappable | 🚧 |
 
 ## Current focus
 
-**No phase is currently open — the next one has not been chosen.**
+**Current phase: [Phase 17 — Provider boundary + Gemini](milestones/06-ai-chat/01-provider/phase-17-provider-boundary.md)** (opened 2026-09-11, Step 1 in progress).
 [Phase 9](milestones/04-multiplatform/01-mobile/phase-9-ios-simulator.md) is **done**: the
 reader builds, launches, imports, pages by swipe and fits the notch on an iPhone and an
 iPad, and on real hardware. Android has no phase yet, and web (WASM) stays ⏸. Milestone 3's
 candidates — full-text search, annotations, and the **bookmarks** that
 [Phase 8 deferred out](milestones/03-reader-enhancements/05-toc-navigation/README.md) — are
 still unclaimed on its [board](milestones/03-reader-enhancements/README.md), and
-[Milestone 5 — Sync](milestones/05-sync/README.md) is designed and queued.
+[Milestone 5 — Sync](milestones/05-sync/README.md) is designed and queued, and
+[Milestone 6 — AI Chat](milestones/06-ai-chat/README.md) was captured on 2026-09-11 with six
+phases (17–22) but no ADR yet.
 [`TODO.md`](../TODO.md) holds the smaller unscheduled items.
 
 **Milestone 5 — Sync is designed and queued.** A grilling session on 2026-08-29 turned
