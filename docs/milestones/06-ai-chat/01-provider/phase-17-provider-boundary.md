@@ -49,9 +49,10 @@ it is the part that changes when Google changes the API.
 Detail for each lives in
 [`phase-17-provider-boundary-steps.md`](phase-17-provider-boundary-steps.md).
 
-- [ ] **1. The vocabulary and the trait** — `src/ai/mod.rs`: `Role`, `Message`, `Reply`,
+- [x] **1. The vocabulary and the trait** — `src/ai/mod.rs`: `Role`, `Message`, `Reply`,
       `ChatError`, `trait ChatProvider { async fn complete }`, and a `Fake` in the test
       module that proves the trait can be implemented and called. `#[test]` via `pollster`.
+      Committed in `aa29912`, **137 tests green**.
 - [ ] **2. The prompt template** — `src/ai/prompt.rs`: `opening_messages(book, chapter,
       selection) -> Vec<Message>`, with the passage cap. `#[test]`.
 - [ ] **3. Gemini request body** — `src/ai/gemini.rs`: `serde` types for `generateContent`

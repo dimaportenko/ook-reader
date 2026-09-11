@@ -51,7 +51,7 @@ reader can use (open a book, see text, turn a page, resume). The MVP slice seque
 
 ## Current focus
 
-**Current phase: [Phase 17 — Provider boundary + Gemini](milestones/06-ai-chat/01-provider/phase-17-provider-boundary.md)** (opened 2026-09-11, Step 1 in progress).
+**Current phase: [Phase 17 — Provider boundary + Gemini](milestones/06-ai-chat/01-provider/phase-17-provider-boundary.md)** (opened 2026-09-11, Step 1 done — `aa29912`).
 [Phase 9](milestones/04-multiplatform/01-mobile/phase-9-ios-simulator.md) is **done**: the
 reader builds, launches, imports, pages by swipe and fits the notch on an iPhone and an
 iPad, and on real hardware. Android has no phase yet, and web (WASM) stays ⏸. Milestone 3's

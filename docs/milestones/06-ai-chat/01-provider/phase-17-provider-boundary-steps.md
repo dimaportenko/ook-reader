@@ -20,7 +20,7 @@ them is the only thing behind `#[ignore]`.
 
 ## Step plan
 
-1. **The vocabulary and the trait** — types + `ChatProvider` + a test `Fake`.
+1. ~~**The vocabulary and the trait**~~ — types + `ChatProvider` + a test `Fake`. **Done** — `aa29912`.
 2. **The prompt template** — book, chapter, selection → opening messages, with a cap.
 3. **Gemini request body** — serde types, pure builder, JSON-shape test.
 4. **Gemini response body** — serde types, pure reader, captured-JSON tests.
@@ -132,3 +132,7 @@ one — a small convenience the template in Step 2 leans on heavily.
 prompt as a separate field, Anthropic likewise, OpenAI as a message — so it is *not* part of
 the shared vocabulary; Step 2 decides how the template expresses it without one. Cancellation
 and streaming are Phase 22.
+
+> **Status:** done — committed in `aa29912` (137 tests green). The test was written at
+> commit time and verified live by mutation; the pre-existing page-label failure was
+> re-pinned in `9005f51` first.
