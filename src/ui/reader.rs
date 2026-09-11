@@ -436,11 +436,11 @@ mod test {
 
     #[test]
     fn the_page_label_waits_for_a_real_count() {
-        assert_eq!(page_label(0, 0), "Page …");
-        assert_eq!(page_label(3, 0), "Page …");
+        assert_eq!(page_label(0, 0), "…");
+        assert_eq!(page_label(3, 0), "…");
 
-        assert_eq!(page_label(0, 12), "Page 1 of 12");
-        assert_eq!(page_label(11, 12), "Page 12 of 12");
+        assert_eq!(page_label(0, 12), "1 of 12");
+        assert_eq!(page_label(11, 12), "12 of 12");
     }
 
     #[test]
