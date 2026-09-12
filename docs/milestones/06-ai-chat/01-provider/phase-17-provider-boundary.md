@@ -53,8 +53,9 @@ Detail for each lives in
       `ChatError`, `trait ChatProvider { async fn complete }`, and a `Fake` in the test
       module that proves the trait can be implemented and called. `#[test]` via `pollster`.
       Committed in `aa29912`, **137 tests green**.
-- [ ] **2. The prompt template** — `src/ai/prompt.rs`: `opening_messages(book, chapter,
-      selection) -> Vec<Message>`, with the passage cap. `#[test]`.
+- [x] **2. The prompt template** — `src/ai/prompt.rs`: `draft(&Passage) -> String`, the
+      prefilled input text, with the passage cap. `#[test]`. Committed in `e74b4ed`,
+      **141 tests green**.
 - [ ] **3. Gemini request body** — `src/ai/gemini.rs`: `serde` types for `generateContent`
       and a pure `request_body(&[Message]) -> GenerateRequest`; assert the JSON shape.
       `#[test]`.

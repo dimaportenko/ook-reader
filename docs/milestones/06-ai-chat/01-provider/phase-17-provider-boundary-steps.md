@@ -21,7 +21,7 @@ them is the only thing behind `#[ignore]`.
 ## Step plan
 
 1. ~~**The vocabulary and the trait**~~ — types + `ChatProvider` + a test `Fake`. **Done** — `aa29912`.
-2. **The prompt template** — book, chapter, selection → opening messages, with a cap.
+2. ~~**The prompt template**~~ — book, chapter, selection → a draft for the input box, with a cap. **Done** — `e74b4ed`.
 3. **Gemini request body** — serde types, pure builder, JSON-shape test.
 4. **Gemini response body** — serde types, pure reader, captured-JSON tests.
 5. **The HTTP call** — `reqwest`, `#[ignore]` live test, iOS build check.
@@ -259,3 +259,8 @@ there is no intermediate `Vec<String>` + `join`.
 **Scope note.** Nothing reads the selection out of the WebView yet — that is Phase 20. The
 cap is by *characters*, not tokens; a token-aware cap is provider-specific and belongs in a
 provider, if ever. The UI is not told when truncation happened beyond the visible `…`.
+
+> **Status:** done — committed in `e74b4ed` (141 tests green). Built as `draft(&Passage) -> String`
+> with `MAX_MESSAGE_CHARS` and an ASCII `...` marker; the four tests were written at commit
+> time and the char-boundary one verified live by mutation. One clippy nit
+> (`push_str("\n")` → `push('\n')`) was fixed before the commit.
