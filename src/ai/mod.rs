@@ -1,3 +1,5 @@
+pub(crate) mod prompt;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Role {
     User,

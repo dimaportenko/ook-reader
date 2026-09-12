@@ -136,3 +136,126 @@ and streaming are Phase 22.
 > **Status:** done — committed in `aa29912` (137 tests green). The test was written at
 > commit time and verified live by mutation; the pre-existing page-label failure was
 > re-pinned in `9005f51` first.
+
+---
+
+## Step 2 — The prompt template
+
+**What it is.** The feature spec says the chat input opens *prefilled* — book, author, the
+passage — and the reader types their question after it. So the template's output is a
+**draft string for the input box**, not a finished message: `prompt::draft(&Passage) ->
+String`. It is sent as `Message::user(draft)` only once the user hits send. That also
+settles the "no `System` role" question from Step 1: the context rides inside the first user
+turn, which every provider understands.
+
+**Check (`cargo test ai::prompt`)** — pure Rust, `#[test]`, in `src/ai/prompt.rs`:
+
+```rust
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn passage<'a>(text: &'a str) -> Passage<'a> {
+        Passage {
+            title: "The Colour of Magic",
+            author: Some("Terry Pratchett"),
+            chapter: Some("The Colour of Magic"),
+            text,
+        }
+    }
+
+    #[test]
+    fn the_draft_names_the_book_and_quotes_the_passage() {
+        let draft = draft(&passage("Rincewind ran."));
+
+        assert!(draft.contains("The Colour of Magic"), "{draft}");
+        assert!(draft.contains("Terry Pratchett"), "{draft}");
+        assert!(draft.contains("> Rincewind ran."), "{draft}");
+        assert!(draft.ends_with("\n\n"), "the cursor lands on a fresh line: {draft:?}");
+    }
+
+    #[test]
+    fn missing_author_and_chapter_leave_no_holes() {
+        let draft = draft(&Passage {
+            title: "Anonymous",
+            author: None,
+            chapter: None,
+            text: "x",
+        });
+
+        assert!(!draft.contains("by "), "{draft}");
+        assert!(!draft.contains("chapter"), "{draft}");
+    }
+
+    #[test]
+    fn a_long_passage_is_cut_on_a_char_boundary() {
+        let long = "é".repeat(MAX_PASSAGE_CHARS + 10);
+
+        let draft = draft(&passage(&long));
+
+        let quoted = draft.split("> ").nth(1).unwrap();
+        assert_eq!(quoted.chars().filter(|c| *c == 'é').count(), MAX_PASSAGE_CHARS);
+        assert!(quoted.contains('…'), "truncation is visible: {quoted}");
+    }
+}
+```
+
+Watch it fail (no `prompt` module), then make it pass. The third test is the important one:
+`"é"` is two bytes, so a byte-indexed slice at the cap would panic mid-character.
+
+**Minimal implementation** — `pub(crate) mod prompt;` in `src/ai/mod.rs`, and
+`src/ai/prompt.rs`:
+
+```rust
+pub(crate) const MAX_PASSAGE_CHARS: usize = 4_000;
+
+pub(crate) struct Passage<'a> {
+    pub(crate) title: &'a str,
+    pub(crate) author: Option<&'a str>,
+    pub(crate) chapter: Option<&'a str>,
+    pub(crate) text: &'a str,
+}
+
+pub(crate) fn draft(passage: &Passage) -> String {
+    let mut out = format!("I'm reading *{}*", passage.title);
+    if let Some(author) = passage.author { … push " by {author}" }
+    if let Some(chapter) = passage.chapter { … push ", chapter \"{chapter}\"" }
+    out.push_str(".\n\n");
+    for line in clipped(passage.text).lines() { … push "> {line}\n" }
+    out.push('\n');
+    out
+}
+
+fn clipped(text: &str) -> Cow<'_, str> {
+    match text.char_indices().nth(MAX_PASSAGE_CHARS) {
+        None => Cow::Borrowed(text),
+        Some((end, _)) => Cow::Owned(format!("{}…", &text[..end])),
+    }
+}
+```
+
+Fill in the `…` yourself; the shape is the point, not the exact wording — adjust the
+prose until the first test's `contains` checks match what you actually write. Make sure a
+multi-line selection quotes every line (the `for line in …lines()` loop), so a passage
+spanning paragraphs still reads as one blockquote.
+
+**Why it works.** `Passage<'a>` borrows everything. The caller (the reader, in Phase 20)
+already owns a `Book { title: String, author: Option<String> }` and a chapter label, and it
+would be wasteful to clone four strings just to format them once. The `'a` says: every
+`&str` in here lives at least as long as the `Passage` — one lifetime, because they all come
+from the same caller frame. `Option<&'a str>` is the borrowed twin of `Option<String>`, and
+`book.author.as_deref()` is the one-call conversion at the call site.
+
+`char_indices().nth(N)` is the correct "N characters in" cursor: it walks UTF-8 boundaries
+and returns the *byte* offset where the (N+1)th char starts, which is exactly the safe slice
+end. `None` means the text was shorter than the cap. `Cow` lets the common case — a short
+selection — return the borrowed input with no allocation, while the truncated case owns its
+new string; the caller treats both as `&str` via deref.
+
+`format!` and `push_str` on one growing `String` is the idiomatic way to assemble a
+multi-part message; `String` is a `Vec<u8>` underneath, so appends are amortised O(1) and
+there is no intermediate `Vec<String>` + `join`.
+
+**Scope note.** Nothing reads the selection out of the WebView yet — that is Phase 20. The
+cap is by *characters*, not tokens; a token-aware cap is provider-specific and belongs in a
+provider, if ever. The UI is not told when truncation happened beyond the visible `…`.
