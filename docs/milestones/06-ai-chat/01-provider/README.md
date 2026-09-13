@@ -9,4 +9,4 @@ behind an `#[ignore]` test that needs a key.
 
 | # | Phase | Status |
 |---|---|---|
-| 17 | [Provider boundary + Gemini](phase-17-provider-boundary.md) | 🚧 in progress |
+| 17 | [Provider boundary + Gemini](phase-17-provider-boundary.md) | ✅ done — closed 2026-09-13, `2b9e826` |

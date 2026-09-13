@@ -1,6 +1,6 @@
 # Phase 17 — Provider boundary + Gemini
 
-[← Feature: Provider boundary](README.md) · **Status:** 🚧 in progress — opened 2026-09-11 ·
+[← Feature: Provider boundary](README.md) · **Status:** ✅ done — opened 2026-09-11, closed 2026-09-13 (`2b9e826`, 149 tests green) ·
 build log: [`phase-17-provider-boundary-steps.md`](phase-17-provider-boundary-steps.md)
 
 ## Goal

@@ -14,6 +14,8 @@ mod document_picker;
 mod epub;
 mod library;
 mod nav;
+#[allow(dead_code)]
+mod secrets;
 mod settings;
 mod toc;
 mod ui;
