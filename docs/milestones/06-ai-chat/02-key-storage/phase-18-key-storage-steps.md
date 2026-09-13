@@ -589,6 +589,8 @@ migrations.
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
 
+> **Status:** done — committed in `6d1cd29` (160 tests green, 2 ignored; clippy clean).
+
 **The crux.** The column exists, but it is still disconnected from Rust: `Settings` cannot
 carry a model and both SQL statements ignore it. The compiler can keep every Rust struct
 literal honest, but it cannot see through SQL strings, so the existing round-trip test has

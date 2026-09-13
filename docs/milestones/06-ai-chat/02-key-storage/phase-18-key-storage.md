@@ -60,7 +60,7 @@ Detail for each lives in [`phase-18-key-storage-steps.md`](phase-18-key-storage-
       `#[test]` on the slug round trip, fallback and provider names.
 - [x] **3b-i. Add and backfill the model column** — migrate an existing singleton
       `settings` row exactly once; `#[test]` on the old on-disk shape.
-- [ ] **3b-ii. Persist the model value** — add the model to `Settings`, `save_settings`,
+- [x] **3b-ii. Persist the model value** — add the model to `Settings`, `save_settings`,
       and `settings()`; `#[test]` on the db round trip.
 - [ ] **3c. Give Gemini the chosen model** — add `Gemini::with_model`; `#[test]` that the
       chosen model reaches the endpoint.
