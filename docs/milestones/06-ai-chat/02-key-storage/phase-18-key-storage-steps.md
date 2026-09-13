@@ -362,6 +362,8 @@ and feeds `Gemini`. The `Memory` store stays the one tests use everywhere else. 
 
 ## Step 3a — The model value
 
+> **Status:** done — committed in `8643600` (159 tests green, 2 ignored).
+
 **The crux.** The saved value and the provider's model name look similar, but they have
 different stability promises. Save a short app-owned slug such as `flash`; map it to
 Google's exact endpoint name at the boundary. Then a future API-model upgrade changes one

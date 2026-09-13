@@ -56,7 +56,7 @@ Detail for each lives in [`phase-18-key-storage-steps.md`](phase-18-key-storage-
 - [x] **2. The keychain behind the trait** — `keyring-core` +
       `apple-native-keyring-store`, `Keychain` store,
       `#[ignore]` round trip against the real keychain, `dx build --platform ios`.
-- [ ] **3a. The model value** — `AiModel` enum with stable slugs and Gemini API names;
+- [x] **3a. The model value** — `AiModel` enum with stable slugs and Gemini API names;
       `#[test]` on the slug round trip, fallback and provider names.
 - [ ] **3b. Persist the model setting** — add the model to `Settings` and the singleton
       `settings` row; `#[test]` on migration and the db round trip.
