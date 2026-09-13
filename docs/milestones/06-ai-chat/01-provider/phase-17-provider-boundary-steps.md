@@ -22,7 +22,7 @@ them is the only thing behind `#[ignore]`.
 
 1. ~~**The vocabulary and the trait**~~ — types + `ChatProvider` + a test `Fake`. **Done** — `aa29912`.
 2. ~~**The prompt template**~~ — book, chapter, selection → a draft for the input box, with a cap. **Done** — `e74b4ed`.
-3. **Gemini request body** — serde types, pure builder, JSON-shape test.
+3. ~~**Gemini request body**~~ — serde types, pure builder, JSON-shape test. **Done** — `49f7902`.
 4. **Gemini response body** — serde types, pure reader, captured-JSON tests.
 5. **The HTTP call** — `reqwest`, `#[ignore]` live test, iOS build check.
 6. **Review and refactor** — punch-list, suite green, clippy clean.
@@ -402,3 +402,9 @@ assertions and the string only when the exact spelling on the wire is the point.
 are Step 5 concerns (they live in the HTTP call, not the body). The response side is Step 4.
 `GenerateRequest` is `pub(crate)` only so the ignored test in Step 5 can inspect it; it is
 never imported outside `ai`.
+
+> **Status:** done — committed in `49f7902` (143 tests green). `Content` and `Part` were
+> made `pub(crate)` rather than private; both tests were written at commit time and the
+> shape test verified live by mutation. The commit also carried a `pollster` dev-dep bump
+> to 1 and a re-indent of `Cargo.toml`. Clippy reports only the expected dead-code warnings
+> until the UI wires `ai` in.
