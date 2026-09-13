@@ -1,3 +1,4 @@
+pub(crate) mod gemini;
 pub(crate) mod prompt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

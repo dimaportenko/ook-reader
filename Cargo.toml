@@ -18,45 +18,47 @@ directories = "6"
 uuid = { version = "1", features = ["v4"] }
 thiserror = "2"
 dioxus-primitives = { git = "https://github.com/DioxusLabs/components", rev = "bf007c15d0cf4d04d3181cc46cf12325aa773955", version = "0.0.1", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 # AppKit's own window-frame autosave, reached through the NSWindow behind tao's
 # `ns_window()`. `default-features = false` because both crates default to binding
 # every class in their framework.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3", default-features = false, features = [
-    "std",
-    "NSResponder",
-    "NSWindow",
+  "std",
+  "NSResponder",
+  "NSWindow",
 ] }
 objc2-foundation = { version = "0.3", default-features = false, features = [
-    "std",
-    "NSString",
+  "std",
+  "NSString",
 ] }
 
 [target.'cfg(target_os = "ios")'.dependencies]
 objc2 = { version = "0.6", default-features = false, features = ["std"] }
 objc2-foundation = { version = "0.3", default-features = false, features = [
-    "std",
-    "NSArray",
-    "NSString",
-    "NSURL",
+  "std",
+  "NSArray",
+  "NSString",
+  "NSURL",
 ] }
 objc2-ui-kit = { version = "0.3", default-features = false, features = [
-    "std",
-    "block2",
-    "UIDocumentPickerViewController",
-    "UIResponder",
-    "UIViewController",
-    "objc2-uniform-type-identifiers",
+  "std",
+  "block2",
+  "UIDocumentPickerViewController",
+  "UIResponder",
+  "UIViewController",
+  "objc2-uniform-type-identifiers",
 ] }
 objc2-uniform-type-identifiers = { version = "0.3", default-features = false, features = [
-    "std",
-    "UTType",
+  "std",
+  "UTType",
 ] }
 
 [dev-dependencies]
 tempfile = "3"
-pollster = "0.4"
+pollster = "1"
 
 [features]
 default = ["desktop"]
