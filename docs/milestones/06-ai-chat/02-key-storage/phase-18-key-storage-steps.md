@@ -23,7 +23,9 @@ never to the screen.
    iOS build.
 3. **The model as a setting.**
    - **3a. The model value** — `AiModel`, stable slugs and Gemini API names.
-   - **3b. Persist the model setting** — `Settings` field, migration and db round trip.
+   - **3b. Persist the model setting.**
+     - **3b-i. The schema bridge** — add and backfill the model column once.
+     - **3b-ii. The model round trip** — `Settings` field, save and load.
    - **3c. Give Gemini the chosen model** — `Gemini::with_model` and endpoint check.
 4. **The provider in context** — key + model → `Signal<Option<Gemini>>` on launch.
 5. **The settings row** — input, status line, forget, model picker.
@@ -454,3 +456,126 @@ from `api_name()` prevents persistence from depending on Google's versioned endp
 
 **Scope note.** Do not add an `AiModel` field to `Settings`, touch SQLite, or change
 `Gemini` yet. Step 3b persists this value; Step 3c passes its API name to the provider.
+
+---
+
+## Step 3b-i — Add and backfill the model column
+
+**The crux.** `CREATE TABLE IF NOT EXISTS` creates a missing table; it does not reconcile
+the columns of a table already on disk. This is the first settings change that has to keep
+a real user's existing row, so `Db::open` must distinguish the old schema from the new one
+and run `ALTER TABLE` exactly once.
+
+Keep this as a one-column compatibility bridge rather than pulling Phase 11's full SQLx
+migration system forward. SQLite exposes read-only PRAGMAs as table-valued functions, so
+`pragma_table_info('settings')` can answer whether the column exists with an ordinary
+`SELECT … WHERE`:
+[SQLite PRAGMA functions](https://www.sqlite.org/pragma.html#pragma_functions) (checked
+2026-09-13).
+
+**Check (`cargo test db::test::a_pre_model_settings_row_is_upgraded_once_with_the_default_slug`)**
+— pure Rust against a temporary on-disk SQLite database. Add this test module to the bottom
+of `src/db/mod.rs`:
+
+```rust
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use crate::settings::ai_model::AiModel;
+
+    #[test]
+    fn a_pre_model_settings_row_is_upgraded_once_with_the_default_slug() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join(DB_FILENAME);
+        let legacy = Connection::open(&path).expect("open legacy database");
+        legacy
+            .execute_batch(
+                "CREATE TABLE settings (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    theme TEXT NOT NULL,
+                    font_family TEXT NOT NULL,
+                    font_size INTEGER NOT NULL,
+                    line_height INTEGER NOT NULL,
+                    page_margins INTEGER NOT NULL,
+                    max_line_length INTEGER NOT NULL
+                );
+                INSERT INTO settings
+                    (id, theme, font_family, font_size, line_height, page_margins, max_line_length)
+                VALUES (1, 'night', 'humanist', 125, 170, 150, 55);",
+            )
+            .expect("seed legacy settings");
+        drop(legacy);
+
+        let db = Db::open(dir.path()).expect("migrate");
+        drop(db);
+        let db = Db::open(dir.path()).expect("reopen migrated database");
+        let slug: String = db
+            .conn
+            .query_row(
+                "SELECT ai_model FROM settings WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read migrated model");
+
+        assert_eq!(slug, AiModel::default().slug());
+    }
+}
+```
+
+Run it before changing `migrate`: both calls to `Db::open` succeed because the existing
+table is otherwise valid, but the final query fails with `no such column: ai_model`. That
+is the red target. Reopening before the query is deliberate: an unconditional `ALTER TABLE`
+could pass the first open and fail the second.
+
+**Minimal implementation** — in `Db::migrate` in `src/db/mod.rs`:
+
+1. Extend the canonical `CREATE TABLE IF NOT EXISTS settings` statement with the latest
+   column:
+
+```sql
+ai_model TEXT NOT NULL DEFAULT 'flash-lite'
+```
+
+2. Immediately after that `CREATE TABLE` call, inspect an existing table and alter only the
+   legacy shape:
+
+```rust
+let has_ai_model = self.conn.query_row(
+    "SELECT EXISTS (
+        SELECT 1
+        FROM pragma_table_info('settings')
+        WHERE name = 'ai_model'
+    )",
+    [],
+    |row| row.get::<_, bool>(0),
+)?;
+
+if !has_ai_model {
+    self.conn.execute(
+        "ALTER TABLE settings
+        ADD COLUMN ai_model TEXT NOT NULL DEFAULT 'flash-lite'",
+        [],
+    )?;
+}
+```
+
+Then rerun the focused test, `cargo test`, and `cargo clippy`.
+
+**Why it works.** A fresh database gets the latest schema directly from `CREATE TABLE`.
+An existing database keeps its table and takes the `ALTER TABLE` branch; SQLite's
+`NOT NULL DEFAULT 'flash-lite'` makes every pre-model row immediately readable without
+discarding its other settings. On later opens the PRAGMA query sees the column, so the
+branch is skipped. A crash before the `ALTER` leaves the old shape to retry; a crash after
+it leaves the column visible, which makes the retry a no-op.
+
+The literal duplicates Step 3a's default slug intentionally. A migration records what the
+default meant when that schema version shipped; changing `AiModel::default()` later must
+not rewrite history. The test pins today's two meanings together.
+
+**Scope note.** Do not add `ai_model` to `Settings`, `save_settings`, or `settings()` yet.
+This step only makes old and fresh databases share the same column. Step 3b-ii gives the
+column a Rust field and proves the full save/load round trip. Do not introduce
+`PRAGMA user_version` here: Phase 11 replaces this one-column bridge with SQLx's versioned
+migrations.
