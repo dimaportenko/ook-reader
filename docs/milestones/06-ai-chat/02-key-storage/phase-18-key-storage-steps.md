@@ -759,6 +759,9 @@ provider lifecycle. Step 5 exposes the model choice in the settings UI.
 
 ## Step 4 — The provider in context
 
+> **Status:** done — committed in `e76f40d` (162 tests green, 2 ignored; clippy clean;
+> desktop launch confirmed).
+
 **The crux.** `main.rs` is the composition root: it is the one place allowed to know that
 the native `SecretStore`, the persisted `AiModel`, and `Gemini` belong together. Keep that
 join in a pure helper, then put only the finished `Option<Gemini>` in a signal. The keychain
