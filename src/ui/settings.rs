@@ -1,7 +1,11 @@
+use std::rc::Rc;
+
 use dioxus::prelude::*;
 use dioxus_primitives::ContentAlign;
 
 use crate::{
+    ai::gemini::Gemini,
+    secrets::SecretStore,
     settings::{
         ai_model::AiModel, Settings, FONT_SIZE_MAX, FONT_SIZE_MIN, LINE_HEIGHT_MAX,
         LINE_HEIGHT_MIN, MAX_LINE_LENGTH_MAX, MAX_LINE_LENGTH_MIN, PAGE_MARGINS_MAX,
@@ -142,6 +146,48 @@ pub(crate) fn AiModelPicker() -> Element {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KeyStatus {
+    Unavailable,
+    NotSet,
+    Set,
+}
+
+impl KeyStatus {
+    fn of(store_open: bool, provider_ready: bool) -> Self {
+        match (store_open, provider_ready) {
+            (false, _) => KeyStatus::Unavailable,
+            (true, false) => KeyStatus::NotSet,
+            (true, true) => KeyStatus::Set,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            KeyStatus::Unavailable => "Secret store unavailable",
+            KeyStatus::NotSet => "Not set",
+            KeyStatus::Set => "Key set",
+        }
+    }
+}
+
+#[component]
+pub(crate) fn ApiKeyControl() -> Element {
+    let store = use_context::<Option<Rc<dyn SecretStore>>>();
+    let provider = use_context::<Signal<Option<Gemini>>>();
+    let status = KeyStatus::of(store.is_some(), provider.read().is_some());
+
+    rsx! {
+        div {
+            "Gemini API key"
+            span {
+                style: "padding: 0 0.5rem",
+                {status.label()}
+            }
+        }
+    }
+}
+
 pub(crate) fn SettingsPopover() -> Element {
     rsx! {
         PopoverRoot {
@@ -162,8 +208,29 @@ pub(crate) fn SettingsPopover() -> Element {
                     FontFamilyPicker {}
                     ThemePicker {}
                     AiModelPicker {}
+                    ApiKeyControl {}
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn key_status_needs_an_open_store_before_it_can_report_a_key() {
+        assert_eq!(KeyStatus::of(false, false), KeyStatus::Unavailable);
+        assert_eq!(KeyStatus::of(false, true), KeyStatus::Unavailable);
+        assert_eq!(KeyStatus::of(true, false), KeyStatus::NotSet);
+        assert_eq!(KeyStatus::of(true, true), KeyStatus::Set);
+    }
+
+    #[test]
+    fn each_key_status_has_a_reader_facing_label() {
+        assert_eq!(KeyStatus::Unavailable.label(), "Secret store unavailable");
+        assert_eq!(KeyStatus::NotSet.label(), "Not set");
+        assert_eq!(KeyStatus::Set.label(), "Key set");
     }
 }

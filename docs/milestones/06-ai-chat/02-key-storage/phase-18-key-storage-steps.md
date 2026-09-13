@@ -1013,3 +1013,156 @@ not run the iOS interaction check. Steps 5b–5d add those secret-specific state
 the phase's native-platform verification. An absent provider is expected while exercising
 this picker without a stored key; the same model choice will be used when a provider later
 becomes available.
+
+---
+
+## Step 5b — Show key status
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**The crux.** The row has to answer "is a key set?" without ever holding the key. It does
+not need to: Step 4 already left two witnesses in context, and together they distinguish all
+three states the phase asks for. `Option<Rc<dyn SecretStore>>` being `None` means the native
+store never opened; `Signal<Option<Gemini>>` being `Some` means a key was read and a provider
+built from it. The status is a pure function of those two presences — the UI never calls
+`store.get`, so the secret's `String` stays confined to the store and the `Gemini` value,
+and because the provider is a signal, the row re-renders on its own when Step 5c replaces
+it after a save.
+
+**Check first (`cargo test ui::settings::test`).** Add a test module at the bottom of
+`src/ui/settings.rs` — the file has none yet — before writing the type:
+
+```rust
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn key_status_needs_an_open_store_before_it_can_report_a_key() {
+        assert_eq!(KeyStatus::of(false, false), KeyStatus::Unavailable);
+        assert_eq!(KeyStatus::of(false, true), KeyStatus::Unavailable);
+        assert_eq!(KeyStatus::of(true, false), KeyStatus::NotSet);
+        assert_eq!(KeyStatus::of(true, true), KeyStatus::Set);
+    }
+
+    #[test]
+    fn each_key_status_has_a_reader_facing_label() {
+        assert_eq!(KeyStatus::Unavailable.label(), "Secret store unavailable");
+        assert_eq!(KeyStatus::NotSet.label(), "Not set");
+        assert_eq!(KeyStatus::Set.label(), "Key set");
+    }
+}
+```
+
+Observed red: `error[E0433]: cannot find type KeyStatus in this scope`.
+
+The visual check is a desktop eyeball under `dx serve --platform desktop`:
+
+1. Open a book and the reading-settings popover. Below **AI model** there is a
+   **Gemini API key** row reading **Not set** on a machine with no stored key.
+2. Seed a throwaway key with the macOS CLI so the "set" state can be seen before Step 5c
+   adds an input — `-A` lets the app read it without a keychain prompt:
+   `security add-generic-password -A -s com.dimaportenko.ook-reader -a gemini-api-key -w anything`.
+   Relaunch, reopen the popover: the row reads **Key set**.
+3. Remove it again — `security delete-generic-password -s com.dimaportenko.ook-reader -a gemini-api-key` —
+   relaunch, and confirm **Not set** returns.
+
+**Secret store unavailable** has no desktop eyeball; it is pinned by the pure test only.
+
+**Minimal implementation.** In `src/ui/settings.rs`, add `use std::rc::Rc;` and extend the
+`crate::` import with `ai::gemini::Gemini` and `secrets::SecretStore`. Then, above
+`SettingsPopover`:
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KeyStatus {
+    Unavailable,
+    NotSet,
+    Set,
+}
+
+impl KeyStatus {
+    fn of(store_open: bool, provider_ready: bool) -> Self {
+        match (store_open, provider_ready) {
+            (false, _) => KeyStatus::Unavailable,
+            (true, false) => KeyStatus::NotSet,
+            (true, true) => KeyStatus::Set,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            KeyStatus::Unavailable => "Secret store unavailable",
+            KeyStatus::NotSet => "Not set",
+            KeyStatus::Set => "Key set",
+        }
+    }
+}
+
+#[component]
+pub(crate) fn ApiKeyControl() -> Element {
+    let store = use_context::<Option<Rc<dyn SecretStore>>>();
+    let provider = use_context::<Signal<Option<Gemini>>>();
+    let status = KeyStatus::of(store.is_some(), provider.read().is_some());
+
+    rsx! {
+        div {
+            "Gemini API key"
+            span {
+                style: "padding: 0 0.5rem",
+                {status.label()}
+            }
+        }
+    }
+}
+```
+
+Mount `ApiKeyControl {}` after `AiModelPicker {}` in `SettingsPopover`.
+
+**Why it works.**
+
+- **`use_context`, not `try_use_context`, for the store.** The context *is* provided —
+  its value happens to be an `Option`. `try_use_context` would fold "nobody provided
+  this" into "the keychain failed to open", and the first is a programming error worth a
+  panic, not a status line.
+- **`provider.read()` instead of `provider()`.** Calling a signal clones its value, and
+  `Gemini` is deliberately not `Clone`: it holds the key, and a clone would be a second
+  copy of the secret living in UI code. `read()` hands back a guard that borrows the
+  `Option` in place; `.is_some()` is answered through the guard and the guard drops at the
+  end of the statement. Reading through the guard still subscribes the component, so a
+  later `provider.set(...)` re-renders this row.
+- **Two `bool`s, not the handles themselves.** `of` only needs presence; passing the
+  `Option`s would force the test to build a `Gemini` (a `reqwest::Client`) and coerce a
+  `Memory` to `&dyn SecretStore` just to be ignored. The cost is that the argument order is
+  unchecked by the type system — the names carry it.
+- **A private enum rather than an inline `match` on strings.** Steps 5c and 5d branch on
+  the same three states (disable the input when `Unavailable`, show *forget* only when
+  `Set`), so the state gets a name now and the labels live in one place. It follows the
+  `AiModel::label` shape from Step 5a.
+
+**Forks taken.**
+
+- *Derive from the provider* versus *ask the store*. `store.get(GEMINI_API_KEY).is_some()`
+  would be truthful even if provider construction failed for some reason other than a
+  missing key, but it reads the secret through UI code and is not reactive — after 5c saves
+  a key, nothing would re-render the row. The provider signal is both confined and reactive.
+- *Bool arguments* versus *typed `Option<&dyn SecretStore>` / `Option<&Gemini>`* — see
+  above; ergonomics of the test decided it.
+
+**Look hardest at.**
+
+- `(false, true)` is unreachable: `main.rs`'s effect derives the provider *from* the store,
+  so a closed store always leaves the provider `None`. The test pins the `_` arm anyway.
+  Folding the two facts into one `Signal<Result<Option<Gemini>, SecretError>>` at the source
+  would remove the impossible branch — a Step 6 punch-list candidate, since it reshapes
+  Step 4's boundary.
+- A store that opens but whose `get` *fails* shows **Not set** — Step 4 logs the error and
+  sets the provider to `None`, and this row cannot tell that from a genuinely missing key.
+  The phase scoped three states; a fourth (*read failed*) is a Phase 19 or Step 6 question.
+- The component is named `ApiKeyControl` although it only displays for now — chosen so 5c
+  and 5d grow it in place rather than rename it.
+
+**Scope note.** No input, no save, no forget: 5c adds the password input and save button
+and replaces the provider so this row flips to **Key set** without a relaunch; 5d adds
+forget and runs the native persistence check on desktop and the iOS simulator.
