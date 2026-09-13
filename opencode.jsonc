@@ -1,0 +1,21 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "commands": {
+    "lbb:next": {
+      "description": "Suggest the next test-first learning step",
+      "template": "Use the `next` skill now. Treat this command as an explicit invocation of `lbb:next`. $ARGUMENTS"
+    },
+    "lbb:refine": {
+      "description": "Revise the current learning step",
+      "template": "Use the `refine` skill now. Treat this command as an explicit invocation of `lbb:refine`. $ARGUMENTS"
+    },
+    "lbb:commit": {
+      "description": "Validate and commit the current learning step",
+      "template": "Use the `commit` skill now. Treat this command as an explicit invocation of `lbb:commit`. $ARGUMENTS"
+    },
+    "lbb:next-implement": {
+      "description": "Suggest and implement the next learning step",
+      "template": "Use the `next-implement` skill now. This is an explicit opt-in invocation of `lbb:next-implement`. $ARGUMENTS"
+    }
+  }
+}
