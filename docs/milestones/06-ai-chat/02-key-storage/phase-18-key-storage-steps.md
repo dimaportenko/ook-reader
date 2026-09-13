@@ -172,6 +172,9 @@ the store for the web target later, if that ever comes, but that is not why it e
 
 ## Step 2 — The keychain behind the trait
 
+> **Status:** done — committed in `17dcae9` (156 tests green, 2 ignored; the ignored
+> keychain round trip and the iOS build passed separately).
+
 **What changed from the plan.** The phase doc named `keyring` 4's `v1` API. Reading the
 crate source rules that out: `keyring::v1::Entry::new` returns `NoDefaultStore` on iOS
 unconditionally — the convenience layer only wires a default store for macOS, Windows and
