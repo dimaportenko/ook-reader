@@ -23,7 +23,7 @@ them is the only thing behind `#[ignore]`.
 1. ~~**The vocabulary and the trait**~~ — types + `ChatProvider` + a test `Fake`. **Done** — `aa29912`.
 2. ~~**The prompt template**~~ — book, chapter, selection → a draft for the input box, with a cap. **Done** — `e74b4ed`.
 3. ~~**Gemini request body**~~ — serde types, pure builder, JSON-shape test. **Done** — `49f7902`.
-4. **Gemini response body** — serde types, pure reader, captured-JSON tests.
+4. ~~**Gemini response body**~~ — serde types, pure reader, captured-JSON tests. **Done** — `f6a1c16`.
 5. **The HTTP call** — `reqwest`, `#[ignore]` live test, iOS build check.
 6. **Review and refactor** — punch-list, suite green, clippy clean.
 
@@ -582,3 +582,7 @@ variants. `finishReason: "MAX_TOKENS"` is treated as a normal (truncated) reply 
 visible marker for that is a Phase 19 UI decision. `promptFeedback.blockReason` is dropped
 on the floor here; if a later phase wants to tell the reader *why* it got nothing, add a
 `Blocked(String)` variant then, with the captured body above as its test.
+
+> **Status:** done — committed in `f6a1c16` (147 tests green). Built with the `let … else`
+> early return; the four tests were written at commit time and the multi-part one verified
+> live by mutation. Clippy still reports only dead-code warnings for the unwired `ai` module.

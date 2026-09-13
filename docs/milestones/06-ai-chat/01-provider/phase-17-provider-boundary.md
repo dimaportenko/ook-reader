@@ -59,9 +59,9 @@ Detail for each lives in
 - [x] **3. Gemini request body** — `src/ai/gemini.rs`: `serde` types for `generateContent`
       and a pure `request_body(&[Message]) -> GenerateRequest`; assert the JSON shape.
       `#[test]`. Committed in `49f7902`, **143 tests green**.
-- [ ] **4. Gemini response body** — the response types and `reply_from(GenerateResponse)
+- [x] **4. Gemini response body** — the response types and `reply_from(GenerateResponse)
       -> Result<Reply, ChatError>`, against a captured success and an empty-candidates
-      body. `#[test]`.
+      body. `#[test]`. Committed in `f6a1c16`, **147 tests green**.
 - [ ] **5. The HTTP call** — `reqwest` joins 3 and 4 inside `impl ChatProvider for Gemini`;
       `#[ignore]` test with `GEMINI_API_KEY`. Also `dx build --platform ios` to catch TLS.
 - [ ] **6. Review and refactor** — punch-list over `src/ai/`, suite green, clippy clean.
