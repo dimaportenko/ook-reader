@@ -56,8 +56,12 @@ Detail for each lives in [`phase-18-key-storage-steps.md`](phase-18-key-storage-
 - [x] **2. The keychain behind the trait** — `keyring-core` +
       `apple-native-keyring-store`, `Keychain` store,
       `#[ignore]` round trip against the real keychain, `dx build --platform ios`.
-- [ ] **3. The model as a setting** — `AiModel` enum with slugs, a `settings` column,
-      `Gemini::with_model`; `#[test]` on the slug round trip and the db round trip.
+- [ ] **3a. The model value** — `AiModel` enum with stable slugs and Gemini API names;
+      `#[test]` on the slug round trip, fallback and provider names.
+- [ ] **3b. Persist the model setting** — add the model to `Settings` and the singleton
+      `settings` row; `#[test]` on migration and the db round trip.
+- [ ] **3c. Give Gemini the chosen model** — add `Gemini::with_model`; `#[test]` that the
+      chosen model reaches the endpoint.
 - [ ] **4. The provider in context** — `main.rs` reads the key on launch into
       `Signal<Option<Gemini>>`; a helper that rebuilds it when the key or model changes;
       `#[test]` on the helper, `dx serve` for the wiring.

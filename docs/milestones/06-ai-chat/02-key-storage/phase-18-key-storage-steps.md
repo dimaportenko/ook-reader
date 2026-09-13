@@ -19,8 +19,12 @@ never to the screen.
 ## Step plan
 
 1. **The secret boundary** — trait + error + `Memory` store.
-2. **The keychain behind the trait** — `keyring`, `#[ignore]` test, iOS build.
-3. **The model as a setting** — `AiModel`, slug, column, `Gemini::with_model`.
+2. **The keychain behind the trait** — native Apple keyring store, `#[ignore]` test,
+   iOS build.
+3. **The model as a setting.**
+   - **3a. The model value** — `AiModel`, stable slugs and Gemini API names.
+   - **3b. Persist the model setting** — `Settings` field, migration and db round trip.
+   - **3c. Give Gemini the chosen model** — `Gemini::with_model` and endpoint check.
 4. **The provider in context** — key + model → `Signal<Option<Gemini>>` on launch.
 5. **The settings row** — input, status line, forget, model picker.
 6. **Review and refactor** — punch-list, suite green, clippy clean.
@@ -353,3 +357,98 @@ unused.)
 **Scope note.** Nothing reads `GEMINI_API_KEY` yet; Step 4 wires the store into `main.rs`
 and feeds `Gemini`. The `Memory` store stays the one tests use everywhere else. No
 "unavailable" UI copy yet — Step 5 shows it on the row.
+
+---
+
+## Step 3a — The model value
+
+**The crux.** The saved value and the provider's model name look similar, but they have
+different stability promises. Save a short app-owned slug such as `flash`; map it to
+Google's exact endpoint name at the boundary. Then a future API-model upgrade changes one
+match arm instead of invalidating every existing settings row.
+
+Google's model catalogue currently lists `gemini-3.5-flash-lite` and
+`gemini-3.5-flash` as stable endpoint names:
+[Gemini API models](https://ai.google.dev/gemini-api/docs/models) (checked 2026-09-13).
+
+**Check (`cargo test settings::ai_model`)** — pure Rust. Add `pub mod ai_model;` to
+`src/settings/mod.rs`, create `src/settings/ai_model.rs`, and begin with these tests:
+
+```rust
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn every_ai_model_survives_a_slug_round_trip() {
+        for model in AiModel::ALL {
+            assert_eq!(AiModel::from_slug(model.slug()), model);
+        }
+    }
+
+    #[test]
+    fn an_unknown_ai_model_slug_falls_back_to_flash_lite() {
+        assert_eq!(AiModel::from_slug("unknown"), AiModel::FlashLite);
+    }
+
+    #[test]
+    fn each_choice_names_its_stable_gemini_model() {
+        assert_eq!(
+            AiModel::FlashLite.api_name(),
+            "gemini-3.5-flash-lite"
+        );
+        assert_eq!(AiModel::Flash.api_name(), "gemini-3.5-flash");
+    }
+}
+```
+
+With only the module declaration and tests present, the check fails because `AiModel` does
+not exist. That is the red target.
+
+**Minimal implementation** — above the test module in `src/settings/ai_model.rs`:
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum AiModel {
+    #[default]
+    FlashLite,
+    Flash,
+}
+
+impl AiModel {
+    pub(crate) const ALL: [AiModel; 2] = [AiModel::FlashLite, AiModel::Flash];
+
+    pub(crate) fn slug(self) -> &'static str {
+        match self {
+            AiModel::FlashLite => "flash-lite",
+            AiModel::Flash => "flash",
+        }
+    }
+
+    pub(crate) fn from_slug(slug: &str) -> AiModel {
+        match slug {
+            "flash-lite" => AiModel::FlashLite,
+            "flash" => AiModel::Flash,
+            _ => AiModel::default(),
+        }
+    }
+
+    pub(crate) fn api_name(self) -> &'static str {
+        match self {
+            AiModel::FlashLite => "gemini-3.5-flash-lite",
+            AiModel::Flash => "gemini-3.5-flash",
+        }
+    }
+}
+```
+
+Then rerun `cargo test settings::ai_model` and `cargo clippy`.
+
+**Why it works.** The enum makes unsupported choices unrepresentable inside the app, and
+`Copy` keeps it compatible with the existing `Copy` `Settings` signal. `Default` marks
+Flash-Lite as both the first-launch choice and the safe fallback for an unknown stored
+slug. `ALL` gives Step 5's picker one ordered source of choices. Keeping `slug()` separate
+from `api_name()` prevents persistence from depending on Google's versioned endpoint text.
+
+**Scope note.** Do not add an `AiModel` field to `Settings`, touch SQLite, or change
+`Gemini` yet. Step 3b persists this value; Step 3c passes its API name to the provider.
