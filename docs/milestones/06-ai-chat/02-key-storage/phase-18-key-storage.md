@@ -51,7 +51,7 @@ and the settings signal keeps carrying `Copy` data as it does today.
 
 Detail for each lives in [`phase-18-key-storage-steps.md`](phase-18-key-storage-steps.md).
 
-- [ ] **1. The secret boundary** — `src/secrets/mod.rs`: `SecretStore` trait (`get`, `set`,
+- [x] **1. The secret boundary** — `src/secrets/mod.rs`: `SecretStore` trait (`get`, `set`,
       `forget`), `SecretError`, the `GEMINI_API_KEY` name, and a `Memory` store; `#[test]`.
 - [ ] **2. The keychain behind the trait** — `keyring` dependency, `Keychain` store,
       `#[ignore]` round trip against the real keychain, `dx build --platform ios`.

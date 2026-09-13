@@ -32,6 +32,8 @@ never to the screen.
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
 
+> **Status:** done — committed in `0d82691` (153 tests green, 1 ignored).
+
 **Check (`cargo test secrets::`)** — pure Rust, `#[test]`. Create `src/secrets/mod.rs`,
 add `mod secrets;` to `main.rs` (with the same `#[allow(dead_code)]` treatment `ai` got, for
 the same reason), and start with the tests:
