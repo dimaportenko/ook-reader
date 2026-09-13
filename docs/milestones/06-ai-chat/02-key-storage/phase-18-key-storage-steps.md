@@ -694,3 +694,61 @@ prevents a future fixture edit from accidentally taking those teeth away.
 **Scope note.** Do not change the migration, `Gemini`, context, or the settings UI. Keep the
 temporary `#[allow(dead_code)]` on `settings::ai_model`: `ALL` remains unused until the
 picker in Step 5. Step 3c is next and passes `settings.ai_model.api_name()` into Gemini.
+
+---
+
+## Step 3c — Give Gemini the chosen model
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**The crux.** `Gemini` already stores its model and builds the request URL from that field,
+but callers can only construct the default. The smallest bridge is a builder that replaces
+the default before the provider is shared. The check must read the resulting endpoint, not
+only the field, so it proves the value reaches the part of the request where it matters.
+
+**Check (`cargo test ai::gemini::test::a_chosen_model_reaches_the_endpoint`)** — add one
+pure test beside the existing endpoint test:
+
+```rust
+#[test]
+fn a_chosen_model_reaches_the_endpoint() {
+    let gemini = Gemini::new("key".to_owned()).with_model("gemini-3.5-flash");
+
+    assert_eq!(
+        endpoint(&gemini.model),
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
+    );
+}
+```
+
+Run it before adding the builder. It fails to compile with `E0599`: no method named
+`with_model` exists on `Gemini`. That is the red target.
+
+**Minimal implementation** — add the builder to `impl Gemini`:
+
+```rust
+pub(crate) fn with_model(mut self, model: impl Into<String>) -> Self {
+    self.model = model.into();
+    self
+}
+```
+
+Then rerun the focused test, `cargo test`, and `cargo clippy --all-targets`.
+
+**Why it works.** `new` remains the one constructor and preserves Flash-Lite as the default.
+`with_model` consumes that complete value, changes only its model, and returns it ready to
+put into context; there is no partly configured provider for a caller to keep using by
+mistake. `impl Into<String>` accepts the `&'static str` returned by `AiModel::api_name()`
+without making `Gemini` depend on the settings enum, while the provider still owns the name
+for as long as it exists. The test feeds the stored value through the same `endpoint`
+function used by `complete`, pinning the whole model-to-URL path without touching the
+network.
+
+The cleanup pass kept the first draft unchanged: the builder matches the existing
+`Message` constructors' `impl Into<String>` idiom, and extracting another helper or exposing
+the model would add surface without making this two-line state change clearer.
+
+**Scope note.** This step does not read `Settings`, rebuild a provider, or put one in Dioxus
+context. Step 4 joins `settings.ai_model.api_name()` with the key at launch and owns the
+provider lifecycle. Step 5 exposes the model choice in the settings UI.

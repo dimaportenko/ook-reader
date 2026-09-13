@@ -96,6 +96,11 @@ impl Gemini {
             client: reqwest::Client::new(),
         }
     }
+
+    pub(crate) fn with_model(mut self, model: impl Into<String>) -> Self {
+        self.model = model.into();
+        self
+    }
 }
 
 fn endpoint(model: &str) -> String {
@@ -217,6 +222,16 @@ mod test {
         assert_eq!(
             url,
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"
+        );
+    }
+
+    #[test]
+    fn a_chosen_model_reaches_the_endpoint() {
+        let gemini = Gemini::new("key".to_owned()).with_model("gemini-3.5-flash");
+
+        assert_eq!(
+            endpoint(&gemini.model),
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
         );
     }
 
