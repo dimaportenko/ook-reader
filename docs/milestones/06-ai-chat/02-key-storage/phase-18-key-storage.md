@@ -64,9 +64,10 @@ Detail for each lives in [`phase-18-key-storage-steps.md`](phase-18-key-storage-
       and `settings()`; `#[test]` on the db round trip.
 - [x] **3c. Give Gemini the chosen model** — add `Gemini::with_model`; `#[test]` that the
       chosen model reaches the endpoint.
-- [ ] **4. The provider in context** — `main.rs` reads the key on launch into
-      `Signal<Option<Gemini>>`; a helper that rebuilds it when the key or model changes;
-      `#[test]` on the helper, `dx serve` for the wiring.
+- [ ] **4. The provider in context** — `main.rs` owns an `Rc<dyn SecretStore>`, reads the key
+      on launch into `Signal<Option<Gemini>>`, and provides both through context; a helper
+      rebuilds the provider when the key or model changes; `#[test]` on the helper,
+      `dx serve` for the wiring.
 - [ ] **5. The settings row** — key input + *set / not set* + forget button + model picker
       in `SettingsPopover`; `dx serve` eyeball on desktop, simulator check on iOS.
 - [ ] **6. Review and refactor** — punch-list over `src/secrets/` and the touched files,

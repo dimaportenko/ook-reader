@@ -754,3 +754,151 @@ the model would add surface without making this two-line state change clearer.
 **Scope note.** This step does not read `Settings`, rebuild a provider, or put one in Dioxus
 context. Step 4 joins `settings.ai_model.api_name()` with the key at launch and owns the
 provider lifecycle. Step 5 exposes the model choice in the settings UI.
+
+---
+
+## Step 4 — The provider in context
+
+**The crux.** `main.rs` is the composition root: it is the one place allowed to know that
+the native `SecretStore`, the persisted `AiModel`, and `Gemini` belong together. Keep that
+join in a pure helper, then put only the finished `Option<Gemini>` in a signal. The keychain
+itself is not reactive, so a model change can rerun a Dioxus effect, while Step 5 will call
+the same helper explicitly after saving or forgetting a key — without ever putting the key
+in its own signal.
+
+**Check (`cargo test test::a_stored_key_controls_provider_availability`)** — pure Rust.
+Add this test to the existing `test` module at the bottom of `src/main.rs` before writing
+the helper:
+
+```rust
+#[test]
+fn a_stored_key_controls_provider_availability() {
+    let store = secrets::Memory::default();
+
+    assert!(
+        load_gemini(&store, AiModel::FlashLite)
+            .expect("read a missing key")
+            .is_none()
+    );
+
+    store.set(GEMINI_API_KEY, "key").expect("store the key");
+    assert!(
+        load_gemini(&store, AiModel::Flash)
+            .expect("read the stored key")
+            .is_some()
+    );
+
+    store.forget(GEMINI_API_KEY).expect("forget the key");
+    assert!(
+        load_gemini(&store, AiModel::Flash)
+            .expect("read after forgetting")
+            .is_none()
+    );
+}
+```
+
+It fails to compile because `load_gemini` does not exist. The non-default `Flash` value
+also makes the test compile through the model-selection path. Steps 3a and 3c already pin
+the two halves of that path — `AiModel::api_name()` and `Gemini::with_model` reaching the
+endpoint — so this test only needs to pin the new composition rule: missing key means no
+provider, stored key means one is ready, and forgetting returns to none.
+
+After the pure check is green, run `cargo test`, `cargo clippy --all-targets`, and
+`dx serve --platform desktop`. The visual check has intentionally no new UI: the normal
+library or reader must open without a keychain panic or visible regression. On a machine
+whose keychain opens normally, the terminal should not report that it could not open the
+secret store or read the Gemini API key.
+
+**Minimal implementation.** Extend `src/main.rs`'s existing `use crate::{...}` block with
+these types:
+
+```rust
+ai::gemini::Gemini,
+secrets::{keychain::Keychain, SecretError, SecretStore, GEMINI_API_KEY},
+settings::ai_model::AiModel,
+```
+
+Put the helper above `main`:
+
+```rust
+fn load_gemini(
+    store: &dyn SecretStore,
+    model: AiModel,
+) -> Result<Option<Gemini>, SecretError> {
+    Ok(store
+        .get(GEMINI_API_KEY)?
+        .map(|key| Gemini::new(key).with_model(model.api_name())))
+}
+```
+
+Then, in `App`, immediately after the `settings` hook, create the native store, the
+provider signal, and a memo containing only the model:
+
+```rust
+let secret_store = use_hook(|| {
+    Keychain::new()
+        .or_log("open the secret store")
+        .map(|store| Rc::new(store) as Rc<dyn SecretStore>)
+});
+let mut provider = use_signal(|| None::<Gemini>);
+let ai_model = use_memo(move || settings().ai_model);
+```
+
+Provide both handles beside the existing contexts:
+
+```rust
+use_context_provider(|| secret_store.clone());
+use_context_provider(|| provider);
+```
+
+Finally, add an effect beside the settings-persistence and root-theme effects:
+
+```rust
+use_effect({
+    let secret_store = secret_store.clone();
+    move || {
+        provider.set(secret_store.as_deref().and_then(|store| {
+            load_gemini(store, ai_model())
+                .or_log("read the Gemini API key")
+                .flatten()
+        }));
+    }
+});
+```
+
+Keep the store context's inferred type as `Option<Rc<dyn SecretStore>>`. `None` here means
+the native store itself could not be opened; Step 5 can distinguish that from an available
+store whose `get` returns no key and show the appropriate status without constructing a
+second `Keychain` inside the UI.
+
+**Why it works.**
+
+- **`Result<Option<Gemini>, SecretError>` preserves all three outcomes.** `Ok(None)` is the
+  ordinary first-launch or forgotten-key state, `Ok(Some(_))` means the provider is ready,
+  and `Err` means the system service failed. `?` propagates only that third case; `map`
+  transforms a present key without exposing it anywhere else.
+- **The secret remains confined.** The temporary `String` returned by `get` moves straight
+  into `Gemini`. Dioxus stores the provider, not a second copy of the key, so no component
+  can accidentally render or retain the raw secret as UI state.
+- **`Rc<dyn SecretStore>` shares the boundary, not the concrete keychain.** `App` constructs
+  the native implementation once and descendants receive only the trait they need. Step 5
+  can therefore exercise the same UI operations against `Memory` in a later pure helper
+  without teaching the settings code about Apple APIs.
+- **`Signal<Option<Gemini>>` is a stable context handle.** Replacing its value schedules
+  consumers that read it; Phase 19 can react to provider availability without recreating
+  the context value or knowing where the provider came from.
+- **The memo narrows reactivity to the model.** An effect reruns when it reads a reactive
+  value that changes. Reading the whole `Settings` signal directly would rebuild a
+  `reqwest::Client` after every font, margin, or theme adjustment. `use_memo` still follows
+  `settings`, but only notifies this effect when its `AiModel` output actually differs.
+- **Store construction degrades to unavailable instead of ending the app.** `or_log` turns
+  a native-store setup failure into `None`; that leaves the provider absent and gives Step
+  5 a state it can display. A normal missing key remains a different state because the
+  store context is still `Some`.
+
+**Scope note.** This step does not add controls or display key status, and it does not make
+the keychain reactive. Step 5 consumes `Option<Rc<dyn SecretStore>>` and
+`Signal<Option<Gemini>>`; after a successful `set` or `forget`, its event handler calls
+`load_gemini` and replaces the provider immediately. Changing `settings.ai_model` needs no
+extra call because the memo-driven effect handles it. Do not add key validation here — the
+first real request in Phase 19 remains the validator.

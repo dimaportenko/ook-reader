@@ -31,8 +31,11 @@ pub(crate) use dioxus::mobile as renderer;
 use library::Library;
 
 use crate::{
+    ai::gemini::Gemini,
     config::Config,
     db::Db,
+    secrets::{keychain::Keychain, SecretError, SecretStore, GEMINI_API_KEY},
+    settings::ai_model::AiModel,
     ui::{
         library::{LibraryBooks, OpenBook},
         reader::Reader,
@@ -81,6 +84,13 @@ fn App() -> Element {
         ),
     });
     let open_book = use_signal(|| None::<OpenBook>);
+    let secret_store = use_hook(|| {
+        Keychain::new()
+            .or_log("open the secret store")
+            .map(|store| Rc::new(store) as Rc<dyn SecretStore>)
+    });
+    let mut ai_provider = use_signal(|| None::<Gemini>);
+    let ai_model = use_memo(move || settings().ai_model);
 
     let desktop = crate::renderer::use_window();
     use_hook(move || window::remember_frame(&desktop.window));
@@ -90,6 +100,19 @@ fn App() -> Element {
     use_context_provider(|| status);
     use_context_provider(|| open_book);
     use_context_provider(|| settings);
+    use_context_provider(|| secret_store.clone());
+    use_context_provider(|| ai_provider);
+
+    use_effect({
+        let secret_store = secret_store.clone();
+        move || {
+            ai_provider.set(secret_store.as_deref().and_then(|store| {
+                load_gemini(store, ai_model())
+                    .or_log("read the Gemini API key")
+                    .flatten()
+            }));
+        }
+    });
 
     use_effect({
         let db = db.clone();
@@ -134,11 +157,36 @@ fn App() -> Element {
     }
 }
 
+fn load_gemini(store: &dyn SecretStore, model: AiModel) -> Result<Option<Gemini>, SecretError> {
+    Ok(store
+        .get(GEMINI_API_KEY)?
+        .map(|key| Gemini::new(key).with_model(model.api_name())))
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
 
     const MAIN_CSS_SOURCE: &str = include_str!("../assets/main.css");
+
+    #[test]
+    fn a_stored_key_controls_provider_availability() {
+        let store = secrets::Memory::default();
+
+        assert!(load_gemini(&store, AiModel::FlashLite)
+            .expect("read a missing key")
+            .is_none());
+
+        store.set(GEMINI_API_KEY, "key").expect("store the key");
+        assert!(load_gemini(&store, AiModel::Flash)
+            .expect("read the stored key")
+            .is_some());
+
+        store.forget(GEMINI_API_KEY).expect("forget the key");
+        assert!(load_gemini(&store, AiModel::Flash)
+            .expect("read after forgetting")
+            .is_none());
+    }
 
     #[test]
     fn the_safe_area_is_only_paid_out_to_a_viewport_that_covers_it() {
