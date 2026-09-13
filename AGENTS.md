@@ -125,9 +125,9 @@ Important project skills:
   today. The CLI they document is installed separately, by the user — see
   [Verifying on a simulator](#verifying-on-a-simulator-ios--ipados).
 - `lbb:next`, `lbb:refine`, `lbb:commit`, `lbb:next-implement`: learn-by-building workflow
-  skills from the Claude Code LBB skill set, made available to Pi through
-  `.agents/skills/lbb`. In Pi, their slash-command names come from the original skill
-  frontmatter: `/skill:next`, `/skill:refine`, `/skill:commit`, and
-  `/skill:next-implement`. `lbb:next-implement` is `lbb:next` **plus the implementation** —
-  it derives the step the same way, then writes the code and tests, runs a `simplify` cleanup
-  pass over the diff for the user to review, and still leaves the commit to `lbb:commit`.
+  skills from the Claude Code LBB skill set, made available to OpenCode through
+  `.agents/skills/lbb`. Project commands in `opencode.jsonc` preserve the Claude names:
+  `/lbb:next`, `/lbb:refine`, `/lbb:commit`, and `/lbb:next-implement`.
+  `lbb:next-implement` is `lbb:next` **plus the implementation** — it derives the step the
+  same way, then writes the code and tests, runs a `simplify` cleanup pass over the diff for
+  the user to review, and still leaves the commit to `lbb:commit`.
