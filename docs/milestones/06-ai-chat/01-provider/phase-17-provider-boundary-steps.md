@@ -773,3 +773,108 @@ consideration once the settings row in Phase 18 says what it needs. No `systemIn
 > parse error got its own `Json` variant. `reqwest` was first pinned at 0.13, which pulled
 > a second copy beside the 0.12 Dioxus already uses, and was dropped back to 0.12. The three
 > tests were written at commit time; the status one was verified live by mutation.
+
+---
+
+## Step 6 — Review and refactor
+
+**What it is.** The phase closes by stepping back over `src/ai/` with working code in
+hand. Nothing here changes behaviour; the existing 149 tests are the spec, and clippy going
+from 24 warnings to 0 is the target. Work the list top to bottom, running `cargo test` after
+each item, and tick as you go.
+
+**Check (`cargo test && cargo clippy --all-targets`)** — the safety net, not a target.
+Before you start: 149 passed, 1 ignored, 24 dead-code warnings. After: the same 149 passed,
+1 ignored, **0 warnings** (the `block v0.1.6` future-incompat note is upstream, not ours).
+One new test is fair game, under item 5, because that refactor makes a lifetime relationship
+explicit that was implicit before. Nothing else gets a new test — if you find yourself
+needing one, the change is a feature, not a refactor.
+
+### Punch-list
+
+- [ ] **1. Silence the dead-code storm honestly.** `src/main.rs`: `#[allow(dead_code)] mod ai;`
+  — with a comment saying *until Phase 19 wires the chat panel*. Step 1 planned exactly this.
+  A module-level `allow` is one line to remove later; twenty-four `#[allow]`s sprinkled over
+  items would each need remembering. Do not "fix" the warnings by making everything `pub` —
+  that trades an honest "unused yet" for a dishonest "used elsewhere".
+
+- [x] **2. Tighten `gemini.rs`'s public surface to `Gemini` and `Gemini::new`.** Everything
+  else — `GenerateRequest`, `Content`, `Part`, `GenerateResponse`, `request_body`,
+  `reply_from` — drop the `pub(crate)`. Nothing outside `ai::gemini` names them; the Step 5
+  live test lives *inside* the module, so the reason the Step 3 doc gave for `pub(crate)`
+  never materialised. The payoff is the crux of the phase made checkable: `grep pub gemini.rs`
+  now lists the whole boundary, and the compiler will refuse the first `use ai::gemini::Part`
+  someone writes in the reader.
+
+- [x] **3. Put the file in reading order.** `gemini.rs` currently opens with `Gemini` and
+  `complete`, which call `request_body` and `reply_from` defined below them. Reorder to:
+  request types + `request_body` → response types + `reply_from` → `Gemini`, `endpoint`,
+  `check_status`, `impl ChatProvider`. Rust does not care about item order; readers do —
+  the file should tell the Step 3 → 4 → 5 story top to bottom, and `complete` should read as
+  the join of two things you have already seen. While there, swap `use crate::ai::{…}` for
+  `use super::{…}`: it says "I am a child of `ai`" instead of restating the path, and it
+  survives the module being moved.
+
+- [x] **4. `MAX_MESSAGE_CHARS` → `MAX_PASSAGE_CHARS`.** It caps the *quoted passage*, not the
+  message — the title and author are added on top. The name is the only place the mistake
+  can hide, because nothing else about the cap is wrong. The test that names it moves too.
+
+- [x] **5. Borrow in the request instead of cloning.** The Step 3 doc deferred this until
+  Step 5 showed whether the request outlives the messages. It does not: `complete` builds
+  `request_body(messages)` and serializes it with `.json(&…)` on the same line, and the
+  `GenerateRequest` is dropped before `.send()`. So:
+
+  ```rust
+  struct GenerateRequest<'a> { contents: Vec<Content<'a>> }
+  struct Content<'a> { role: &'static str, parts: Vec<Part<'a>> }
+  struct Part<'a> { text: &'a str }
+
+  fn request_body(messages: &[Message]) -> GenerateRequest<'_> { … }
+
+  impl<'a> From<&'a Message> for Content<'a> {
+      fn from(message: &'a Message) -> Self {
+          Content { role: …, parts: vec![Part { text: &message.text }] }
+      }
+  }
+  ```
+
+  Three structs grow a `'a`, one `clone()` disappears, and `serde` is happy because
+  `&str: Serialize`. The `'_` in `request_body`'s return type is lifetime elision: "the
+  same lifetime as the one input reference." The `impl<'a> From<&'a Message>` is where the
+  lesson is — `From<&Message>` with an elided lifetime cannot express "the output borrows
+  from the input", so the lifetime has to be named on the `impl`. If a later step ever needs
+  the request to outlive the messages, the compiler will say so at the call site, which is
+  exactly the guarantee you want from a borrow. *One new test is allowed here*: none is
+  needed, the existing shape tests cover it — skip it unless the borrow checker teaches you
+  something worth pinning.
+
+- [x] **6. `write!` instead of `push_str(&format!(…))` in `prompt.rs`.** Three places.
+  `format!` allocates a temporary `String` that `push_str` immediately copies and drops;
+  `write!(out, " by {author}")` (with `use std::fmt::Write;`) formats straight into `out`.
+  It returns a `fmt::Result` that is always `Ok` for a `String`, so either `let _ =` it or
+  `.expect("writing to a String cannot fail")` — the second documents *why* it is safe. The
+  first `format!` that seeds `out` stays; it is the allocation you want.
+
+- [x] **7. One voice for `ChatError` messages.** Three variants say "the provider …", one says
+  "could not read provider answer". Make it "could not read the provider's answer: {0}".
+  These strings are the UI copy in Phase 19 until someone writes better; they should already
+  read as one sentence-set.
+
+**Not on the list, and why.** `Message`'s fields stay private while `Reply.text` is
+`pub(crate)` — asymmetric, but Phase 19 is the first code that needs to *read* a `Message`
+(to render history), and it should decide between accessors and `pub(crate)` fields with a
+real caller in front of it. `Gemini::with_model` waits for Phase 18's settings row for the
+same reason. `check_status` taking `String` rather than `&str` is right: the body is moved
+into the error, not copied.
+
+**Why the pass matters.** Items 2 and 5 are the ones that change what the code *promises*.
+After 2, the provider boundary the phase was named for is enforced by visibility, not by
+convention; after 5, the type signature of the request says "borrowed from the conversation"
+and the compiler polices it. The rest is legibility — but this file is the template the
+second provider will be written from, so its shape is worth getting right once.
+
+> **Written by:** `lbb:next-implement` — the seven punch-list edits were applied by the agent,
+> reviewed by hand. The `simplify` pass proposed reverting items 5 and 6 as "harder for a
+> learner"; both were kept deliberately, since teaching the lifetime and `fmt::Write` idioms is
+> the point of the pass. The `#[allow(dead_code)]` landed without the planned comment, per the
+> no-agent-comments rule — add it by hand.

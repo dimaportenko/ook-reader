@@ -1,6 +1,7 @@
 use std::borrow::Cow;
+use std::fmt::Write;
 
-pub(crate) const MAX_MESSAGE_CHARS: usize = 4_000;
+pub(crate) const MAX_PASSAGE_CHARS: usize = 4_000;
 
 pub(crate) struct Passage<'a> {
     pub(crate) title: &'a str,
@@ -12,22 +13,22 @@ pub(crate) struct Passage<'a> {
 pub(crate) fn draft(passage: &Passage) -> String {
     let mut out = format!("I'm reading *{}*", passage.title);
     if let Some(author) = passage.author {
-        out.push_str(&format!(" by {author}"));
+        write!(out, " by {author}").expect("writing to a String cannot fail");
     }
     if let Some(chapter) = passage.chapter {
-        out.push_str(&format!(", chapter \"{chapter}\""));
+        write!(out, ", chapter \"{chapter}\"").expect("writing to a String cannot fail");
     }
 
     out.push_str(".\n\n");
     for line in clipped(passage.text).lines() {
-        out.push_str(&format!("> {line}\n"));
+        writeln!(out, "> {line}").expect("writing to a String cannot fail");
     }
     out.push('\n');
     out
 }
 
 fn clipped(text: &str) -> Cow<'_, str> {
-    match text.char_indices().nth(MAX_MESSAGE_CHARS) {
+    match text.char_indices().nth(MAX_PASSAGE_CHARS) {
         None => Cow::Borrowed(text),
         Some((end, _)) => Cow::Owned(format!("{}...", &text[..end])),
     }
@@ -53,7 +54,10 @@ mod test {
         assert!(draft.contains("The Colour of Magic"), "{draft}");
         assert!(draft.contains("Terry Pratchett"), "{draft}");
         assert!(draft.contains("> Rincewind ran."), "{draft}");
-        assert!(draft.ends_with("\n\n"), "the cursor lands on a fresh line: {draft:?}");
+        assert!(
+            draft.ends_with("\n\n"),
+            "the cursor lands on a fresh line: {draft:?}"
+        );
     }
 
     #[test]
@@ -78,12 +82,15 @@ mod test {
 
     #[test]
     fn a_long_passage_is_cut_on_a_char_boundary() {
-        let long = "é".repeat(MAX_MESSAGE_CHARS + 10);
+        let long = "é".repeat(MAX_PASSAGE_CHARS + 10);
 
         let draft = draft(&passage(&long));
 
         let quoted = draft.split("> ").nth(1).unwrap();
-        assert_eq!(quoted.chars().filter(|c| *c == 'é').count(), MAX_MESSAGE_CHARS);
+        assert_eq!(
+            quoted.chars().filter(|c| *c == 'é').count(),
+            MAX_PASSAGE_CHARS
+        );
         assert!(quoted.contains("..."), "truncation is visible: {quoted}");
     }
 }

@@ -1,7 +1,84 @@
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 
-use crate::ai::{ChatError, ChatProvider, Message, Reply, Role};
+use super::{ChatError, ChatProvider, Message, Reply, Role};
+
+#[derive(Debug, Serialize)]
+struct GenerateRequest<'a> {
+    contents: Vec<Content<'a>>,
+}
+
+#[derive(Debug, Serialize)]
+struct Content<'a> {
+    role: &'static str,
+    parts: Vec<Part<'a>>,
+}
+
+#[derive(Debug, Serialize)]
+struct Part<'a> {
+    text: &'a str,
+}
+
+fn request_body(messages: &[Message]) -> GenerateRequest<'_> {
+    GenerateRequest {
+        contents: messages.iter().map(Content::from).collect(),
+    }
+}
+
+impl<'a> From<&'a Message> for Content<'a> {
+    fn from(message: &'a Message) -> Self {
+        Content {
+            role: match message.role {
+                Role::User => "user",
+                Role::Assistant => "model",
+            },
+            parts: vec![Part {
+                text: &message.text,
+            }],
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct GenerateResponse {
+    #[serde(default)]
+    candidates: Vec<Candidate>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Candidate {
+    content: ResponseContent,
+}
+
+#[derive(Debug, Deserialize)]
+struct ResponseContent {
+    #[serde(default)]
+    parts: Vec<ResponsePart>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ResponsePart {
+    text: Option<String>,
+}
+
+fn reply_from(response: GenerateResponse) -> Result<Reply, ChatError> {
+    let Some(candidate) = response.candidates.into_iter().next() else {
+        return Err(ChatError::Empty);
+    };
+
+    let text: String = candidate
+        .content
+        .parts
+        .into_iter()
+        .filter_map(|part| part.text)
+        .collect();
+
+    if text.is_empty() {
+        Err(ChatError::Empty)
+    } else {
+        Ok(Reply { text })
+    }
+}
 
 const DEFAULT_MODEL: &str = "gemini-3.5-flash-lite";
 
@@ -51,83 +128,6 @@ impl ChatProvider for Gemini {
 
         let parsed: GenerateResponse = serde_json::from_str(&body)?;
         reply_from(parsed)
-    }
-}
-
-#[derive(Debug, Serialize)]
-pub(crate) struct GenerateRequest {
-    contents: Vec<Content>,
-}
-
-#[derive(Debug, Serialize)]
-pub(crate) struct Content {
-    role: &'static str,
-    parts: Vec<Part>,
-}
-
-#[derive(Debug, Serialize)]
-pub(crate) struct Part {
-    text: String,
-}
-
-pub(crate) fn request_body(messages: &[Message]) -> GenerateRequest {
-    GenerateRequest {
-        contents: messages.iter().map(Content::from).collect(),
-    }
-}
-
-impl From<&Message> for Content {
-    fn from(message: &Message) -> Self {
-        Content {
-            role: match message.role {
-                Role::User => "user",
-                Role::Assistant => "model",
-            },
-            parts: vec![Part {
-                text: message.text.clone(),
-            }],
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct GenerateResponse {
-    #[serde(default)]
-    candidates: Vec<Candidate>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Candidate {
-    content: ResponseContent,
-}
-
-#[derive(Debug, Deserialize)]
-struct ResponseContent {
-    #[serde(default)]
-    parts: Vec<ResponsePart>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ResponsePart {
-    text: Option<String>,
-}
-
-pub(crate) fn reply_from(response: GenerateResponse) -> Result<Reply, ChatError> {
-    let Some(candidate) = response.candidates.into_iter().next() else {
-        return Err(ChatError::Empty);
-    };
-
-    let text: String = candidate
-        .content
-        .parts
-        .into_iter()
-        .filter_map(|part| part.text)
-        .collect();
-
-    if text.is_empty() {
-        Err(ChatError::Empty)
-    } else {
-        Ok(Reply { text })
     }
 }
 

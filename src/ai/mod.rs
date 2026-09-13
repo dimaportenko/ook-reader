@@ -42,7 +42,7 @@ pub(crate) enum ChatError {
     Http(#[from] reqwest::Error),
     #[error("the provider rejected the request ({status}): {body}")]
     Api { status: u16, body: String },
-    #[error("could not read provider answer: {0}")]
+    #[error("could not read the provider's answer: {0}")]
     Json(#[from] serde_json::Error),
 }
 

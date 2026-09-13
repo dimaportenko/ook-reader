@@ -4,6 +4,7 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 
+#[allow(dead_code)]
 mod ai;
 mod clock;
 mod config;
