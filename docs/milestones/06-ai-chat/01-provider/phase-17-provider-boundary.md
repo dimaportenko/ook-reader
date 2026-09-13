@@ -56,9 +56,9 @@ Detail for each lives in
 - [x] **2. The prompt template** — `src/ai/prompt.rs`: `draft(&Passage) -> String`, the
       prefilled input text, with the passage cap. `#[test]`. Committed in `e74b4ed`,
       **141 tests green**.
-- [ ] **3. Gemini request body** — `src/ai/gemini.rs`: `serde` types for `generateContent`
+- [x] **3. Gemini request body** — `src/ai/gemini.rs`: `serde` types for `generateContent`
       and a pure `request_body(&[Message]) -> GenerateRequest`; assert the JSON shape.
-      `#[test]`.
+      `#[test]`. Committed in `49f7902`, **143 tests green**.
 - [ ] **4. Gemini response body** — the response types and `reply_from(GenerateResponse)
       -> Result<Reply, ChatError>`, against a captured success and an empty-candidates
       body. `#[test]`.

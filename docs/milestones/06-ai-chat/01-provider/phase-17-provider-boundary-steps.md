@@ -408,3 +408,177 @@ never imported outside `ai`.
 > shape test verified live by mutation. The commit also carried a `pollster` dev-dep bump
 > to 1 and a re-indent of `Cargo.toml`. Clippy reports only the expected dead-code warnings
 > until the UI wires `ai` in.
+
+---
+
+## Step 4 — Gemini response body
+
+**What it is.** The second half of the translation: Gemini's `generateContent` JSON →
+`Result<Reply, ChatError>`. Still no network — `reqwest` in Step 5 will hand us a body as
+text, and this step decides what that text *means*. A success looks like this (only the
+fields we read, plus the ones we must be able to ignore):
+
+```json
+{
+  "candidates": [
+    {
+      "content": { "role": "model", "parts": [ { "text": "Ankh-Morpork" } ] },
+      "finishReason": "STOP"
+    }
+  ],
+  "usageMetadata": { "promptTokenCount": 9, "candidatesTokenCount": 3 }
+}
+```
+
+And a prompt the safety filter refused arrives as **HTTP 200 with no candidates**:
+
+```json
+{ "promptFeedback": { "blockReason": "SAFETY" } }
+```
+
+That second shape is the reason this step exists as its own step. A 200 is not a reply;
+"no candidates" is the empty case, and it has to become `ChatError::Empty` here, in pure
+Rust, not somewhere in the reader when it finds an empty string.
+
+**Check (`cargo test ai::gemini`)** — pure Rust, `#[test]`, appended to the existing test
+module in `src/ai/gemini.rs`:
+
+```rust
+#[test]
+fn a_captured_success_becomes_a_reply() {
+    let body = r#"{
+        "candidates": [
+            {
+                "content": { "role": "model", "parts": [ { "text": "Ankh-Morpork" } ] },
+                "finishReason": "STOP"
+            }
+        ],
+        "usageMetadata": { "promptTokenCount": 9, "candidatesTokenCount": 3 }
+    }"#;
+
+    let reply = reply_from(serde_json::from_str(body).unwrap()).unwrap();
+
+    assert_eq!(reply.text, "Ankh-Morpork");
+}
+
+#[test]
+fn several_text_parts_are_joined_into_one_reply() {
+    let body = r#"{ "candidates": [ { "content": { "parts": [
+        { "text": "Ankh-" }, { "text": "Morpork" }
+    ] } } ] }"#;
+
+    let reply = reply_from(serde_json::from_str(body).unwrap()).unwrap();
+
+    assert_eq!(reply.text, "Ankh-Morpork");
+}
+
+#[test]
+fn a_blocked_prompt_has_no_candidates_and_is_empty() {
+    let body = r#"{ "promptFeedback": { "blockReason": "SAFETY" } }"#;
+
+    let result = reply_from(serde_json::from_str(body).unwrap());
+
+    assert!(matches!(result, Err(ChatError::Empty)), "{result:?}");
+}
+
+#[test]
+fn a_candidate_with_no_text_is_empty_too() {
+    let body = r#"{ "candidates": [ { "content": { "parts": [ {} ] } } ] }"#;
+
+    let result = reply_from(serde_json::from_str(body).unwrap());
+
+    assert!(matches!(result, Err(ChatError::Empty)), "{result:?}");
+}
+```
+
+Watch all four fail (no `GenerateResponse`, no `reply_from`), then make them pass. Note
+what the bodies deliberately leave out: `role` and `finishReason` in the second and fourth,
+`candidates` entirely in the third. Every one of those is a field Gemini can omit or that
+we never read, and the tests pin that the parser survives their absence. The first test
+carries the fields we *don't* model (`finishReason`, `usageMetadata`) so it also pins that
+unknown keys are ignored.
+
+**Minimal implementation** — in `src/ai/gemini.rs`, next to the request types:
+
+```rust
+use serde::{Deserialize, Serialize};
+
+use super::{ChatError, Message, Reply, Role};
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct GenerateResponse {
+    #[serde(default)]
+    candidates: Vec<Candidate>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Candidate {
+    content: ResponseContent,
+}
+
+#[derive(Debug, Deserialize)]
+struct ResponseContent {
+    #[serde(default)]
+    parts: Vec<ResponsePart>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ResponsePart {
+    text: Option<String>,
+}
+
+pub(crate) fn reply_from(response: GenerateResponse) -> Result<Reply, ChatError> {
+    let text: String = response
+        .candidates
+        .into_iter()
+        .next()
+        … flatten the first candidate's parts, keep the `Some(text)`s, concatenate …;
+
+    if text.is_empty() { Err(ChatError::Empty) } else { Ok(Reply { text }) }
+}
+```
+
+Fill in the `…`. One clean shape is `.into_iter().next().into_iter()` to turn
+`Option<Candidate>` into a zero-or-one iterator, then `.flat_map(|c| c.content.parts)`,
+`.filter_map(|p| p.text)`, `.collect::<String>()`. Another is a plain `match` on
+`candidates.into_iter().next()` with an early `return Err(ChatError::Empty)`. Both are
+fine; pick the one you can read back in a month.
+
+Separate `ResponseContent`/`ResponsePart` from the request-side `Content`/`Part` rather than
+deriving both `Serialize` and `Deserialize` on one type. They look alike today, but `role`
+is required going out and optional coming back, `text` is required going out and optional
+coming back — the two directions have different rules, and one struct would have to lie
+about one of them.
+
+**Why it works.** `#[derive(Deserialize)]` is the mirror of Step 3: the struct is the
+schema, and `serde_json::from_str` walks the JSON against it. Two attributes do the real
+work here. `#[serde(default)]` on a `Vec` field means "if the key is missing, use
+`Vec::new()`" — without it, the blocked-prompt body would fail to parse with *"missing
+field `candidates`"*, and a parse error is the wrong diagnosis for a safety block. Serde
+ignores unknown keys by default (the opposite, `#[serde(deny_unknown_fields)]`, is opt-in),
+which is exactly what you want at an API boundary: Google adds fields all the time, and none
+of them should break the reader.
+
+`Option<String>` on `text` is the other half of the same idea. A `Part` is a tagged union on
+the wire — it might be `text`, `inlineData`, `functionCall` — and a missing `text` key
+deserializes to `None` for free because serde treats `Option` fields as optional. So the
+types encode "we only understand text parts and skip the rest," and the code never has to
+say it.
+
+`reply_from` takes `GenerateResponse` **by value** and `Reply` takes ownership of the text
+by moving it out of the parts: `into_iter()` everywhere, no `.clone()`. The response was
+built for this one call and is dead after it, so consuming it is the honest signature. That
+is also why `collect::<String>()` works — `String: FromIterator<String>`, so concatenating
+owned strings is one line and one allocation.
+
+`matches!` in the tests is the idiom for "is it this variant" when the error type does not
+derive `PartialEq` (and `ChatError` does not — `thiserror` enums usually wrap non-comparable
+sources later). It expands to a `match` that returns `bool`, so you get a structural check
+without adding a derive just for tests.
+
+**Scope note.** No HTTP status handling, no error JSON (`{ "error": { "code": 400, … } }`)
+— those come *with* the status code in Step 5, where `ChatError` grows `Http` and `Api`
+variants. `finishReason: "MAX_TOKENS"` is treated as a normal (truncated) reply for now; a
+visible marker for that is a Phase 19 UI decision. `promptFeedback.blockReason` is dropped
+on the floor here; if a later phase wants to tell the reader *why* it got nothing, add a
+`Blocked(String)` variant then, with the captured body above as its test.
