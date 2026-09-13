@@ -913,6 +913,9 @@ first real request in Phase 19 remains the validator.
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
 
+> **Status:** done — committed in `bd8ed2c` (163 tests green, 2 ignored; clippy clean;
+> desktop eyeball confirmed).
+
 **The crux.** The model is not a secret, so this slice should travel through the ordinary
 `Settings` signal rather than the keychain. The persistence effect and the model-only memo
 from earlier steps already observe that signal: the picker only has to write one `AiModel`,

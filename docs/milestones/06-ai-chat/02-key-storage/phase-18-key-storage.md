@@ -68,7 +68,7 @@ Detail for each lives in [`phase-18-key-storage-steps.md`](phase-18-key-storage-
       on launch into `Signal<Option<Gemini>>`, and provides both through context; a helper
       rebuilds the provider when the key or model changes; `#[test]` on the helper,
       `dx serve` for the wiring.
-- [ ] **5a. Pick the model** — a labelled Flash-Lite / Flash picker in
+- [x] **5a. Pick the model** — a labelled Flash-Lite / Flash picker in
       `SettingsPopover`; its choice persists and rebuilds a present provider; `#[test]` on
       the reader-facing labels and a `dx serve` desktop eyeball.
 - [ ] **5b. Show key status** — the settings row distinguishes *key set*, *not set*, and an
