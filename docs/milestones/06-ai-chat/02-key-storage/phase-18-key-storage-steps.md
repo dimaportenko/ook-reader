@@ -1021,6 +1021,9 @@ becomes available.
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
 
+> **Status:** done — committed in `f101228` (165 tests green, 2 ignored; clippy clean;
+> desktop eyeball confirmed both *Not set* and *Key set*).
+
 **The crux.** The row has to answer "is a key set?" without ever holding the key. It does
 not need to: Step 4 already left two witnesses in context, and together they distinguish all
 three states the phase asks for. `Option<Rc<dyn SecretStore>>` being `None` means the native

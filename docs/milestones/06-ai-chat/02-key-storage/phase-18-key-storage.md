@@ -71,7 +71,7 @@ Detail for each lives in [`phase-18-key-storage-steps.md`](phase-18-key-storage-
 - [x] **5a. Pick the model** — a labelled Flash-Lite / Flash picker in
       `SettingsPopover`; its choice persists and rebuilds a present provider; `#[test]` on
       the reader-facing labels and a `dx serve` desktop eyeball.
-- [ ] **5b. Show key status** — the settings row distinguishes *key set*, *not set*, and an
+- [x] **5b. Show key status** — the settings row distinguishes *key set*, *not set*, and an
       unavailable secret store without reading the key into UI state; `dx serve` eyeball.
 - [ ] **5c. Save a key** — password input + save button write through `SecretStore`, clear
       the input, and refresh the provider and status immediately; `#[test]` with `Memory`
