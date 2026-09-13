@@ -702,6 +702,8 @@ picker in Step 5. Step 3c is next and passes `settings.ai_model.api_name()` into
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
 
+> **Status:** done — committed in `79ae06b` (161 tests green, 2 ignored; clippy clean).
+
 **The crux.** `Gemini` already stores its model and builds the request URL from that field,
 but callers can only construct the default. The smallest bridge is a builder that replaces
 the default before the provider is shared. The check must read the resulting endpoint, not

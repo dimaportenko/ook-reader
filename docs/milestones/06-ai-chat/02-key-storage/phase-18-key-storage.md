@@ -62,7 +62,7 @@ Detail for each lives in [`phase-18-key-storage-steps.md`](phase-18-key-storage-
       `settings` row exactly once; `#[test]` on the old on-disk shape.
 - [x] **3b-ii. Persist the model value** — add the model to `Settings`, `save_settings`,
       and `settings()`; `#[test]` on the db round trip.
-- [ ] **3c. Give Gemini the chosen model** — add `Gemini::with_model`; `#[test]` that the
+- [x] **3c. Give Gemini the chosen model** — add `Gemini::with_model`; `#[test]` that the
       chosen model reaches the endpoint.
 - [ ] **4. The provider in context** — `main.rs` reads the key on launch into
       `Signal<Option<Gemini>>`; a helper that rebuilds it when the key or model changes;
