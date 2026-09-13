@@ -58,7 +58,7 @@ Detail for each lives in [`phase-18-key-storage-steps.md`](phase-18-key-storage-
       `#[ignore]` round trip against the real keychain, `dx build --platform ios`.
 - [x] **3a. The model value** — `AiModel` enum with stable slugs and Gemini API names;
       `#[test]` on the slug round trip, fallback and provider names.
-- [ ] **3b-i. Add and backfill the model column** — migrate an existing singleton
+- [x] **3b-i. Add and backfill the model column** — migrate an existing singleton
       `settings` row exactly once; `#[test]` on the old on-disk shape.
 - [ ] **3b-ii. Persist the model value** — add the model to `Settings`, `save_settings`,
       and `settings()`; `#[test]` on the db round trip.

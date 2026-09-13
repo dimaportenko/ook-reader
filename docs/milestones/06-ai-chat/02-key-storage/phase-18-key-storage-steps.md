@@ -461,6 +461,8 @@ from `api_name()` prevents persistence from depending on Google's versioned endp
 
 ## Step 3b-i — Add and backfill the model column
 
+> **Status:** done — committed in `4283208` (160 tests green, 2 ignored; clippy clean).
+
 **The crux.** `CREATE TABLE IF NOT EXISTS` creates a missing table; it does not reconcile
 the columns of a table already on disk. This is the first settings change that has to keep
 a real user's existing row, so `Db::open` must distinguish the old schema from the new one
