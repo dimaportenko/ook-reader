@@ -167,3 +167,186 @@ impl SecretStore for Memory {
 **Scope note.** Nothing here touches the real keychain — that is Step 2. Nothing here
 knows what a key is *for*; `Gemini` is fed from the store in Step 4. `Memory` doubles as
 the store for the web target later, if that ever comes, but that is not why it exists.
+
+---
+
+## Step 2 — The keychain behind the trait
+
+**What changed from the plan.** The phase doc named `keyring` 4's `v1` API. Reading the
+crate source rules that out: `keyring::v1::Entry::new` returns `NoDefaultStore` on iOS
+unconditionally — the convenience layer only wires a default store for macOS, Windows and
+desktop Linux. The pieces underneath are fine, and they are what we use directly:
+`keyring-core` (the `Entry` type, the `Error` enum, `set_default_store`) plus
+`apple-native-keyring-store` (two stores: `keychain::Store`, the classic login keychain on
+macOS, and `protected::Store`, the data-protection keychain iOS uses). Same code, two more
+lines of `Cargo.toml`, and no wrapper deciding for us which platforms count.
+
+**Check — two kinds.** The error translation is pure and gets real `#[test]`s; the keychain
+round trip is the phase's `#[ignore]` test, like Phase 17's live call.
+
+`Cargo.toml`:
+
+```toml
+[dependencies]
+keyring-core = "1"
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
+apple-native-keyring-store = { version = "1", features = ["keychain", "protected"] }
+```
+
+Then `src/secrets/keychain.rs`, with `#[cfg(any(target_os = "macos", target_os = "ios"))]
+mod keychain;` in `secrets/mod.rs`, and the tests first:
+
+```rust
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::secrets::{SecretStore, GEMINI_API_KEY};
+    use keyring_core::Error;
+
+    #[test]
+    fn a_missing_entry_translates_to_none() {
+        let read: Result<Option<String>, SecretError> = absent_as_none(Err(Error::NoEntry));
+
+        assert_eq!(read.expect("missing is not an error"), None);
+    }
+
+    #[test]
+    fn a_found_entry_translates_to_some() {
+        let read = absent_as_none(Ok("sk-…".to_owned()));
+
+        assert_eq!(read.expect("found").as_deref(), Some("sk-…"));
+    }
+
+    #[test]
+    fn any_other_keychain_error_is_unavailable() {
+        let read = absent_as_none::<String>(Err(Error::NoDefaultStore));
+
+        assert!(matches!(read, Err(SecretError::Unavailable(_))), "got {read:?}");
+    }
+
+    #[test]
+    #[ignore = "touches the real keychain"]
+    fn a_secret_round_trips_through_the_keychain() {
+        let store = Keychain::new().expect("keychain store");
+        let name = format!("test-{}", uuid::Uuid::new_v4());
+
+        assert_eq!(store.get(&name).expect("read before set"), None);
+
+        store.set(&name, "round trip").expect("set");
+        assert_eq!(
+            store.get(&name).expect("read after set").as_deref(),
+            Some("round trip")
+        );
+
+        store.forget(&name).expect("forget");
+        assert_eq!(store.get(&name).expect("read after forget"), None);
+        store.forget(&name).expect("a second forget is a no-op");
+
+        let _ = store.forget(GEMINI_API_KEY);
+    }
+}
+```
+
+Run `cargo test secrets::` for the three, then `cargo test secrets:: -- --ignored` once
+for the round trip (macOS may ask for keychain access the first time — allow it; that
+prompt is the login keychain doing its job). Finish with `dx build --platform ios`: that is
+where a missing feature or a linker complaint about Security.framework would show.
+
+Delete the last line of the ignored test before committing if you like — it is there only
+so a stray key from manual poking never survives a test run.
+
+**Minimal code** — `src/secrets/keychain.rs`:
+
+```rust
+use std::sync::Arc;
+
+use keyring_core::{Entry, Error};
+
+use super::{SecretError, SecretStore};
+
+const SERVICE: &str = "com.dimaportenko.ook-reader";
+
+pub(crate) struct Keychain;
+
+impl Keychain {
+    pub(crate) fn new() -> Result<Self, SecretError> {
+        #[cfg(target_os = "macos")]
+        let store = apple_native_keyring_store::keychain::Store::new();
+        #[cfg(target_os = "ios")]
+        let store = apple_native_keyring_store::protected::Store::new();
+
+        keyring_core::set_default_store(store.map_err(unavailable)?);
+        Ok(Keychain)
+    }
+
+    fn entry(name: &str) -> Result<Entry, SecretError> {
+        Entry::new(SERVICE, name).map_err(unavailable)
+    }
+}
+
+impl SecretStore for Keychain {
+    fn get(&self, name: &str) -> Result<Option<String>, SecretError> {
+        absent_as_none(Self::entry(name)?.get_password())
+    }
+
+    fn set(&self, name: &str, value: &str) -> Result<(), SecretError> {
+        Self::entry(name)?.set_password(value).map_err(unavailable)
+    }
+
+    fn forget(&self, name: &str) -> Result<(), SecretError> {
+        absent_as_none(Self::entry(name)?.delete_credential()).map(|_| ())
+    }
+}
+
+fn absent_as_none<T>(result: Result<T, Error>) -> Result<Option<T>, SecretError> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(Error::NoEntry) => Ok(None),
+        Err(other) => Err(unavailable(other)),
+    }
+}
+
+fn unavailable(error: Error) -> SecretError {
+    SecretError::Unavailable(error.to_string())
+}
+```
+
+(`Store::new()` returns `Result<Arc<Store>, Error>`; `set_default_store` takes the `Arc`
+— the `use std::sync::Arc` is only needed if you name the type. Drop it if clippy says
+unused.)
+
+**Why it works.**
+
+- **The one pure function is the whole translation.** `absent_as_none` is where the
+  crate's vocabulary (a missing entry is an `Err`) becomes the trait's (a missing entry is
+  `Ok(None)`). It is generic over `T` so the same function serves `get` (where `T` is
+  `String`) and `forget` (where `T` is `()` and the `Some`/`None` is thrown away with
+  `.map(|_| ())`). Three real tests cover it without a keychain in sight — that is the
+  Phase 17 split again: the translation is testable, the socket is not.
+- **`match` on the error, not `if let`.** There are three outcomes and they are different
+  *kinds* of thing: a value, a normal absence, a real failure. A `match` with three arms
+  reads like the truth table; `if let Err(Error::NoEntry)` would bury the third case in an
+  `else`. `Error::NoEntry` is a unit variant so it can be matched without binding anything.
+- **`Store::new()` once, in `new`, into a process-wide default.** `keyring-core` keeps the
+  store in a global (`set_default_store`), and `Entry::new` reads it. That global is the
+  crate's design, not ours; wrapping it in `Keychain::new()` means the rest of the app
+  never sees it and `Keychain` is the only value that can reach it. Calling it twice is
+  harmless (the second replaces the first), so the `Keychain` value stays a unit struct
+  — there is nothing to hold.
+- **`cfg` picks the store, the code below it is identical.** macOS gets the classic
+  keychain because the data-protection one needs a signed, entitled binary and
+  `dx serve` builds are neither; iOS has *only* the data-protection keychain. The `#[cfg]`
+  sits on the `let` so the two binaries differ in exactly one line. Linux and Windows are
+  not covered on purpose — nothing in the roadmap builds there yet — and the module-level
+  `cfg` in `mod.rs` keeps the crate compiling for them rather than failing at link time.
+- **`SERVICE` is the bundle id.** The keychain keys items by service + account. Using the
+  same identifier the bundle uses means a user looking in Keychain Access sees the app's
+  name, and the sync token in Milestone 5 lands in the same drawer.
+- **`uuid` in the ignored test** because the real keychain is shared with every other run
+  and with the app itself: a fixed test name would collide with a key you set by hand.
+  `uuid` is already a dependency.
+
+**Scope note.** Nothing reads `GEMINI_API_KEY` yet; Step 4 wires the store into `main.rs`
+and feeds `Gemini`. The `Memory` store stays the one tests use everywhere else. No
+"unavailable" UI copy yet — Step 5 shows it on the row.

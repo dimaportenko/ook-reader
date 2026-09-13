@@ -1,5 +1,8 @@
 use std::{cell::RefCell, collections::HashMap};
 
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+pub(crate) mod keychain;
+
 pub(crate) const GEMINI_API_KEY: &str = "gemini-api-key";
 
 #[derive(Debug, thiserror::Error)]

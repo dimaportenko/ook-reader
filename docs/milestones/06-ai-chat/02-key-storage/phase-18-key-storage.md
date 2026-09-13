@@ -32,7 +32,7 @@ and the settings signal keeps carrying `Copy` data as it does today.
 - **A new module, `src/secrets/`**, owning the trait, the `Memory` store, and the
   `Keychain` store. `ai` does not know about it; `main.rs` joins them, as it joins `Db`
   and `Settings` today.
-- **`keyring` 4 for the keychain**, `v1` API, service name `com.dimaportenko.ook-reader`,
+- **`keyring-core` + `apple-native-keyring-store` for the keychain** (not the `keyring` `v1` wrapper, whose default store refuses iOS — see Step 2), service name `com.dimaportenko.ook-reader`,
   one entry per secret name. On iOS the Apple store needs its data-protection (`protected`)
   feature and the app's keychain entitlement — the step that adds the crate ends with
   `dx build --platform ios`, the same tripwire Phase 17 used for TLS. If the crate turns
@@ -53,7 +53,7 @@ Detail for each lives in [`phase-18-key-storage-steps.md`](phase-18-key-storage-
 
 - [x] **1. The secret boundary** — `src/secrets/mod.rs`: `SecretStore` trait (`get`, `set`,
       `forget`), `SecretError`, the `GEMINI_API_KEY` name, and a `Memory` store; `#[test]`.
-- [ ] **2. The keychain behind the trait** — `keyring` dependency, `Keychain` store,
+- [ ] **2. The keychain behind the trait** — `keyring-core` + `apple-native-keyring-store`, `Keychain` store,
       `#[ignore]` round trip against the real keychain, `dx build --platform ios`.
 - [ ] **3. The model as a setting** — `AiModel` enum with slugs, a `settings` column,
       `Gemini::with_model`; `#[test]` on the slug round trip and the db round trip.
