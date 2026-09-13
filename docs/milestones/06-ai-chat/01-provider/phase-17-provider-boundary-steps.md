@@ -24,7 +24,7 @@ them is the only thing behind `#[ignore]`.
 2. ~~**The prompt template**~~ — book, chapter, selection → a draft for the input box, with a cap. **Done** — `e74b4ed`.
 3. ~~**Gemini request body**~~ — serde types, pure builder, JSON-shape test. **Done** — `49f7902`.
 4. ~~**Gemini response body**~~ — serde types, pure reader, captured-JSON tests. **Done** — `f6a1c16`.
-5. **The HTTP call** — `reqwest`, `#[ignore]` live test, iOS build check.
+5. ~~**The HTTP call**~~ — `reqwest`, `#[ignore]` live test, iOS build check. **Done** — `2fa9bfe`.
 6. **Review and refactor** — punch-list, suite green, clippy clean.
 
 ---
@@ -767,3 +767,9 @@ is the 2xx range — `200` and `204` both count, `3xx` does not, which is right 
 configurable from outside (`new` takes only the key); a `with_model` builder is a Step 6
 consideration once the settings row in Phase 18 says what it needs. No `systemInstruction`
 — the prompt template already puts context in the first user turn.
+
+> **Status:** done — committed in `2fa9bfe` (149 tests green, 1 ignored; the ignored live test
+> passed with `GEMINI_API_KEY` in 0.72s, and `dx build --platform ios` linked clean). The
+> parse error got its own `Json` variant. `reqwest` was first pinned at 0.13, which pulled
+> a second copy beside the 0.12 Dioxus already uses, and was dropped back to 0.12. The three
+> tests were written at commit time; the status one was verified live by mutation.

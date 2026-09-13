@@ -62,6 +62,7 @@ Detail for each lives in
 - [x] **4. Gemini response body** — the response types and `reply_from(GenerateResponse)
       -> Result<Reply, ChatError>`, against a captured success and an empty-candidates
       body. `#[test]`. Committed in `f6a1c16`, **147 tests green**.
-- [ ] **5. The HTTP call** — `reqwest` joins 3 and 4 inside `impl ChatProvider for Gemini`;
+- [x] **5. The HTTP call** — `reqwest` joins 3 and 4 inside `impl ChatProvider for Gemini`;
       `#[ignore]` test with `GEMINI_API_KEY`. Also `dx build --platform ios` to catch TLS.
+      Committed in `2fa9bfe`, **149 tests green**, live test passed.
 - [ ] **6. Review and refactor** — punch-list over `src/ai/`, suite green, clippy clean.
