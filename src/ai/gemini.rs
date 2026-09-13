@@ -1,6 +1,58 @@
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 
-use crate::ai::{ChatError, Message, Reply, Role};
+use crate::ai::{ChatError, ChatProvider, Message, Reply, Role};
+
+const DEFAULT_MODEL: &str = "gemini-3.5-flash-lite";
+
+pub(crate) struct Gemini {
+    key: String,
+    model: String,
+    client: reqwest::Client,
+}
+
+impl Gemini {
+    pub(crate) fn new(key: String) -> Self {
+        Gemini {
+            key,
+            model: DEFAULT_MODEL.to_string(),
+            client: reqwest::Client::new(),
+        }
+    }
+}
+
+fn endpoint(model: &str) -> String {
+    format!("https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent")
+}
+
+fn check_status(status: StatusCode, body: String) -> Result<String, ChatError> {
+    if status.is_success() {
+        Ok(body)
+    } else {
+        Err(ChatError::Api {
+            status: status.as_u16(),
+            body,
+        })
+    }
+}
+
+impl ChatProvider for Gemini {
+    async fn complete(&self, messages: &[Message]) -> Result<Reply, ChatError> {
+        let response = self
+            .client
+            .post(endpoint(&self.model))
+            .header("x-goog-api-key", &self.key)
+            .json(&request_body(messages))
+            .send()
+            .await?;
+
+        let status = response.status();
+        let body = check_status(status, response.text().await?)?;
+
+        let parsed: GenerateResponse = serde_json::from_str(&body)?;
+        reply_from(parsed)
+    }
+}
 
 #[derive(Debug, Serialize)]
 pub(crate) struct GenerateRequest {
@@ -156,5 +208,37 @@ mod test {
         let result = reply_from(serde_json::from_str(body).unwrap());
 
         assert!(matches!(result, Err(ChatError::Empty)), "{result:?}");
+    }
+
+    #[test]
+    fn the_endpoint_names_the_model_and_the_method() {
+        let url = endpoint("gemini-3.5-flash-lite");
+
+        assert_eq!(
+            url,
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"
+        );
+    }
+
+    #[test]
+    fn a_non_success_status_becomes_an_api_error() {
+        let result = check_status(StatusCode::BAD_REQUEST, r#"{"error":{"code":400}}"#.into());
+
+        assert!(
+            matches!(&result, Err(ChatError::Api { status: 400, body }) if body.contains("400")),
+            "{result:?}"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs GEMINI_API_KEY and the network"]
+    async fn a_real_gemini_answers_through_the_trait() {
+        let key = std::env::var("GEMINI_API_KEY").expect("set GEMINI_API_KEY to run this");
+        let gemini = Gemini::new(key);
+        let messages = [Message::user("Reply with exactly one word: pong")];
+
+        let reply = ChatProvider::complete(&gemini, &messages).await.unwrap();
+
+        assert!(reply.text.to_lowercase().contains("pong"), "{reply:?}");
     }
 }

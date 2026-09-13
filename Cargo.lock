@@ -3569,11 +3569,13 @@ dependencies = [
  "percent-encoding",
  "pollster 1.0.1",
  "rbook",
+ "reqwest",
  "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
+ "tokio",
  "uuid",
 ]
 

@@ -586,3 +586,184 @@ on the floor here; if a later phase wants to tell the reader *why* it got nothin
 > **Status:** done — committed in `f6a1c16` (147 tests green). Built with the `let … else`
 > early return; the four tests were written at commit time and the multi-part one verified
 > live by mutation. Clippy still reports only dead-code warnings for the unwired `ai` module.
+
+---
+
+## Step 5 — The HTTP call
+
+**What it is.** Join Steps 3 and 4 with the one piece of code that touches the socket: a
+`Gemini` struct that holds the key, the model name, and a `reqwest::Client`, and an
+`impl ChatProvider for Gemini` whose `complete` posts `request_body(messages)` and feeds the
+answer through `reply_from`. The phase's exit criterion lives here — an `#[ignore]`d test
+that, given `GEMINI_API_KEY`, gets a real sentence back through the *trait*, not through
+`Gemini` directly.
+
+The wire details, all of which stay in `gemini.rs`:
+
+- `POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`
+- key in the `x-goog-api-key` header (not the query string — it would end up in logs)
+- default model `gemini-3.5-flash-lite` — the newest stable Flash-Lite with a free tier as of
+  2026-09 (checked against the Gemini models and pricing pages); a field, so "Flash-Lite → Flash" is a settings
+  change, never a code change
+
+**Check** — two kinds this time.
+
+*Pure, `cargo test ai::gemini`*, in the existing test module:
+
+```rust
+#[test]
+fn the_endpoint_names_the_model_and_the_method() {
+    let url = endpoint("gemini-3.5-flash-lite");
+
+    assert_eq!(
+        url,
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"
+    );
+}
+
+#[test]
+fn a_non_success_status_becomes_an_api_error() {
+    let result = check_status(reqwest::StatusCode::BAD_REQUEST, r#"{"error":{"code":400}}"#.into());
+
+    assert!(
+        matches!(&result, Err(ChatError::Api { status: 400, body }) if body.contains("400")),
+        "{result:?}"
+    );
+}
+```
+
+*Live, `cargo test ai::gemini -- --ignored`*, same module. It needs a tokio runtime (see
+"why" below), so add to `[dev-dependencies]`:
+
+```toml
+tokio = { version = "1", features = ["rt", "macros"] }
+```
+
+```rust
+#[tokio::test]
+#[ignore = "needs GEMINI_API_KEY and the network"]
+async fn a_real_gemini_answers_through_the_trait() {
+    let key = std::env::var("GEMINI_API_KEY").expect("set GEMINI_API_KEY to run this");
+    let gemini = Gemini::new(key);
+    let messages = [Message::user("Reply with exactly one word: pong")];
+
+    let reply = ChatProvider::complete(&gemini, &messages).await.unwrap();
+
+    assert!(reply.text.to_lowercase().contains("pong"), "{reply:?}");
+}
+```
+
+Run the pure tests first and watch them fail (no `endpoint`, no `check_status`, no `Api`
+variant). Then `GEMINI_API_KEY=… cargo test ai::gemini -- --ignored` once you have the
+implementation; that one run *is* the phase's acceptance test, so paste its output into
+the commit body. Finally `dx build --platform ios` — the point is not the app, it is that
+`reqwest` with `rustls` links for iOS at all.
+
+**Minimal implementation.**
+
+`Cargo.toml`, `[dependencies]` — the same features Dioxus already pulls, so the lockfile
+does not grow:
+
+```toml
+reqwest = { version = "0.13", default-features = false, features = ["rustls-tls", "json"] }
+```
+
+`src/ai/mod.rs` — `ChatError` grows the two shapes an HTTP call can fail in:
+
+```rust
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ChatError {
+    #[error("the provider returned no answer")]
+    Empty,
+    #[error("could not reach the provider: {0}")]
+    Http(#[from] reqwest::Error),
+    #[error("the provider rejected the request ({status}): {body}")]
+    Api { status: u16, body: String },
+}
+```
+
+`src/ai/gemini.rs`:
+
+```rust
+use reqwest::StatusCode;
+
+use super::{ChatError, ChatProvider, Message, Reply, Role};
+
+const DEFAULT_MODEL: &str = "gemini-3.5-flash-lite";
+
+pub(crate) struct Gemini {
+    key: String,
+    model: String,
+    client: reqwest::Client,
+}
+
+impl Gemini {
+    pub(crate) fn new(key: String) -> Self {
+        Gemini { key, model: DEFAULT_MODEL.to_string(), client: reqwest::Client::new() }
+    }
+}
+
+fn endpoint(model: &str) -> String {
+    format!("https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent")
+}
+
+fn check_status(status: StatusCode, body: String) -> Result<String, ChatError> {
+    if status.is_success() { Ok(body) } else { Err(ChatError::Api { status: status.as_u16(), body }) }
+}
+
+impl ChatProvider for Gemini {
+    async fn complete(&self, messages: &[Message]) -> Result<Reply, ChatError> {
+        let response = self
+            .client
+            .post(endpoint(&self.model))
+            .header("x-goog-api-key", &self.key)
+            .json(&request_body(messages))
+            .send()
+            .await?;
+
+        let status = response.status();
+        let body = check_status(status, response.text().await?)?;
+        let parsed: GenerateResponse = serde_json::from_str(&body)?;
+        reply_from(parsed)
+    }
+}
+```
+
+The `serde_json::from_str(&body)?` needs one more `#[from]` on `ChatError` — either a
+`Json(#[from] serde_json::Error)` variant, or fold it into `Api` by hand with
+`.map_err(…)`. Pick one and say why in the commit. (Reading the body as `text()` and
+parsing it yourself, instead of `response.json()`, is deliberate: on a non-2xx the body is
+the error message you want to *show*, and `.json::<GenerateResponse>()` would throw it
+away as a deserialize failure.)
+
+**Why it works.** `async fn complete` in the trait now does real suspension: every `.await`
+on a `reqwest` future hands control back to the executor until the socket has something.
+That is why the ignored test cannot use `pollster` — `reqwest` is built on `hyper`, which
+registers its sockets with **tokio's reactor**, and `pollster::block_on` polls on a bare
+thread with no reactor to wake it. The call would panic with *"there is no reactor
+running"*. `#[tokio::test]` spins up a single-threaded runtime for that one test; in the
+app, Dioxus already runs tokio, so `complete` needs nothing extra there.
+
+`#[from]` on a variant is `thiserror` generating `impl From<reqwest::Error> for ChatError`,
+which is what makes `?` work: `?` calls `From::from` on the error before returning it. So
+one attribute replaces a `.map_err(ChatError::Http)` at every `.await`. `Api` has no
+`#[from]` because nothing produces it but us — it is the "the server answered, and the
+answer was no" case, which is not a transport error and should read differently in the UI.
+
+`reqwest::Client` is an `Arc` around a connection pool. Building one per request would
+re-do the TLS handshake every time; building one per `Gemini` and holding it in the struct
+is the documented pattern, and it is `Clone` for the same reason. `&self.key` in the header
+call borrows — `reqwest` copies it into the request, so the struct stays untouched and
+`complete` can keep taking `&self`.
+
+`endpoint` and `check_status` are split out for exactly one reason: they are the only parts
+of `complete` that a test can reach without a server, and both encode a decision (the URL
+shape, "which statuses are failures") that would otherwise be untested. `status.is_success()`
+is the 2xx range — `200` and `204` both count, `3xx` does not, which is right because
+`reqwest` follows redirects itself.
+
+**Scope note.** No timeout, no retry, no cancellation — Phase 22. The key is a plain
+`String` in memory until Phase 18 puts it in the keychain. The model is not yet
+configurable from outside (`new` takes only the key); a `with_model` builder is a Step 6
+consideration once the settings row in Phase 18 says what it needs. No `systemInstruction`
+— the prompt template already puts context in the first user turn.

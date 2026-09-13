@@ -38,6 +38,12 @@ pub(crate) struct Reply {
 pub(crate) enum ChatError {
     #[error("the provider returned no answer")]
     Empty,
+    #[error("could not reach the provider: {0}")]
+    Http(#[from] reqwest::Error),
+    #[error("the provider rejected the request ({status}): {body}")]
+    Api { status: u16, body: String },
+    #[error("could not read provider answer: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 pub(crate) trait ChatProvider {
