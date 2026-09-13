@@ -1,21 +1,22 @@
 use rusqlite::{params, OptionalExtension};
 
 use crate::db::Db;
-use crate::settings::{font::FontFamily, theme::Theme, Settings};
+use crate::settings::{ai_model::AiModel, font::FontFamily, theme::Theme, Settings};
 
 impl Db {
     pub(crate) fn save_settings(&self, settings: &Settings) -> Result<(), rusqlite::Error> {
         self.conn.execute(
             "INSERT INTO settings
-                (id, theme, font_family, font_size, line_height, page_margins, max_line_length)
-            VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)
+                (id, theme, font_family, font_size, line_height, page_margins, max_line_length, ai_model)
+            VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7)
             ON CONFLICT(id) DO UPDATE SET
                 theme = excluded.theme,
                 font_family = excluded.font_family,
                 font_size = excluded.font_size,
                 line_height = excluded.line_height,
                 page_margins = excluded.page_margins,
-                max_line_length = excluded.max_line_length",
+                max_line_length = excluded.max_line_length,
+                ai_model = excluded.ai_model",
             params![
                 settings.theme.slug(),
                 settings.font_family.slug(),
@@ -23,6 +24,7 @@ impl Db {
                 settings.line_height,
                 settings.page_margins,
                 settings.max_line_length,
+                settings.ai_model.slug(),
             ],
         )?;
 
@@ -32,7 +34,7 @@ impl Db {
     pub(crate) fn settings(&self) -> Result<Option<Settings>, rusqlite::Error> {
         self.conn
             .query_row(
-                "SELECT theme, font_family, font_size, line_height, page_margins, max_line_length
+                "SELECT theme, font_family, font_size, line_height, page_margins, max_line_length, ai_model
                 FROM settings WHERE id = 1",
                 [],
                 |row| {
@@ -43,6 +45,7 @@ impl Db {
                         line_height: row.get(3)?,
                         page_margins: row.get(4)?,
                         max_line_length: row.get(5)?,
+                        ai_model: AiModel::from_slug(&row.get::<_, String>(6)?),
                     })
                 },
             )
@@ -68,12 +71,14 @@ mod test {
             line_height: 170,
             page_margins: 150,
             max_line_length: 55,
+            ai_model: AiModel::Flash,
         };
         db.save_settings(&saved).expect("first save");
         assert_eq!(db.settings().expect("first read"), Some(saved));
 
         let latest = Settings {
             theme: Theme::Sepia,
+            ai_model: AiModel::FlashLite,
             ..saved
         };
         db.save_settings(&latest).expect("second save");
@@ -90,6 +95,7 @@ mod test {
             line_height: 170,
             page_margins: 150,
             max_line_length: 55,
+            ai_model: AiModel::Flash,
         };
 
         assert_ne!(saved.theme, default.theme);
@@ -98,6 +104,7 @@ mod test {
         assert_ne!(saved.line_height, default.line_height);
         assert_ne!(saved.page_margins, default.page_margins);
         assert_ne!(saved.max_line_length, default.max_line_length);
+        assert_ne!(saved.ai_model, default.ai_model);
     }
 
     #[test]

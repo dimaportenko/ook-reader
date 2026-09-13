@@ -581,3 +581,114 @@ This step only makes old and fresh databases share the same column. Step 3b-ii g
 column a Rust field and proves the full save/load round trip. Do not introduce
 `PRAGMA user_version` here: Phase 11 replaces this one-column bridge with SQLx's versioned
 migrations.
+
+---
+
+## Step 3b-ii — Persist the model value
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**The crux.** The column exists, but it is still disconnected from Rust: `Settings` cannot
+carry a model and both SQL statements ignore it. The compiler can keep every Rust struct
+literal honest, but it cannot see through SQL strings, so the existing round-trip test has
+to exercise both the first insert and the conflict-update path with different models.
+
+**Check (`cargo test db::settings::test`)** — strengthen the two existing tripwires in
+`src/db/settings.rs` before changing the implementation.
+
+Import `AiModel`, then make the first saved row non-default and make the second save switch
+back to the default:
+
+```rust
+let saved = Settings {
+    theme: Theme::Night,
+    font_family: FontFamily::Humanist,
+    font_size: 125,
+    line_height: 170,
+    page_margins: 150,
+    max_line_length: 55,
+    ai_model: AiModel::Flash,
+};
+
+let latest = Settings {
+    theme: Theme::Sepia,
+    ai_model: AiModel::FlashLite,
+    ..saved
+};
+```
+
+Give the fixture in `every_settings_field_differs_from_the_default_in_the_round_trip` the
+same `ai_model: AiModel::Flash`, then add its tripwire:
+
+```rust
+assert_ne!(saved.ai_model, default.ai_model);
+```
+
+Run the focused module now. It fails to compile because `Settings` has no `ai_model` field;
+that is the red target. The two model values are deliberate: if the SQL `INSERT` carries
+the model but `ON CONFLICT … DO UPDATE` forgets it, the second read must fail instead of
+quietly keeping `Flash`.
+
+One existing assertion message in `src/settings/mod.rs` also becomes stale in this step.
+Keep `vars.len()` at `theme.css_vars().len() + 5` — an AI model is not CSS — but change
+“bump this when a setting is added” to “bump this when a CSS-backed setting is added”.
+
+**Minimal implementation.** First, let `Settings` carry the value in `src/settings/mod.rs`:
+
+```rust
+use crate::settings::{ai_model::AiModel, font::FontFamily, theme::Theme};
+
+pub(crate) struct Settings {
+    pub(crate) theme: Theme,
+    pub(crate) font_family: FontFamily,
+    pub(crate) font_size: u16,
+    pub(crate) line_height: u16,
+    pub(crate) page_margins: u16,
+    pub(crate) max_line_length: u16,
+    pub(crate) ai_model: AiModel,
+}
+```
+
+Add `ai_model: AiModel::default()` to the `Default` implementation. Then extend both SQL
+directions in `src/db/settings.rs`.
+
+The save statement gets an eighth column, a seventh parameter, and a conflict update:
+
+```rust
+"INSERT INTO settings
+    (id, theme, font_family, font_size, line_height, page_margins, max_line_length, ai_model)
+VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7)
+ON CONFLICT(id) DO UPDATE SET
+    theme = excluded.theme,
+    font_family = excluded.font_family,
+    font_size = excluded.font_size,
+    line_height = excluded.line_height,
+    page_margins = excluded.page_margins,
+    max_line_length = excluded.max_line_length,
+    ai_model = excluded.ai_model"
+```
+
+Append `settings.ai_model.slug()` to `params!`. The load statement appends `ai_model` to
+the `SELECT` list and reconstructs the enum from column index 6:
+
+```rust
+ai_model: AiModel::from_slug(&row.get::<_, String>(6)?),
+```
+
+Then rerun `cargo test db::settings::test`, `cargo test`, and `cargo clippy`.
+
+**Why it works.** `Settings` remains `Copy` because `AiModel` is `Copy`, so none of the
+signal or struct-update behavior changes. SQLite receives the app-owned slug rather than
+Google's endpoint name, preserving the stability boundary from Step 3a. On load,
+`from_slug` turns valid text back into the enum and degrades an unknown future or corrupted
+value to Flash-Lite without losing the other six settings.
+
+Appending the SQL column keeps the existing row indices stable; only index 6 is new. The
+non-default first fixture catches a missing insert parameter, while switching back to
+Flash-Lite catches a missing conflict update. The separate “every field differs” assertion
+prevents a future fixture edit from accidentally taking those teeth away.
+
+**Scope note.** Do not change the migration, `Gemini`, context, or the settings UI. Keep the
+temporary `#[allow(dead_code)]` on `settings::ai_model`: `ALL` remains unused until the
+picker in Step 5. Step 3c is next and passes `settings.ai_model.api_name()` into Gemini.
