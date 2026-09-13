@@ -905,3 +905,108 @@ the keychain reactive. Step 5 consumes `Option<Rc<dyn SecretStore>>` and
 `load_gemini` and replaces the provider immediately. Changing `settings.ai_model` needs no
 extra call because the memo-driven effect handles it. Do not add key validation here — the
 first real request in Phase 19 remains the validator.
+
+---
+
+## Step 5a — Pick the model
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**The crux.** The model is not a secret, so this slice should travel through the ordinary
+`Settings` signal rather than the keychain. The persistence effect and the model-only memo
+from earlier steps already observe that signal: the picker only has to write one `AiModel`,
+and the existing pipeline saves it and rebuilds any present provider.
+
+**Check first (`cargo test settings::ai_model::test::each_ai_model_has_a_reader_facing_label`).**
+Add this pure test beside the existing `AiModel` tests before adding the method:
+
+```rust
+#[test]
+fn each_ai_model_has_a_reader_facing_label() {
+    assert_eq!(
+        AiModel::ALL.map(AiModel::label),
+        ["Flash-Lite", "Flash"]
+    );
+}
+```
+
+Run the focused test. It fails to compile because `AiModel::label` does not exist yet.
+
+The UI behavior is a specific desktop eyeball under `dx serve --platform desktop`:
+
+1. Open a book and then the reading-settings popover.
+2. Confirm a visible **AI model** label and two choices, **Flash-Lite** and **Flash**, with
+   Flash-Lite selected on a default database.
+3. Pick Flash, close and reopen the popover, and confirm Flash remains selected.
+4. Quit and relaunch the app, reopen the book and popover, and confirm Flash is still
+   selected.
+
+Before the implementation there is no model control, so the first visual check is plainly
+red. Afterward, run the focused test, `cargo test`, `cargo clippy --all-targets`, and the
+desktop check above.
+
+**Minimal implementation.** In `src/settings/ai_model.rs`, add the reader-facing name next
+to `slug` and `api_name`:
+
+```rust
+pub(crate) fn label(self) -> &'static str {
+    match self {
+        AiModel::FlashLite => "Flash-Lite",
+        AiModel::Flash => "Flash",
+    }
+}
+```
+
+In `src/ui/settings.rs`, import `AiModel`, add a small `AiModelPicker` component, and place
+it beside the existing font and theme pickers in `SettingsPopover`:
+
+```rust
+#[component]
+pub(crate) fn AiModelPicker() -> Element {
+    let mut settings = use_context::<Signal<Settings>>();
+
+    rsx! {
+        label {
+            "AI model"
+            select {
+                onchange: move |event| {
+                    settings.write().ai_model = AiModel::from_slug(&event.data.value());
+                },
+                for model in AiModel::ALL {
+                    option {
+                        key: "{model.slug()}",
+                        value: model.slug(),
+                        selected: model == settings().ai_model,
+                        {model.label()}
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+Remove the temporary `#[allow(dead_code)]` from the `ai_model` module declaration in
+`src/settings/mod.rs`: this step makes `ALL` part of the running app. Keep this picker
+dedicated instead of forcing the generic `SlugPicker` to display labels that differ from
+stored slugs; changing that shared component would make a two-choice slice touch the font
+and theme controls too.
+
+**Why it works.** `AiModel` is `Copy`, so the loop and comparison move only a tiny enum.
+Each option writes its stable slug into the DOM but shows a separate reader-facing label;
+changing product copy later therefore cannot corrupt persisted values. The `onchange`
+handler converts the selected slug back to the enum and mutates the existing context
+signal. That write wakes the database effect, while the memo from Step 4 only notifies the
+provider effect when `ai_model` itself changes rather than on unrelated typography edits.
+
+The input is nested in its visible `label`, giving the select an accessible name without
+adding an ID or broadening the reusable picker API. The relaunch check crosses the whole
+path that unit tests cover only in pieces: picker → settings signal → SQLite → startup
+load → selected option.
+
+**Scope note.** This step does not read, save, display, or forget an API key, and it does
+not run the iOS interaction check. Steps 5b–5d add those secret-specific states and close
+the phase's native-platform verification. An absent provider is expected while exercising
+this picker without a stored key; the same model choice will be used when a provider later
+becomes available.

@@ -1,4 +1,3 @@
-#[allow(dead_code)]
 pub mod ai_model;
 pub mod font;
 pub mod theme;

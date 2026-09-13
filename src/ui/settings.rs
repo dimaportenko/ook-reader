@@ -3,8 +3,9 @@ use dioxus_primitives::ContentAlign;
 
 use crate::{
     settings::{
-        Settings, FONT_SIZE_MAX, FONT_SIZE_MIN, LINE_HEIGHT_MAX, LINE_HEIGHT_MIN,
-        MAX_LINE_LENGTH_MAX, MAX_LINE_LENGTH_MIN, PAGE_MARGINS_MAX, PAGE_MARGINS_MIN,
+        ai_model::AiModel, Settings, FONT_SIZE_MAX, FONT_SIZE_MIN, LINE_HEIGHT_MAX,
+        LINE_HEIGHT_MIN, MAX_LINE_LENGTH_MAX, MAX_LINE_LENGTH_MIN, PAGE_MARGINS_MAX,
+        PAGE_MARGINS_MIN,
     },
     ui::{
         components::{
@@ -117,6 +118,30 @@ pub(crate) fn MaxLineLengthControl() -> Element {
     }
 }
 
+#[component]
+pub(crate) fn AiModelPicker() -> Element {
+    let mut settings = use_context::<Signal<Settings>>();
+
+    rsx! {
+        label {
+            "AI model"
+            select {
+                onchange: move |event| {
+                    settings.write().ai_model = AiModel::from_slug(&event.data.value());
+                },
+                for model in AiModel::ALL {
+                    option {
+                        key: "{model.slug()}",
+                        value: model.slug(),
+                        selected: model == settings().ai_model,
+                        {model.label()}
+                    }
+                }
+            }
+        }
+    }
+}
+
 pub(crate) fn SettingsPopover() -> Element {
     rsx! {
         PopoverRoot {
@@ -136,6 +161,7 @@ pub(crate) fn SettingsPopover() -> Element {
                     MaxLineLengthControl {}
                     FontFamilyPicker {}
                     ThemePicker {}
+                    AiModelPicker {}
                 }
             }
         }

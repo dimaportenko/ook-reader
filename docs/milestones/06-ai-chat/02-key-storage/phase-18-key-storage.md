@@ -68,7 +68,16 @@ Detail for each lives in [`phase-18-key-storage-steps.md`](phase-18-key-storage-
       on launch into `Signal<Option<Gemini>>`, and provides both through context; a helper
       rebuilds the provider when the key or model changes; `#[test]` on the helper,
       `dx serve` for the wiring.
-- [ ] **5. The settings row** — key input + *set / not set* + forget button + model picker
-      in `SettingsPopover`; `dx serve` eyeball on desktop, simulator check on iOS.
+- [ ] **5a. Pick the model** — a labelled Flash-Lite / Flash picker in
+      `SettingsPopover`; its choice persists and rebuilds a present provider; `#[test]` on
+      the reader-facing labels and a `dx serve` desktop eyeball.
+- [ ] **5b. Show key status** — the settings row distinguishes *key set*, *not set*, and an
+      unavailable secret store without reading the key into UI state; `dx serve` eyeball.
+- [ ] **5c. Save a key** — password input + save button write through `SecretStore`, clear
+      the input, and refresh the provider and status immediately; `#[test]` with `Memory`
+      plus a desktop eyeball.
+- [ ] **5d. Forget the key and verify native persistence** — forget clears the store,
+      provider, and status; verify save, relaunch, forget, and model persistence under
+      `dx serve` on desktop and with the iOS simulator.
 - [ ] **6. Review and refactor** — punch-list over `src/secrets/` and the touched files,
       suite green, clippy clean.

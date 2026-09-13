@@ -29,6 +29,13 @@ impl AiModel {
             AiModel::Flash => "gemini-3.5-flash",
         }
     }
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            AiModel::FlashLite => "Flash-Lite",
+            AiModel::Flash => "Flash",
+        }
+    }
 }
 
 #[cfg(test)]
@@ -51,5 +58,10 @@ mod test {
     fn each_choice_names_its_stable_gemini_model() {
         assert_eq!(AiModel::FlashLite.api_name(), "gemini-3.5-flash-lite");
         assert_eq!(AiModel::Flash.api_name(), "gemini-3.5-flash");
+    }
+
+    #[test]
+    fn each_ai_model_has_a_reader_facing_label() {
+        assert_eq!(AiModel::ALL.map(AiModel::label), ["Flash-Lite", "Flash"]);
     }
 }
