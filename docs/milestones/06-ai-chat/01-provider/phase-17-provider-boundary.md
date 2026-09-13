@@ -65,4 +65,5 @@ Detail for each lives in
 - [x] **5. The HTTP call** — `reqwest` joins 3 and 4 inside `impl ChatProvider for Gemini`;
       `#[ignore]` test with `GEMINI_API_KEY`. Also `dx build --platform ios` to catch TLS.
       Committed in `2fa9bfe`, **149 tests green**, live test passed.
-- [ ] **6. Review and refactor** — punch-list over `src/ai/`, suite green, clippy clean.
+- [x] **6. Review and refactor** — punch-list over `src/ai/`, suite green, clippy clean.
+       Committed in `2b9e826`, **149 tests green, 1 ignored**, clippy clean.

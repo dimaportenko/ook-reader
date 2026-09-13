@@ -792,7 +792,7 @@ needing one, the change is a feature, not a refactor.
 
 ### Punch-list
 
-- [ ] **1. Silence the dead-code storm honestly.** `src/main.rs`: `#[allow(dead_code)] mod ai;`
+- [x] **1. Silence the dead-code storm honestly.** `src/main.rs`: `#[allow(dead_code)] mod ai;`
   — with a comment saying *until Phase 19 wires the chat panel*. Step 1 planned exactly this.
   A module-level `allow` is one line to remove later; twenty-four `#[allow]`s sprinkled over
   items would each need remembering. Do not "fix" the warnings by making everything `pub` —
@@ -878,3 +878,5 @@ second provider will be written from, so its shape is worth getting right once.
 > learner"; both were kept deliberately, since teaching the lifetime and `fmt::Write` idioms is
 > the point of the pass. The `#[allow(dead_code)]` landed without the planned comment, per the
 > no-agent-comments rule — add it by hand.
+
+> **Status:** done — committed in `2b9e826` (149 tests green, 1 ignored; clippy clean).
