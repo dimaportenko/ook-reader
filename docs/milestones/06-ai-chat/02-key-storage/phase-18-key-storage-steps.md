@@ -1177,6 +1177,9 @@ forget and runs the native persistence check on desktop and the iOS simulator.
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
 
+> **Status:** done — committed in `269fcbc` (166 tests green, 2 ignored; clippy clean;
+> desktop eyeball confirmed save, status flip, and relaunch).
+
 **The crux.** Saving is the one moment the key is legitimately in UI hands: it has to pass
 through an input to reach the store. The step's job is to make that moment as short as
 possible — the draft lives in a component-local signal, is handed to the store on one

@@ -73,7 +73,7 @@ Detail for each lives in [`phase-18-key-storage-steps.md`](phase-18-key-storage-
       the reader-facing labels and a `dx serve` desktop eyeball.
 - [x] **5b. Show key status** — the settings row distinguishes *key set*, *not set*, and an
       unavailable secret store without reading the key into UI state; `dx serve` eyeball.
-- [ ] **5c. Save a key** — password input + save button write through `SecretStore`, clear
+- [x] **5c. Save a key** — password input + save button write through `SecretStore`, clear
       the input, and refresh the provider and status immediately; `#[test]` with `Memory`
       plus a desktop eyeball.
 - [ ] **5d. Forget the key and verify native persistence** — forget clears the store,
