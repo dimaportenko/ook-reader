@@ -157,10 +157,22 @@ fn App() -> Element {
     }
 }
 
+fn gemini_for(key: String, model: AiModel) -> Gemini {
+    Gemini::new(key).with_model(model.api_name())
+}
+
 fn load_gemini(store: &dyn SecretStore, model: AiModel) -> Result<Option<Gemini>, SecretError> {
-    Ok(store
-        .get(GEMINI_API_KEY)?
-        .map(|key| Gemini::new(key).with_model(model.api_name())))
+    Ok(store.get(GEMINI_API_KEY)?.map(|key| gemini_for(key, model)))
+}
+
+pub(crate) fn save_gemini_key(
+    store: &dyn SecretStore,
+    key: &str,
+    model: AiModel,
+) -> Result<Gemini, SecretError> {
+    let key = key.trim();
+    store.set(GEMINI_API_KEY, key)?;
+    Ok(gemini_for(key.to_owned(), model))
 }
 
 #[cfg(test)]
@@ -186,6 +198,18 @@ mod test {
         assert!(load_gemini(&store, AiModel::Flash)
             .expect("read after forgetting")
             .is_none());
+    }
+
+    #[test]
+    fn saving_a_key_stores_it_trimmed_and_readies_a_provider() {
+        let store = secrets::Memory::default();
+
+        save_gemini_key(&store, "  key\n", AiModel::Flash).expect("save the key");
+
+        assert_eq!(
+            store.get(GEMINI_API_KEY).expect("read back").as_deref(),
+            Some("key")
+        );
     }
 
     #[test]

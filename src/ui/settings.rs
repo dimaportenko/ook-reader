@@ -5,6 +5,7 @@ use dioxus_primitives::ContentAlign;
 
 use crate::{
     ai::gemini::Gemini,
+    save_gemini_key,
     secrets::SecretStore,
     settings::{
         ai_model::AiModel, Settings, FONT_SIZE_MAX, FONT_SIZE_MIN, LINE_HEIGHT_MAX,
@@ -18,6 +19,7 @@ use crate::{
         },
         font::FontFamilyPicker,
         theme::ThemePicker,
+        OrLog,
     },
 };
 
@@ -174,7 +176,9 @@ impl KeyStatus {
 #[component]
 pub(crate) fn ApiKeyControl() -> Element {
     let store = use_context::<Option<Rc<dyn SecretStore>>>();
-    let provider = use_context::<Signal<Option<Gemini>>>();
+    let mut provider = use_context::<Signal<Option<Gemini>>>();
+    let settings = use_context::<Signal<Settings>>();
+    let mut draft = use_signal(String::new);
     let status = KeyStatus::of(store.is_some(), provider.read().is_some());
 
     rsx! {
@@ -183,6 +187,24 @@ pub(crate) fn ApiKeyControl() -> Element {
             span {
                 style: "padding: 0 0.5rem",
                 {status.label()}
+            }
+            if let Some(store) = store {
+                input {
+                    r#type: "password",
+                    value: "{draft}",
+                    oninput: move |event| draft.set(event.data.value()),
+                }
+                button {
+                    disabled: draft.read().trim().is_empty(),
+                    onclick: move |_| {
+                        let saved = save_gemini_key(store.as_ref(), &draft.read(), settings().ai_model);
+                        if let Some(gemini) = saved.or_log("save the Gemini API key") {
+                            provider.set(Some(gemini));
+                            draft.set(String::new());
+                        }
+                    },
+                    "Save"
+                }
             }
         }
     }

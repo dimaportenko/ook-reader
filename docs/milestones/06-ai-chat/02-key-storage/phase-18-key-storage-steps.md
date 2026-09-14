@@ -1169,3 +1169,207 @@ Mount `ApiKeyControl {}` after `AiModelPicker {}` in `SettingsPopover`.
 **Scope note.** No input, no save, no forget: 5c adds the password input and save button
 and replaces the provider so this row flips to **Key set** without a relaunch; 5d adds
 forget and runs the native persistence check on desktop and the iOS simulator.
+
+---
+
+## Step 5c — Save a key
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**The crux.** Saving is the one moment the key is legitimately in UI hands: it has to pass
+through an input to reach the store. The step's job is to make that moment as short as
+possible — the draft lives in a component-local signal, is handed to the store on one
+click, and is cleared the instant the save succeeds — and to make the row react without a
+relaunch. Step 4's effect cannot do that: it reruns on the *model* memo, and the keychain is
+not reactive, so a save has nothing to wake it. The handler therefore replaces the provider
+signal itself, and the status row from 5b re-renders because it already reads that signal.
+
+**Check first (`cargo test test::saving_a_key_stores_it_trimmed_and_readies_a_provider`).**
+Add this beside `a_stored_key_controls_provider_availability` in `src/main.rs`'s test
+module before writing the helper:
+
+```rust
+#[test]
+fn saving_a_key_stores_it_trimmed_and_readies_a_provider() {
+    let store = secrets::Memory::default();
+
+    save_gemini_key(&store, "  key\n", AiModel::Flash).expect("save the key");
+
+    assert_eq!(
+        store.get(GEMINI_API_KEY).expect("read back").as_deref(),
+        Some("key")
+    );
+}
+```
+
+Observed red: `error[E0425]: cannot find function save_gemini_key in this scope`.
+
+The UI half is a desktop eyeball under `dx serve --platform desktop`:
+
+1. Open a book and the reading-settings popover. Below **Gemini API key · Not set** there
+   is now a masked input and a **Save** button, disabled while the input is empty.
+2. Type anything, click **Save**: the input clears and the status flips to **Key set**
+   without a relaunch.
+3. Quit, relaunch, reopen the popover: still **Key set** (Step 4's launch path read it
+   back from the keychain).
+4. Clean up until 5d adds *forget*:
+   `security delete-generic-password -s com.dimaportenko.ook-reader -a gemini-api-key`.
+
+**Minimal implementation.** In `src/main.rs`, pull the *key → provider* rule out of
+`load_gemini` so the save path can share it without re-reading the store, and add the
+save helper beside it:
+
+```rust
+fn gemini_for(key: String, model: AiModel) -> Gemini {
+    Gemini::new(key).with_model(model.api_name())
+}
+
+fn load_gemini(store: &dyn SecretStore, model: AiModel) -> Result<Option<Gemini>, SecretError> {
+    Ok(store.get(GEMINI_API_KEY)?.map(|key| gemini_for(key, model)))
+}
+
+pub(crate) fn save_gemini_key(
+    store: &dyn SecretStore,
+    key: &str,
+    model: AiModel,
+) -> Result<Gemini, SecretError> {
+    let key = key.trim();
+    store.set(GEMINI_API_KEY, key)?;
+    Ok(gemini_for(key.to_owned(), model))
+}
+```
+
+In `src/ui/settings.rs`, import `crate::save_gemini_key` and `ui::OrLog`, then grow
+`ApiKeyControl` in place:
+
+```rust
+#[component]
+pub(crate) fn ApiKeyControl() -> Element {
+    let store = use_context::<Option<Rc<dyn SecretStore>>>();
+    let mut provider = use_context::<Signal<Option<Gemini>>>();
+    let settings = use_context::<Signal<Settings>>();
+    let mut draft = use_signal(String::new);
+    let status = KeyStatus::of(store.is_some(), provider.read().is_some());
+
+    rsx! {
+        div {
+            "Gemini API key"
+            span {
+                style: "padding: 0 0.5rem",
+                {status.label()}
+            }
+            if let Some(store) = store {
+                input {
+                    r#type: "password",
+                    value: "{draft}",
+                    oninput: move |event| draft.set(event.data.value()),
+                }
+                button {
+                    disabled: draft.read().trim().is_empty(),
+                    onclick: move |_| {
+                        let saved = save_gemini_key(store.as_ref(), &draft.read(), settings().ai_model);
+                        if let Some(gemini) = saved.or_log("save the Gemini API key") {
+                            provider.set(Some(gemini));
+                            draft.set(String::new());
+                        }
+                    },
+                    "Save"
+                }
+            }
+        }
+    }
+}
+```
+
+**Why it works.**
+
+- **The helper lives at the composition root.** `save_gemini_key` sits beside
+  `load_gemini` in `main.rs` because it is the same join — `SecretStore` + `AiModel` →
+  `Gemini` — seen from the other direction. `secrets` stays a generic key/value boundary
+  that knows nothing about Gemini; the UI stays a caller that never constructs a provider.
+  `pub(crate)` on the save helper is the one opening in that wall.
+- **`gemini_for` is the rule both paths share.** Load and save each end in *a key plus a
+  model becomes a provider*. Naming that once means the two cannot drift if a later step
+  adds, say, a base URL; and the save path can build its provider from the key it already
+  holds instead of paying a second keychain round trip to read back what it just wrote.
+  That is also why `save_gemini_key` returns `Result<Gemini, _>` and not
+  `Result<Option<Gemini>, _>` — after a successful `set` there is no "missing" case to
+  represent.
+- **`trim()` at the human-input boundary.** A password field cannot show a stray trailing
+  space from a paste, and the key would only fail on the first real request in Phase 19
+  with an error that looks like a bad key. Trimming lives in the save helper — not in
+  `SecretStore::set` (too generic; it would silently reshape any secret) and not in
+  `Gemini::new` (which also takes keys from the env var in the `#[ignore]` test). The test
+  pins it by round-tripping `"  key\n"` and reading back `"key"`.
+- **`if let Some(store) = store` in rsx.** When the native store never opened there is
+  nothing a save could do, so the input and button are not rendered at all rather than
+  rendered disabled. It also means the handler holds an `Rc<dyn SecretStore>`, not an
+  `Option`, and has no unreachable `else` branch. `status` is computed first, from a borrow;
+  the `if let` then moves `store` into the block, and the `move` closure takes it from
+  there. `Rc<dyn SecretStore>` is `'static`, which is what a stored event handler needs.
+- **`&draft.read()` and the borrow's end.** The guard returned by `read()` is a temporary
+  in the `let saved = …;` statement, so it drops at the semicolon — before the
+  `draft.set(String::new())` that follows. Holding it across that write would be a
+  runtime borrow panic, which is why the save result is bound first and the branch comes
+  after.
+- **Only success clears the draft and replaces the provider.** `or_log` turns an `Err`
+  into `None` after printing it; the `if let` then skips both writes, so a failed keychain
+  write leaves the typed key in the field for a retry and leaves any existing provider
+  untouched. `provider.set(Some(gemini))` is what flips 5b's row: the row read the signal
+  through `provider.read()`, so it is subscribed, and replacing the value re-renders it.
+- **`settings().ai_model` in the handler.** `Settings` is `Copy`, so calling the signal is a
+  cheap copy, and reads inside an event handler do not subscribe anything — the handler
+  runs outside a reactive scope. The model is read at click time, so the provider is
+  built for whatever the picker currently says.
+- **`value: "{draft}"` makes the input controlled.** Dioxus writes the `value` property
+  from the signal on every render, so `draft.set(String::new())` empties the field; the
+  same signal drives `disabled` on the button, so the button greys out again the moment
+  the field is cleared.
+
+**Forks taken.**
+
+- *Build the provider from the key in hand* versus *re-read through `load_gemini`*. The
+  first draft did the re-read — "the store is the source of truth, reload after every
+  write" — which reused `load_gemini` verbatim. The simplify pass rejected it: it costs a
+  second keychain call per save and, worse, hands the call site a
+  `Result<Option<Gemini>, _>` whose inner `None` can never happen, so the handler ended up
+  peeling an `Option<Option<Gemini>>` with a binding named `gemini` that was really an
+  `Option`. Extracting `gemini_for` gives the reuse without the phantom case.
+- *Hide the controls when the store is unavailable* versus *render them disabled*. 5b's
+  handoff had suggested disabling; hiding won because it removes the `Option` from the
+  handler and there is no partial state to show — you cannot type a key somewhere that
+  cannot keep it.
+- *Trim in the helper* versus *not at all*. Trimming is normalisation, not the
+  format validation the phase doc rules out; it went in because the field is masked.
+- *Composition helpers in `main.rs`* versus *a `save_gemini_key` in `ui/settings.rs`
+  calling a `pub(crate) load_gemini`*. Keeping load and save together at the root keeps
+  the UI file free of provider construction and keeps the `Memory` test beside its sibling.
+
+**Look hardest at.**
+
+- **Emptiness is enforced only by the button.** `disabled: draft.read().trim().is_empty()`
+  is the sole thing stopping an all-whitespace key from being stored as `""` and
+  activating a provider. A second caller — submit-on-Enter, say — would bypass it. If that
+  should be an invariant of `save_gemini_key` rather than of one button, the helper needs
+  a way to say "nothing to save", which reintroduces an `Option` or a new `SecretError`
+  variant. Left as a UI rule for now; a Step 6 candidate.
+- **The draft is a third `String` holding the secret.** The phase's confinement rule names
+  the store and `Gemini`; a component-local signal that is cleared on save is the smallest
+  possible exception, but it *is* one — and it survives a cancelled edit (close the
+  popover mid-typing and the draft is still in the signal until the component unmounts).
+  Worth deciding whether that is acceptable.
+- **`save_gemini_key` is `pub(crate)` on the binary root, imported as
+  `crate::save_gemini_key`.** It is the first non-module item the UI pulls from `main.rs`.
+  If 5d adds `forget_gemini_key` the same way, three helpers plus `gemini_for` start to
+  look like an `ai_provider` module — Step 6 punch-list material, not this step's.
+- **`.or_log` prints to stderr and the UI shows nothing.** A failed keychain write leaves
+  the field populated and the status unchanged, which is silent from the reader's side.
+  Consistent with how the rest of the app treats `or_log`, but the first place a user
+  action fails invisibly.
+
+**Scope note.** No forget button and no native persistence run: 5d adds *forget*
+(clearing the store, the provider, and the status), and executes the save → relaunch →
+forget check on desktop and the iOS simulator. No key validation — Phase 19's first real
+request remains the validator. The Step 4 effect is untouched: a model change still
+rebuilds a present provider on its own.
