@@ -1384,6 +1384,9 @@ rebuilds a present provider on its own.
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
 
+> **Status:** done — committed in `2b50bcd` (167 tests green, 2 ignored; clippy clean;
+> desktop and iOS persistence checks confirmed).
+
 **The crux.** Forget is save's mirror, and the mirror has a hole in it. Save had the key in
 hand and could *build* the new provider from it; forget has nothing to build — it has to
 *unbuild*. Nothing in the app will do that on its own: Step 4's effect reruns on the model
