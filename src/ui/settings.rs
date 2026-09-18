@@ -5,7 +5,7 @@ use dioxus_primitives::ContentAlign;
 
 use crate::{
     ai::gemini::Gemini,
-    save_gemini_key,
+    forget_gemini_key, save_gemini_key,
     secrets::SecretStore,
     settings::{
         ai_model::AiModel, Settings, FONT_SIZE_MAX, FONT_SIZE_MIN, LINE_HEIGHT_MAX,
@@ -196,14 +196,33 @@ pub(crate) fn ApiKeyControl() -> Element {
                 }
                 button {
                     disabled: draft.read().trim().is_empty(),
-                    onclick: move |_| {
-                        let saved = save_gemini_key(store.as_ref(), &draft.read(), settings().ai_model);
-                        if let Some(gemini) = saved.or_log("save the Gemini API key") {
-                            provider.set(Some(gemini));
-                            draft.set(String::new());
+                    onclick: {
+                        let store = store.clone();
+                        move |_| {
+                            let saved = save_gemini_key(store.as_ref(), &draft.read(), settings().ai_model);
+                            if let Some(gemini) = saved.or_log("save the Gemini API key") {
+                                provider.set(Some(gemini));
+                                draft.set(String::new());
+                            }
                         }
                     },
                     "Save"
+                }
+                if status == KeyStatus::Set {
+                    button {
+                        onclick: {
+                            let store = store.clone();
+                            move |_| {
+                                if forget_gemini_key(store.as_ref())
+                                    .or_log("forget the Gemini API key")
+                                    .is_some()
+                                {
+                                    provider.set(None);
+                                }
+                            }
+                        },
+                        "Forget"
+                    }
                 }
             }
         }

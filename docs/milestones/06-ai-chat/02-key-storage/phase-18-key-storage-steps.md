@@ -1376,3 +1376,176 @@ pub(crate) fn ApiKeyControl() -> Element {
 forget check on desktop and the iOS simulator. No key validation — Phase 19's first real
 request remains the validator. The Step 4 effect is untouched: a model change still
 rebuilds a present provider on its own.
+
+---
+
+## Step 5d — Forget the key and verify native persistence
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**The crux.** Forget is save's mirror, and the mirror has a hole in it. Save had the key in
+hand and could *build* the new provider from it; forget has nothing to build — it has to
+*unbuild*. Nothing in the app will do that on its own: Step 4's effect reruns on the model
+memo, and the keychain is not reactive, so emptying it wakes nobody. The handler therefore
+does both halves itself — tells the store to drop the secret, then sets the provider signal
+to `None`. The status row from 5b reads that signal, so it flips to **Not set** without a
+relaunch. And because the `Gemini` in the signal was the last copy of the key in process
+memory, `provider.set(None)` is also the moment the secret is gone from the running app.
+
+The second, smaller point is Rust's: two event handlers now need the same
+`Rc<dyn SecretStore>`. A Dioxus handler is `'static` and owns what it captures, so each one
+gets its own clone of the handle — the `Rc` exists precisely so that is cheap.
+
+**Check first (`cargo test test::forgetting_a_key_leaves_nothing_for_the_next_launch_to_read`).**
+Add beside the 5c test in `src/main.rs`'s test module before writing the helper:
+
+```rust
+#[test]
+fn forgetting_a_key_leaves_nothing_for_the_next_launch_to_read() {
+    let store = secrets::Memory::default();
+    save_gemini_key(&store, "key", AiModel::Flash).expect("save the key");
+
+    forget_gemini_key(&store).expect("forget the key");
+
+    assert!(load_gemini(&store, AiModel::Flash)
+        .expect("read after forgetting")
+        .is_none());
+}
+```
+
+Observed red: `error[E0425]: cannot find function forget_gemini_key in this scope`.
+
+The rest of the step is the phase's acceptance run, on desktop first
+(`dx serve --platform desktop`):
+
+1. Open a book and the reading-settings popover. With no stored key the row reads
+   **Not set**, with the masked input and **Save** — and no **Forget**.
+2. Type anything, **Save**: the status flips to **Key set** and a **Forget** button appears.
+3. Pick **Flash** in **AI model**. Quit, relaunch, reopen the popover: still **Key set**,
+   still **Flash** — the key came back from the keychain, the model from SQLite.
+4. **Forget**: the status flips to **Not set** and the button disappears, no relaunch.
+5. Quit, relaunch: still **Not set**. `security find-generic-password -s
+   com.dimaportenko.ook-reader -a gemini-api-key` reports *could not be found*.
+
+Then the same five steps on the iOS simulator (`just serve-ios`), where the store is the
+data-protection keychain behind the app's entitlement — the half of the phase goal that
+`cargo test` cannot reach. Step 5 there is the app alone; there is no `security` CLI for the
+simulator keychain.
+
+**Minimal implementation.** In `src/main.rs`, beside `save_gemini_key`:
+
+```rust
+pub(crate) fn forget_gemini_key(store: &dyn SecretStore) -> Result<(), SecretError> {
+    store.forget(GEMINI_API_KEY)
+}
+```
+
+In `src/ui/settings.rs`, import `forget_gemini_key` next to `save_gemini_key`, give the
+**Save** handler its own clone of the store, and add the **Forget** button after it inside
+the `if let Some(store) = store` block:
+
+```rust
+button {
+    disabled: draft.read().trim().is_empty(),
+    onclick: {
+        let store = store.clone();
+        move |_| {
+            let saved = save_gemini_key(store.as_ref(), &draft.read(), settings().ai_model);
+            if let Some(gemini) = saved.or_log("save the Gemini API key") {
+                provider.set(Some(gemini));
+                draft.set(String::new());
+            }
+        }
+    },
+    "Save"
+}
+if status == KeyStatus::Set {
+    button {
+        onclick: {
+            let store = store.clone();
+            move |_| {
+                if forget_gemini_key(store.as_ref())
+                    .or_log("forget the Gemini API key")
+                    .is_some()
+                {
+                    provider.set(None);
+                }
+            }
+        },
+        "Forget"
+    }
+}
+```
+
+**Why it works.**
+
+- **`forget_gemini_key` is a one-line wrapper on purpose.** All it adds over
+  `store.forget(GEMINI_API_KEY)` is *which* secret — and that is the point. `load_gemini`
+  and `save_gemini_key` already keep the secret's name at the composition root; if the UI
+  called `store.forget` directly it would need to import `GEMINI_API_KEY`, and the name
+  would live in two layers. The test pins that all three helpers agree on it: save through
+  one, forget through another, and the launch path finds nothing.
+- **`onclick: { let store = store.clone(); move |_| … }`.** The block is an expression: it
+  clones the `Rc`, then evaluates to a closure that moves the clone in. Both handlers use
+  this shape, so neither depends on the other, and the original `store` bound by
+  `if let Some(store)` is simply dropped at the end of the block. The alternative — move
+  `store` into one handler and clone for the other — compiles only for the order `rsx!`
+  happens to build things in (dynamic nodes, such as the `if status == …` block, are
+  constructed before dynamic attributes such as `onclick`), which is not a fact a reader
+  should need.
+- **`if status == KeyStatus::Set`.** Inside the `if let Some(store)` block the store is
+  open, so `Set` is exactly "the provider is `Some`" — 5b's enum was written so this branch
+  could name the state instead of re-reading the signal. `KeyStatus` is `Copy` and
+  `PartialEq`, so the comparison is free and the `status` binding is still usable by the
+  label above.
+- **`provider.set(None)` only on success.** `or_log` turns an `Err` from the keychain into
+  `None` after printing it; `.is_some()` on the resulting `Option<()>` is "did it work".
+  A failed delete leaves the provider in place, so the row keeps saying **Key set** — which
+  is the truth, since the key is still in the keychain.
+- **Why the row updates.** Nothing here touches the label directly. `ApiKeyControl` read
+  `provider` through `provider.read()` when it computed `status`, so it is subscribed;
+  `provider.set(None)` marks it dirty, it re-renders, `KeyStatus::of(true, false)` yields
+  `NotSet`, and the `if status == KeyStatus::Set` node unmounts the button that was just
+  clicked. Removing the element whose handler is running is fine — the handler already has
+  its own `Rc` and `Signal` copies, and the runtime finishes the event before applying the
+  re-render.
+- **The Step 4 effect stays out of it.** It never reads `ai_provider`, only `ai_model()`,
+  so setting the provider from a handler does not re-trigger it and does not cost a second
+  keychain read. It still does its job when the model changes: with the provider gone it
+  finds no key and leaves `None`; after a save it rebuilds from the stored key.
+
+**Forks taken.**
+
+- *Forget alongside the input* versus *forget instead of it*. An `if/else` on `status`
+  (input + Save when not set, Forget alone when set) would need only one closure per branch
+  and no clones. It went the other way because rotating a key should be one paste, not
+  forget-then-save; the price is the two `Rc` clones.
+- *A wrapper at the root* versus *`store.forget(GEMINI_API_KEY)` in the handler*. See above:
+  the name stays in one layer.
+- *Clone into both handlers* versus *move into one*. Order-independent won over one line
+  shorter — the `simplify` pass agreed and left both clones.
+- *Keep the draft on forget* versus *clear it*. A half-typed replacement key is not what
+  Forget is about; it stays so the reader can still Save it.
+
+**Look hardest at.**
+
+- **A silent failure looks like a stuck button.** If the keychain refuses the delete, the
+  only trace is a line on stderr; the row still reads **Key set** and Forget stays. Correct,
+  and consistent with 5c's save, but this is now two user actions that can fail invisibly.
+- **The pairing is by convention.** Save mutates the store then sets the provider; forget
+  does the same in the other direction; nothing makes a third caller do both. The altitude
+  review named this as the Step 6 punch-list item: an `ai_provider` module (or a small type
+  owning the store and the signal, exposing `save`/`forget`) so a store write cannot happen
+  without the provider following — the same reshaping of Step 4's boundary that 5b's
+  `(false, true)` arm and 5c's `pub(crate)` helpers already pointed at.
+- **The test overlaps `a_stored_key_controls_provider_availability`.** That test proves the
+  raw `store.forget` path; this one proves the wrapper agrees on the name. Two tests for one
+  line is the cost of the wrapper — if Step 6 folds the helpers into a module, the two
+  probably merge.
+
+**Scope note.** No confirmation before forgetting — one click, no undo, on the grounds that
+re-entering a key is cheap. No UI for the failure path beyond stderr. The `if let`, the
+label, and 5b's enum are untouched. Step 6 is the punch-list: the store/provider pairing
+above, 5b's unreachable `(false, true)` arm, 5c's "emptiness is only enforced by the
+button", and whether the helpers on the binary root deserve a module.

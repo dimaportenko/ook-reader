@@ -12,7 +12,12 @@ validate:
     cargo test && cargo clippy --all-targets
 
 serve-desktop:
-    dx serve --platform desktop
+    #!/usr/bin/env bash
+    set -euo pipefail
+    entitlements=$(mktemp)
+    trap 'rm -f "$entitlements"' EXIT
+    plutil -create xml1 "$entitlements"
+    dx serve --platform desktop --codesign --apple-team-id 70478F49E6BA83927FF78D2C6F8C7A66D1F7C5CF --apple-entitlements "$entitlements"
 
 boot-ios:
     #!/usr/bin/env bash

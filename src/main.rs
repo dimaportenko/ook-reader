@@ -175,6 +175,10 @@ pub(crate) fn save_gemini_key(
     Ok(gemini_for(key.to_owned(), model))
 }
 
+pub(crate) fn forget_gemini_key(store: &dyn SecretStore) -> Result<(), SecretError> {
+    store.forget(GEMINI_API_KEY)
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -210,6 +214,18 @@ mod test {
             store.get(GEMINI_API_KEY).expect("read back").as_deref(),
             Some("key")
         );
+    }
+
+    #[test]
+    fn forgetting_a_key_leaves_nothing_for_the_next_launch_to_read() {
+        let store = secrets::Memory::default();
+        save_gemini_key(&store, "key", AiModel::Flash).expect("save the key");
+
+        forget_gemini_key(&store).expect("forget the key");
+
+        assert!(load_gemini(&store, AiModel::Flash)
+            .expect("read after forgetting")
+            .is_none());
     }
 
     #[test]
