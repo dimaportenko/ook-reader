@@ -1552,3 +1552,107 @@ re-entering a key is cheap. No UI for the failure path beyond stderr. The `if le
 label, and 5b's enum are untouched. Step 6 is the punch-list: the store/provider pairing
 above, 5b's unreachable `(false, true)` arm, 5c's "emptiness is only enforced by the
 button", and whether the helpers on the binary root deserve a module.
+
+---
+
+## Step 6 — Review and refactor
+
+> **Written by:** `lbb:next-implement` — items 1–4 applied by the agent, reviewed by hand;
+> item 5 (comments and naming) left to the learner, since it edits their comments.
+
+**What it is.** The phase closes by stepping back over `src/secrets/` and the files the
+phase reached into — `main.rs`, `ui/settings.rs`, `ai/gemini.rs` — with working code in
+hand. Nothing here changes behaviour: the 167 tests are the spec, and the acceptance run
+from Step 5d is the eyeball check. Work the list top to bottom, running `cargo test` after
+each item, and tick as you go.
+
+**Check (`cargo test && cargo clippy --all-targets`)** — the safety net, not a target.
+Before you start: 167 passed, 2 ignored, 0 warnings (the `block v0.1.6` future-incompat
+note is upstream). After every item: the same 167 passed, 2 ignored, 0 warnings. Tests
+*move* under items 2 and 3; none are added or dropped. If an item seems to need a new test,
+it is a feature — split it out.
+
+### Punch-list
+
+- [x] **1. Retire `#[allow(dead_code)] mod secrets;`.** Step 1 put it there because nothing
+  used the module yet. Now `Keychain`, the trait, the error, and `GEMINI_API_KEY` are all
+  on the launch path — the only thing left unused outside tests is `Memory` (delete the
+  `allow` and clippy says exactly that). So say it honestly: `Memory` and its
+  `impl SecretStore` become `#[cfg(test)]`. It is a test double; compiling it into the app
+  binary was never the point, and a `cfg(test)` on the struct tells the next reader
+  that in one token where a module-wide `allow` hid it.
+
+- [x] **2. Lift the Gemini key helpers out of `main.rs` into `src/gemini_key/mod.rs`.**
+  `gemini_for`, `load_gemini`, `save_gemini_key`, `forget_gemini_key` and their three tests
+  move; `main.rs` keeps only the wiring. The smell that motivates it is in
+  `ui/settings.rs`: `use crate::{forget_gemini_key, save_gemini_key}` — a leaf importing
+  from the crate root. The root is supposed to depend on the leaves, not feed them. The
+  new module is the recorded design in file form: *`ai` does not know about `secrets`;
+  something above both joins them*. Name the functions for their new home —
+  `gemini_key::gemini_from(store, model)`, `gemini_key::save(store, key, model)`,
+  `gemini_key::forget(store)` — so the call sites in the UI read as a sentence.
+  `main.rs` gets `mod gemini_key;` and drops its `SecretError`/`GEMINI_API_KEY` imports,
+  which is the visible proof the secret's name now lives in one layer.
+
+- [x] **3. Give `Gemini::new` the model and delete `DEFAULT_MODEL`.** `gemini.rs` line 83
+  hard-codes `"gemini-3.5-flash-lite"`, and so does `AiModel::FlashLite.api_name()`: two
+  places agree on the default by coincidence. `ai` must not import `settings` to fix it,
+  so remove the default instead — `Gemini::new(key: String, model: impl Into<String>)`,
+  no `with_model`. Every real caller already has a model in hand (`gemini_for`); a builder
+  with a single option was more API than the phase needed. Update the two tests that call
+  `new` (`a_chosen_model_reaches_the_endpoint` and the ignored live test) to pass the
+  model explicitly. Payoff: the signature now states Step 3's decision — *the model is a
+  setting the provider is handed, not something it knows* — and `AiModel::default()` is
+  the only place the app's default model is written.
+
+- [x] **4. Move the platform `cfg` out of `main.rs` and into `secrets`.** `keychain` is
+  gated to macOS/iOS in `secrets/mod.rs`, but `main.rs` imports
+  `secrets::keychain::Keychain` unconditionally, so a Linux or Windows build fails at the
+  `use` line. Add to `secrets/mod.rs`:
+
+  ```rust
+  pub(crate) fn open_native() -> Option<Rc<dyn SecretStore>> {
+      #[cfg(any(target_os = "macos", target_os = "ios"))]
+      {
+          keychain::Keychain::new()
+              .or_log("open the secret store")
+              .map(|store| Rc::new(store) as Rc<dyn SecretStore>)
+      }
+      #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+      {
+          None
+      }
+  }
+  ```
+
+  and `main.rs` becomes `use_hook(secrets::open_native)`. The `as Rc<dyn SecretStore>`
+  cast is the unsizing coercion from Step 4, now beside the trait it erases to. The UI
+  already renders `None` as *Secret store unavailable*, so an unsupported platform degrades
+  to that row instead of failing to compile. You cannot verify the non-Apple arm on this
+  machine; verify by reading, and the Apple arm by the suite and the Step 5d run.
+  *(As landed: `open_native` imports `crate::ui::OrLog` for the log line — a `secrets` →
+  `ui` edge that did not exist before. The alternative was returning
+  `Result<Option<Rc<dyn SecretStore>>, SecretError>` and logging in `main.rs`; the flatter
+  `Option` was kept because the UI already models "no store" as `None`. Moving `OrLog` out
+  of `ui` into a small `log` module is a candidate for a later phase.)*
+
+- [ ] **5. Naming and stale comments.** In `keychain.rs`, `// keychain store key` above
+  `SERVICE` misdescribes it: it is the keychain *service* name (the `-s` you passed to
+  `security find-generic-password`), and the per-secret *account* is `name`. Reword it, or
+  drop it — the constant's name already says service. One thing genuinely worth a comment
+  of yours: `Keychain::new` calls `keyring_core::set_default_store`, which is
+  *process-global* and replaces any earlier store; it is safe only because `App` opens the
+  store once inside `use_hook`. A reader who later calls `Keychain::new()` in two places
+  should learn that from the constructor, not from a debugging session.
+
+### Why this order
+
+Item 1 is a warning-driven one-liner that warms you up on `cfg`. Item 2 changes import
+paths, so doing it before item 3 means the `Gemini::new` signature change touches one
+file's call site, not two. Item 4 depends on item 2 having emptied `main.rs` enough that
+the `use_hook(secrets::open_native)` line is the obvious shape. Item 5 is prose; do it
+last, when you know what the code turned into.
+
+**Done when** all five boxes are ticked, the suite reads 167 passed / 2 ignored, clippy is
+silent, and one save → relaunch → forget pass under `dx serve --platform desktop` behaves
+as in Step 5d. Then `lbb:commit`, and the phase status flips to done.

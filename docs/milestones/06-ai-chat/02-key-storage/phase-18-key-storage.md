@@ -76,7 +76,7 @@ Detail for each lives in [`phase-18-key-storage-steps.md`](phase-18-key-storage-
 - [x] **5c. Save a key** — password input + save button write through `SecretStore`, clear
       the input, and refresh the provider and status immediately; `#[test]` with `Memory`
       plus a desktop eyeball.
-- [ ] **5d. Forget the key and verify native persistence** — forget clears the store,
+- [x] **5d. Forget the key and verify native persistence** — forget clears the store,
       provider, and status; verify save, relaunch, forget, and model persistence under
       `dx serve` on desktop and with the iOS simulator.
 - [ ] **6. Review and refactor** — punch-list over `src/secrets/` and the touched files,

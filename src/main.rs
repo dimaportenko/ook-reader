@@ -12,9 +12,9 @@ mod db;
 #[cfg(target_os = "ios")]
 mod document_picker;
 mod epub;
+mod gemini_key;
 mod library;
 mod nav;
-#[allow(dead_code)]
 mod secrets;
 mod settings;
 mod toc;
@@ -34,8 +34,6 @@ use crate::{
     ai::gemini::Gemini,
     config::Config,
     db::Db,
-    secrets::{keychain::Keychain, SecretError, SecretStore, GEMINI_API_KEY},
-    settings::ai_model::AiModel,
     ui::{
         library::{LibraryBooks, OpenBook},
         reader::Reader,
@@ -84,11 +82,7 @@ fn App() -> Element {
         ),
     });
     let open_book = use_signal(|| None::<OpenBook>);
-    let secret_store = use_hook(|| {
-        Keychain::new()
-            .or_log("open the secret store")
-            .map(|store| Rc::new(store) as Rc<dyn SecretStore>)
-    });
+    let secret_store = use_hook(secrets::open_native);
     let mut ai_provider = use_signal(|| None::<Gemini>);
     let ai_model = use_memo(move || settings().ai_model);
 
@@ -107,7 +101,7 @@ fn App() -> Element {
         let secret_store = secret_store.clone();
         move || {
             ai_provider.set(secret_store.as_deref().and_then(|store| {
-                load_gemini(store, ai_model())
+                gemini_key::gemini_from(store, ai_model())
                     .or_log("read the Gemini API key")
                     .flatten()
             }));
@@ -157,76 +151,11 @@ fn App() -> Element {
     }
 }
 
-fn gemini_for(key: String, model: AiModel) -> Gemini {
-    Gemini::new(key).with_model(model.api_name())
-}
-
-fn load_gemini(store: &dyn SecretStore, model: AiModel) -> Result<Option<Gemini>, SecretError> {
-    Ok(store.get(GEMINI_API_KEY)?.map(|key| gemini_for(key, model)))
-}
-
-pub(crate) fn save_gemini_key(
-    store: &dyn SecretStore,
-    key: &str,
-    model: AiModel,
-) -> Result<Gemini, SecretError> {
-    let key = key.trim();
-    store.set(GEMINI_API_KEY, key)?;
-    Ok(gemini_for(key.to_owned(), model))
-}
-
-pub(crate) fn forget_gemini_key(store: &dyn SecretStore) -> Result<(), SecretError> {
-    store.forget(GEMINI_API_KEY)
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
 
     const MAIN_CSS_SOURCE: &str = include_str!("../assets/main.css");
-
-    #[test]
-    fn a_stored_key_controls_provider_availability() {
-        let store = secrets::Memory::default();
-
-        assert!(load_gemini(&store, AiModel::FlashLite)
-            .expect("read a missing key")
-            .is_none());
-
-        store.set(GEMINI_API_KEY, "key").expect("store the key");
-        assert!(load_gemini(&store, AiModel::Flash)
-            .expect("read the stored key")
-            .is_some());
-
-        store.forget(GEMINI_API_KEY).expect("forget the key");
-        assert!(load_gemini(&store, AiModel::Flash)
-            .expect("read after forgetting")
-            .is_none());
-    }
-
-    #[test]
-    fn saving_a_key_stores_it_trimmed_and_readies_a_provider() {
-        let store = secrets::Memory::default();
-
-        save_gemini_key(&store, "  key\n", AiModel::Flash).expect("save the key");
-
-        assert_eq!(
-            store.get(GEMINI_API_KEY).expect("read back").as_deref(),
-            Some("key")
-        );
-    }
-
-    #[test]
-    fn forgetting_a_key_leaves_nothing_for_the_next_launch_to_read() {
-        let store = secrets::Memory::default();
-        save_gemini_key(&store, "key", AiModel::Flash).expect("save the key");
-
-        forget_gemini_key(&store).expect("forget the key");
-
-        assert!(load_gemini(&store, AiModel::Flash)
-            .expect("read after forgetting")
-            .is_none());
-    }
 
     #[test]
     fn the_safe_area_is_only_paid_out_to_a_viewport_that_covers_it() {

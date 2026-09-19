@@ -80,8 +80,6 @@ fn reply_from(response: GenerateResponse) -> Result<Reply, ChatError> {
     }
 }
 
-const DEFAULT_MODEL: &str = "gemini-3.5-flash-lite";
-
 pub(crate) struct Gemini {
     key: String,
     model: String,
@@ -89,17 +87,12 @@ pub(crate) struct Gemini {
 }
 
 impl Gemini {
-    pub(crate) fn new(key: String) -> Self {
+    pub(crate) fn new(key: String, model: impl Into<String>) -> Self {
         Gemini {
             key,
-            model: DEFAULT_MODEL.to_string(),
+            model: model.into(),
             client: reqwest::Client::new(),
         }
-    }
-
-    pub(crate) fn with_model(mut self, model: impl Into<String>) -> Self {
-        self.model = model.into();
-        self
     }
 }
 
@@ -227,7 +220,7 @@ mod test {
 
     #[test]
     fn a_chosen_model_reaches_the_endpoint() {
-        let gemini = Gemini::new("key".to_owned()).with_model("gemini-3.5-flash");
+        let gemini = Gemini::new("key".to_owned(), "gemini-3.5-flash");
 
         assert_eq!(
             endpoint(&gemini.model),
@@ -249,7 +242,7 @@ mod test {
     #[ignore = "needs GEMINI_API_KEY and the network"]
     async fn a_real_gemini_answers_through_the_trait() {
         let key = std::env::var("GEMINI_API_KEY").expect("set GEMINI_API_KEY to run this");
-        let gemini = Gemini::new(key);
+        let gemini = Gemini::new(key, "gemini-3.5-flash-lite");
         let messages = [Message::user("Reply with exactly one word: pong")];
 
         let reply = ChatProvider::complete(&gemini, &messages).await.unwrap();

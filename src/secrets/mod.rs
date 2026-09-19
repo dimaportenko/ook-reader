@@ -1,4 +1,8 @@
+use std::rc::Rc;
+#[cfg(test)]
 use std::{cell::RefCell, collections::HashMap};
+
+use crate::ui::OrLog;
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub(crate) mod keychain;
@@ -17,11 +21,26 @@ pub(crate) trait SecretStore {
     fn forget(&self, name: &str) -> Result<(), SecretError>;
 }
 
+pub(crate) fn open_native() -> Option<Rc<dyn SecretStore>> {
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        keychain::Keychain::new()
+            .or_log("open the secret store")
+            .map(|store| Rc::new(store) as Rc<dyn SecretStore>)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+    {
+        None
+    }
+}
+
+#[cfg(test)]
 #[derive(Debug, Default)]
 pub(crate) struct Memory {
     entries: RefCell<HashMap<String, String>>,
 }
 
+#[cfg(test)]
 impl SecretStore for Memory {
     fn get(&self, name: &str) -> Result<Option<String>, SecretError> {
         Ok(self.entries.borrow().get(name).cloned())
