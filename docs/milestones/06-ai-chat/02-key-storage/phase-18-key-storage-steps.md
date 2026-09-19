@@ -1560,6 +1560,9 @@ button", and whether the helpers on the binary root deserve a module.
 > **Written by:** `lbb:next-implement` — items 1–4 applied by the agent, reviewed by hand;
 > item 5 (comments and naming) left to the learner, since it edits their comments.
 
+> **Status:** items 1–4 done — committed in `25c2ee1` (167 tests green, 2 ignored; clippy
+> clean; iOS build green). Item 5 still open; the phase closes when it lands.
+
 **What it is.** The phase closes by stepping back over `src/secrets/` and the files the
 phase reached into — `main.rs`, `ui/settings.rs`, `ai/gemini.rs` — with working code in
 hand. Nothing here changes behaviour: the 167 tests are the spec, and the acceptance run
