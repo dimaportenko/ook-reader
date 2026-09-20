@@ -2,12 +2,16 @@ use keyring_core::{Entry, Error};
 
 use super::{SecretError, SecretStore};
 
-// keychain store key
 const SERVICE: &str = "com.dimaportenko.ook-reader";
 
 pub(crate) struct Keychain;
 
 impl Keychain {
+    /// Opens the Apple keychain and installs it as `keyring-core`'s default store.
+    ///
+    /// `set_default_store` is process-global: a second call replaces the first store for
+    /// every `Entry` in the process. `App` calls this once, inside `use_hook`, and nothing
+    /// else may.
     pub(crate) fn new() -> Result<Self, SecretError> {
         #[cfg(target_os = "macos")]
         let store = apple_native_keyring_store::keychain::Store::new();
