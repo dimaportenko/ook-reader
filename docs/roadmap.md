@@ -51,7 +51,7 @@ reader can use (open a book, see text, turn a page, resume). The MVP slice seque
 
 ## Current focus
 
-**Current phase: [Phase 18 — API key storage + settings row](milestones/06-ai-chat/02-key-storage/phase-18-key-storage.md)** (opened 2026-09-13). [Phase 17](milestones/06-ai-chat/01-provider/phase-17-provider-boundary.md) closed 2026-09-13 with the `ChatProvider` boundary, a Gemini implementation and a live test green (`2b9e826`, 149 tests).
+**Current phase: none — Phase 19 (chat panel) is next, unopened.** [Phase 18](milestones/06-ai-chat/02-key-storage/phase-18-key-storage.md) closed 2026-09-20 (`3439746`, 167 tests): the Gemini key lives in the OS keychain behind a `SecretStore` trait, the settings row saves/forgets it and picks the model, and a fresh launch has a provider ready in context. [Phase 17](milestones/06-ai-chat/01-provider/phase-17-provider-boundary.md) closed 2026-09-13 (`2b9e826`, 149 tests).
 [Phase 9](milestones/04-multiplatform/01-mobile/phase-9-ios-simulator.md) is **done**: the
 reader builds, launches, imports, pages by swipe and fits the notch on an iPhone and an
 iPad, and on real hardware. Android has no phase yet, and web (WASM) stays ⏸. Milestone 3's

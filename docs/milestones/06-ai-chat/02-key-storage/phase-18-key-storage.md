@@ -1,6 +1,6 @@
 # Phase 18 — API key storage + settings row
 
-[← Feature: Key storage](README.md) · **Status:** 🚧 in progress — opened 2026-09-13 ·
+[← Feature: Key storage](README.md) · **Status:** ✅ done — opened 2026-09-13, closed 2026-09-20 (`3439746`, 167 tests green) ·
 build log: [`phase-18-key-storage-steps.md`](phase-18-key-storage-steps.md)
 
 ## Goal
@@ -79,5 +79,5 @@ Detail for each lives in [`phase-18-key-storage-steps.md`](phase-18-key-storage-
 - [x] **5d. Forget the key and verify native persistence** — forget clears the store,
       provider, and status; verify save, relaunch, forget, and model persistence under
       `dx serve` on desktop and with the iOS simulator.
-- [ ] **6. Review and refactor** — punch-list over `src/secrets/` and the touched files,
+- [x] **6. Review and refactor** — punch-list over `src/secrets/` and the touched files,
       suite green, clippy clean.

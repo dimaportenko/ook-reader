@@ -10,4 +10,4 @@ same shape Phase 17 used for the network.
 
 | # | Phase | Status |
 |---|---|---|
-| 18 | [API key storage + settings row](phase-18-key-storage.md) | 🚧 in progress |
+| 18 | [API key storage + settings row](phase-18-key-storage.md) | ✅ done |

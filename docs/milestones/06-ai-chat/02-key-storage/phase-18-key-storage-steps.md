@@ -1560,8 +1560,8 @@ button", and whether the helpers on the binary root deserve a module.
 > **Written by:** `lbb:next-implement` — items 1–4 applied by the agent, reviewed by hand;
 > item 5 (comments and naming) left to the learner, since it edits their comments.
 
-> **Status:** items 1–4 done — committed in `25c2ee1` (167 tests green, 2 ignored; clippy
-> clean; iOS build green). Item 5 still open; the phase closes when it lands.
+> **Status:** done — items 1–4 committed in `25c2ee1`, item 5 in `3439746` (167 tests green,
+> 2 ignored; clippy clean; iOS build green). Phase 18 closed 2026-09-20.
 
 **What it is.** The phase closes by stepping back over `src/secrets/` and the files the
 phase reached into — `main.rs`, `ui/settings.rs`, `ai/gemini.rs` — with working code in
@@ -1639,7 +1639,7 @@ it is a feature — split it out.
   `Option` was kept because the UI already models "no store" as `None`. Moving `OrLog` out
   of `ui` into a small `log` module is a candidate for a later phase.)*
 
-- [ ] **5. Naming and stale comments.** In `keychain.rs`, `// keychain store key` above
+- [x] **5. Naming and stale comments.** In `keychain.rs`, `// keychain store key` above
   `SERVICE` misdescribes it: it is the keychain *service* name (the `-s` you passed to
   `security find-generic-password`), and the per-secret *account* is `name`. Reword it, or
   drop it — the constant's name already says service. One thing genuinely worth a comment
@@ -1647,6 +1647,65 @@ it is a feature — split it out.
   *process-global* and replaces any earlier store; it is safe only because `App` opens the
   store once inside `use_hook`. A reader who later calls `Keychain::new()` in two places
   should learn that from the constructor, not from a debugging session.
+
+### Item 5 — laid out (2026-09-19)
+
+> **Status:** done — committed in `3439746` (167 tests green, 2 ignored; clippy clean).
+
+Swept `src/secrets/`, `gemini_key/`, `ui/settings.rs`, `ai/gemini.rs`, `settings/ai_model.rs`
+for comments after items 1–4 landed. One comment exists in all of them, and it is the wrong
+one; the rest of the item is a comment that *should* exist and does not.
+
+**Check** — `cargo test && cargo clippy --all-targets`: 167 passed, 2 ignored, 0 warnings
+before and after. Comments have no test; the safety net is that nothing else moves.
+
+**Edit 1 — `src/secrets/keychain.rs:5`, delete the misdescribing line.**
+
+```rust
+// before
+// keychain store key
+const SERVICE: &str = "com.dimaportenko.ook-reader";
+
+// after
+const SERVICE: &str = "com.dimaportenko.ook-reader";
+```
+
+*Why delete rather than reword:* the constant is passed as the first argument of
+`Entry::new(SERVICE, name)`, which `keyring-core` documents as the **service**; the second,
+`name`, is the **account**. "Key" is the word this whole module reserves for the secret
+itself, so the comment actively points a reader at the wrong thing. The identifier already
+says `SERVICE`; a comment that restates a name is noise, and one that mis-restates it is
+worse than noise.
+
+**Edit 2 — `Keychain::new`, add the comment that earns its place.** Something like:
+
+```rust
+impl Keychain {
+    /// Opens the Apple keychain and installs it as `keyring-core`'s default store.
+    ///
+    /// `set_default_store` is process-global: a second call replaces the first store for
+    /// every `Entry` in the process. `App` calls this once, inside `use_hook`, and nothing
+    /// else may.
+    pub(crate) fn new() -> Result<Self, SecretError> {
+```
+
+*Why this comment and not others:* a good comment records what the code cannot say. The
+signature `fn new() -> Result<Self, _>` reads as a plain constructor — call it wherever you
+need a store. The hidden fact is that `Keychain` is a zero-sized handle to *global* state
+set up by `keyring_core::set_default_store`; a second `Keychain::new()` (say, in a future
+settings screen) would silently swap the store under the first one's feet. That constraint
+lives in `keyring-core`, not in this file, so this file has to name it. Use `///` (a doc
+comment) rather than `//`: it attaches to the item, shows on hover in NeoVim through
+rust-analyzer, and survives a rename of the function body.
+
+**Not in scope.** `#[allow(dead_code)] mod ai;` in `main.rs` stays — `ChatProvider::chat`
+and `ChatError` have no caller until Phase 19's chat panel, so the `allow` is still telling
+the truth. The `// TODO: refactor expect …` above `Config::new()` predates the phase and is
+tracked in `TODO.md`.
+
+**Done when** the two edits are in, the suite and clippy match the numbers above, and one
+save → relaunch → forget pass under `dx serve --platform desktop` behaves as in Step 5d.
+Then `lbb:commit` — that commit closes Phase 18.
 
 ### Why this order
 
