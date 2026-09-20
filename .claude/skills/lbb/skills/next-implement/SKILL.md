@@ -75,6 +75,10 @@ keeps the diff reviewable. Follow [[next]] in full:
 - **One idea per step.** The size discipline matters *more* here, not less: an oversized
   step the learner didn't write is an unreviewable diff. If what you derived is two ideas,
   implement the first and say the second is next.
+- **Order by observability.** A plan you are about to implement is *more* tempting to
+  lay out dependency-first, because you can write the struct in one go. Don't: the
+  learner reviews one diff per step, and a diff with no visible surface is the hardest
+  kind to review. Entry point first, abstraction after its first caller, service last.
 - **Crux first** when opening a new topic — what makes this hard and the insight that
   unlocks it. The learner needs the frame before they read your code.
 - **Runnable check first**, then minimal implementation, then why, then a scope note. Same

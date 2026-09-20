@@ -147,6 +147,30 @@ next single step.
    pass** (see below) — plan it in from the start so the learner knows the phase ends by
    stepping back and cleaning up, not just by landing the final feature.
 
+3. **Order by observability, not by dependency.** The natural engineer's order — build the
+   abstraction, then the helper, then the UI that consumes them — puts the least visible
+   work first: for two or three steps the only feedback is a unit test against a struct
+   with no caller. Invert it. **Every step ends with something the learner can see or
+   click**, and a pure abstraction lands in the step *right after* the first caller that
+   needs it, as a visible refactor of code that already works. Concretely:
+
+   - Start with the entry point (the button, the route, the menu item) and a stub surface
+     behind it, checked by eye — and, on a project with a device target, checked on the
+     device *now*, while the layout is trivial and geometry bugs are cheap.
+   - Fake the data at the edge, not in a fake type: a seeded `Vec`, a hard-coded reply, an
+     echo. A `Fake` implementation of a trait belongs in tests, not in the UI step.
+   - Extract the state machine / helper / trait as its own step once the UI has a submit,
+     a double-click, or an error path that needs it. The learner then feels the pressure
+     that justifies the abstraction, instead of being told it will matter later.
+   - Connect the real service last, and the last step before review is the one that gets
+     the end-to-end check with real credentials.
+
+   A dependency order still applies *inside* a step (the test before the code), and it can
+   win when the abstraction is genuinely the hard idea of the phase — a parser, a merge
+   engine — and the UI over it is trivial. Say which order the plan uses and why; when a
+   plan was written dependency-first and the learner asks for the other, re-sequence it
+   through [[refine]] before Step 1 lands.
+
 ### Each step: test first, then minimal code, then why
 
 Always in this order — the order is the pedagogy:
@@ -289,5 +313,7 @@ stamp:
 - Nothing in `src/` was written by you — only tests, the steps doc, and explanations.
 - The steps doc reads, after the fact, as a clear build log of how the topic was built.
 - Steps were small enough that no single one was "too big to understand by rewriting it."
+- Every step ended with something to see or click; no run of pure-abstraction steps
+  before the first visible surface.
 - Every phase closed with a review-and-refactor pass, so the landed code is idiomatic and
   well-organized — not just working — and the learner saw *why* the cleaner form is better.

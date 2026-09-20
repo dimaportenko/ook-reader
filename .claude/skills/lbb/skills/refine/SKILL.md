@@ -86,6 +86,15 @@ Use when *what the learner should build* has shifted. The common cases:
   screen. Rewrite the test (if the observable behavior changed), the minimal-code sketch, and
   especially the **why** — name *why the new approach is better*, since that comparison is
   itself a lesson.
+- **Wrong order → re-sequence.** The plan was laid out dependency-first (struct → helper →
+  UI) and the learner finds the early steps have nothing to interact with. Reorder the
+  step plan so every step ends with something visible — entry point and stub surface
+  first, abstractions extracted right after their first caller, the real service last —
+  per the "order by observability" rule in [[next]]. Renumber the entries that already
+  exist rather than rewriting them, fold any helper step that has no logic of its own into
+  the step that would have called it, and record the old order and the reason in a short
+  "why this order" note so the build log shows the plan was re-sequenced on purpose. This
+  is the one refine that is cheapest *before* Step 1 is written; do it then.
 - **New requirement folded in.** The learner wants the current step/phase to also cover
   something new (styling, an asset, an edge case). Re-derive the step to include it — or, if
   it's really its own idea, split it out as its own step rather than bloating this one.

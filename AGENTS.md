@@ -28,6 +28,11 @@ give a **runnable check first** — a test, or a `dx serve` you can eyeball — 
 behavior is visible and the user can verify their code as they write it. Then the minimal
 implementation for that step.
 
+Order steps by **observability, not dependency**: every step ends with something to see or
+click. Entry point and stub surface first, data faked at the edge, the abstraction extracted
+right after its first caller, the real service last. The `lbb:next` skill has the full rule
+and its exception.
+
 ## Rule: no comments in code unless asked
 
 On the rare occasions you are asked to write or edit code, write the code and **nothing
