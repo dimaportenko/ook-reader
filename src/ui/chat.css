@@ -1,0 +1,40 @@
+.chat_panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(28rem, 100%);
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+    env(safe-area-inset-bottom) 0;
+  background: var(--light, var(--primary-color))
+    var(--dark, var(--primary-color-5));
+  z-index: 2;
+
+  /** animation */
+  transform: translateX(100%);
+  visibility: hidden;
+  transition:
+    transform 0.2s ease-in-out,
+    visibility 0s linear 0.2s;
+}
+
+.chat_panel[data-state="open"] {
+  transform: translateX(0);
+  visibility: visible;
+  transition:
+    transform 0.2s ease-in-out,
+    visibility 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat_panel {
+    transition: none;
+  }
+}
+
+.chat_panel__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 1rem;
+}

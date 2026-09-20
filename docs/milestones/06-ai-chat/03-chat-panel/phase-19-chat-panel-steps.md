@@ -50,36 +50,119 @@ to catch it, before there is a list to scroll inside it.
 
 **Minimal implementation.**
 
-`src/ui/chat.rs` — a `ChatPanel` component: `use_signal(|| false)` for `open`, a
-`button.icon-button` with an `aria_label: "Chat"` toggling it, and when open a
-`div.chat-panel` (`position: fixed; right: 0; top: 0; bottom: 0; width: min(28rem, 100%)`)
-holding a header row (title + close button) and the body. The body is a `match` on
-`use_context::<Signal<Option<Gemini>>>()`: `None` → the "add a key" `p`; `Some(_)` →
-`p { "No messages yet." }`.
+`src/ui/components/icon.rs`, next to `SETTINGS`:
 
-`src/ui/reader.rs` — `ChatPanel {}` after `SettingsPopover {}` in the control row.
+```rust
+pub(crate) const MESSAGE: TablerIcon = TablerIcon {
+    name: "message-circle",
+    paths: &[
+        "M3 20l1.3 -3.9c-2.324 -3.437 -1.426 -7.872 2.1 -10.374c3.526 -2.501 8.59 -2.296 11.845 .48c3.255 2.777 3.695 7.266 1.029 10.501c-2.666 3.235 -7.615 4.215 -11.574 2.293l-4.7 1",
+    ],
+};
+```
 
-`src/ui/mod.rs` — `pub mod chat;`. Icon: `components::icon` has no chat glyph yet; add a
-`MESSAGE` `TablerIcon` next to `SETTINGS` (Tabler's `message-circle` path).
+`src/ui/chat.rs`, new file, plus `pub mod chat;` in `ui/mod.rs`:
 
-Safe-area: `assets/main.css` pads `body` with `env(safe-area-inset-*)`, but a
-`position: fixed` drawer escapes that box, so it needs its own
-`padding-top: env(safe-area-inset-top)` / `-bottom` — the same lesson `toc.css` learned
-for the popover's `right`.
+```rust
+use dioxus::prelude::*;
+
+use crate::{
+    ai::gemini::Gemini,
+    ui::components::icon::{self, Icon},
+};
+
+#[css_module("/src/ui/chat.css")]
+struct Styles;
+
+#[component]
+pub(crate) fn ChatPanel(show_controls: bool) -> Element {
+    let mut open = use_signal(|| false);
+    let provider = use_context::<Signal<Option<Gemini>>>();
+
+    rsx! {
+        button {
+            class: if show_controls { "icon-button" } else { "icon-button reader-control--hidden" },
+            aria_label: "Chat",
+            onclick: move |_| open.set(true),
+            Icon { icon: icon::MESSAGE }
+        }
+        if open() {
+            aside {
+                class: "{Styles::chat_panel}",
+                aria_label: "Chat",
+                div {
+                    class: "{Styles::chat_panel__header}",
+                    span { "Chat" }
+                    button {
+                        class: "icon-button",
+                        aria_label: "Close chat",
+                        onclick: move |_| open.set(false),
+                        Icon { icon: icon::CLOSE }
+                    }
+                }
+                if provider.read().is_none() {
+                    p { "Add a Gemini key in settings to chat." }
+                } else {
+                    p { "No messages yet." }
+                }
+            }
+        }
+    }
+}
+```
+
+`src/ui/chat.css`, new file; the colour pair is the one `components/popover/style.css`
+uses for its content surface:
+
+```css
+.chat-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(28rem, 100%);
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) 0;
+  background: var(--light, var(--primary-color)) var(--dark, var(--primary-color-5));
+  box-shadow: -2px 0 12px rgb(0 0 0 / 0.2);
+  z-index: 2;
+}
+
+.chat-panel__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 1rem;
+}
+```
+
+`src/ui/reader.rs`, in the control row after `SettingsPopover {}`:
+
+```rust
+ChatPanel { show_controls: show_controls() }
+```
 
 **Why it works.**
 
-- **A fixed `div`, not `PopoverRoot`.** The popovers anchor to their trigger and close on
+- **A fixed `aside`, not `PopoverRoot`.** The popovers anchor to their trigger and close on
   outside click; a chat needs to stay open while the user scrolls the page behind it and
   taps into the input. A plain fixed element with its own `open` signal is the smallest
   thing that behaves like a drawer.
-- **The provider signal is read, never cloned, here.** `provider.read().is_some()` is a
-  synchronous borrow inside render, released before the function returns. Step 4 is the
-  first place a `.await` appears, and the clone-before-spawn rule applies there, not yet.
+- **`provider.read().is_none()` inside `rsx!` is safe.** It is a synchronous borrow during
+  render, released before the function returns — and reading it subscribes the component,
+  so when settings forgets the key and writes `None`, this component re-renders and the
+  body line flips. Step 4 is the first place a `.await` appears, and the clone-before-spawn
+  rule applies there, not yet.
+- **`show_controls` is a prop, not a context read,** matching `NavRow`. The prop hides the
+  button only. The drawer is a separate surface; hiding it with the chrome would drop a
+  half-typed question on a stray tap once Step 2 adds the input.
 - **The `None` branch is in Step 1 on purpose.** It makes the shell observable in two
   states from one signal that already exists, and it is the state a fresh install lands in.
-- **`show_controls` hides the button, not the drawer.** The drawer is a separate surface;
-  hiding it with the chrome would drop a half-typed question on a stray tap.
+- **The drawer sets its own safe-area padding.** `assets/main.css` pads `body`, but
+  `position: fixed` escapes that box — the same lesson `toc.css` learned for the popover's
+  `right`.
+- **`if open() { aside { … } }` unmounts the drawer** rather than hiding it. Cheaper than a
+  CSS toggle, and Step 2's list state will live in a signal owned by `ChatPanel`, so it
+  survives a close and reopen regardless.
 
 **Scope.** No list, no input, no `chat` module. Step 2 adds the list and input on a bare
 `Vec<Message>` signal.

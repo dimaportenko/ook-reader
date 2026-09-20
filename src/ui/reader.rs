@@ -11,6 +11,7 @@ use crate::{
     settings::Settings,
     toc::{self, TocEntry},
     ui::{
+        chat::ChatPanel,
         components::icon::{self, Icon},
         library::OpenBook,
         settings::SettingsPopover,
@@ -248,6 +249,9 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                         on_pick,
                     }
                     SettingsPopover {}
+                    ChatPanel {
+                        show_controls: show_controls(),
+                    }
                 }
 
             }
@@ -278,8 +282,12 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
             }
 
             NavRow {
-                on_prev: move |_| { state.page_prev(); },
-                on_next: move |_| { state.page_next(); },
+                on_prev: move |_| {
+                    state.page_prev();
+                },
+                on_next: move |_| {
+                    state.page_next();
+                },
                 label: page_label,
                 show_controls: show_controls(),
             }
