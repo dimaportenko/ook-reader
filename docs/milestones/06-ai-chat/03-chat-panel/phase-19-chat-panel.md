@@ -55,7 +55,7 @@ something to click, and the pure-Rust struct arrives exactly when the drawer has
 that needs it. (Re-ordered 2026-09-20 from a state-first plan; see the build log's "Why this
 order".)
 
-- [ ] **1. The drawer shell** — a chat button in the reader's control row toggles a
+- [x] **1. The drawer shell** — a chat button in the reader's control row toggles a
       `ChatPanel` drawer; with `None` in the provider signal it reads "add a key in
       settings"; `dx serve` eyeball, `cargo clippy`, then the iOS simulator for drawer
       geometry against the safe area.

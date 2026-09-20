@@ -164,8 +164,29 @@ ChatPanel { show_controls: show_controls() }
   CSS toggle, and Step 2's list state will live in a signal owned by `ChatPanel`, so it
   survives a close and reopen regardless.
 
+**Slide in, slide out (folded in while building).** `if open() { aside }` cannot animate
+out — the element is gone the same frame `open` flips. So the drawer stays mounted and
+animates on a `data-state` attribute, the pattern the popover already uses: `transform:
+translateX(100%)` closed, `translateX(0)` open, a `0.2s` transition on `transform`, and
+`visibility: hidden` delayed by the same `0.2s` so the closed drawer is neither visible nor
+hit-testable. `inert` removes it from focus and the accessibility tree while closed.
+
+**Found on the way: `inert: !open()` made the drawer inert in both states.** Dioxus 0.7.9's
+interpreter keeps a hard-coded list of boolean attributes and `inert` is not on it, so
+`false` renders `inert="false"`, which the browser reads as inert. Fix: `inert: if !open()
+{ true }` — a conditional attribute with no `else` is omitted entirely. SSR's list already
+has `inert`; a fix PR to Dioxus is drafted separately.
+
+**Tests added at commit time.** Two of the five review findings were misspelt CSS tokens
+(`safe-aria-inset-top`, `prefers-reduce-motion`) that no desktop eyeball catches, so
+`ui::chat::test` pins the inset spelling and count, and the visibility delay against the
+slide duration. Watched to fail by mutating the expected duration.
+
 **Scope.** No list, no input, no `chat` module. Step 2 adds the list and input on a bare
 `Vec<Message>` signal.
+
+> **Status:** done — committed in `c8e2488` (169 tests green). Desktop eyeball confirmed
+> by the learner; the iOS geometry check is still owed and runs before Step 2 lands.
 
 ## Step 3 — The conversation state
 
