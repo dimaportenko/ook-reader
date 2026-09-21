@@ -542,10 +542,21 @@ impl Conversation {
 
 `main.rs`: `mod chat;` in the module list.
 
-`ui/chat.rs` — the rewire: `use_signal(Vec::new)` seeded in Step 2 becomes
-`use_signal(Conversation::default)`; the list iterates `chat.read().messages()`; submit
-becomes `if chat.write().ask(&draft()) { draft.set(String::new()) }`. The seed turns and
-the push-on-submit both go, because the struct now owns those transitions.
+`ui/chat.rs` — the rewire against what Step 2 landed:
+
+- `let mut messages = use_signal(|| vec![…seed…])` becomes
+  `let mut chat = use_signal(Conversation::default)`.
+- `submit` shrinks to `if chat.write().ask(&draft.read()) { draft.set(String::new()) }` —
+  the trim, the blank check and the push all move into `ask`. Mind the guard order: the
+  `draft.read()` temporary dies at the end of the `if` condition, before `draft.set` runs
+  in the body.
+- The list iterates `chat.read().messages().iter()`; the `if messages.read().is_empty()`
+  paragraph now reads `chat.read().messages().is_empty()` — and it is finally reachable,
+  since a fresh `Conversation` has no seed.
+- `disabled: draft.read().trim().is_empty()` — the Send button's rule should match
+  `ask`'s, so a whitespace draft neither enables the button nor makes a turn.
+- `use crate::chat::{Conversation, Status};` — `Status` is unused until Step 4 renders it;
+  leave it out until then so clippy stays quiet.
 
 **Why it works.**
 
@@ -554,7 +565,7 @@ the push-on-submit both go, because the struct now owns those transitions.
   `bool` to decide whether to clear the input. Reserve `Status::Failed` for the
   one thing that *is* an error: the provider said no.
 - **`settle` takes `Result<Reply, ChatError>` by value** — exactly what `complete` returns,
-  so Step 5's `spawn` body is one line: `chat.write().settle(outcome)`. It stores
+  so Step 4's `spawn` body is one line: `chat.write().settle(outcome)`. It stores
   `error.to_string()` rather than the `ChatError` because the struct wants to be `Clone`
   and `PartialEq` for the signal and the tests, and `reqwest::Error` inside `ChatError` is
   neither. The `Display` text is what the drawer shows anyway.
