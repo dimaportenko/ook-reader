@@ -62,7 +62,7 @@ order".)
 - [x] **2. The message list and input** — the drawer renders a `Signal<Vec<Message>>`
       seeded with one user and one assistant turn, so both roles are visible; submit
       appends a trimmed user turn and clears the input; no network; `dx serve` eyeball.
-- [ ] **3. The conversation state** — `src/chat/mod.rs`: `Conversation` with `ask` and
+- [x] **3. The conversation state** — `src/chat/mod.rs`: `Conversation` with `ask` and
       `settle`, `Status`; `Message::role`/`text` accessors; `#[test]` with `cargo test`.
       The drawer moves onto `Signal<Conversation>`, submit calls `ask`, the seed goes.
 - [ ] **4. The async send** — submit `spawn`s `provider.complete` on the full history and

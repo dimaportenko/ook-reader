@@ -584,3 +584,12 @@ impl Conversation {
 tests directly, and in the running app a submit leaves the drawer in `Waiting` with nothing
 to settle it. That is expected: Step 4 wires `ask` → `spawn` → `settle` and renders the
 waiting row.
+
+**Found on the way.** The first rewire dropped `ask`'s `bool` and always cleared the draft,
+so a submit refused while `Waiting` threw the typed question away; fixed by clearing only
+on `true`. Clippy then flagged `settle`, `status` and `Failed` as dead until Step 4, so
+`mod chat` carries `#[allow(dead_code)]` like `mod ai`, to be removed in Step 4.
+
+> **Status:** done — committed in `43e8a9e` (175 tests green, 6 new in `chat::test`,
+> added at commit time; `asking_while_waiting_is_refused` watched to fail by inverting
+> its assertion). Clippy clean.
