@@ -65,7 +65,7 @@ order".)
 - [x] **3. The conversation state** — `src/chat/mod.rs`: `Conversation` with `ask` and
       `settle`, `Status`; `Message::role`/`text` accessors; `#[test]` with `cargo test`.
       The drawer moves onto `Signal<Conversation>`, submit calls `ask`, the seed goes.
-- [ ] **4. The async send** — submit `spawn`s `provider.complete` on the full history and
+- [x] **4. The async send** — submit `spawn`s `provider.complete` on the full history and
       `settle`s the result; a waiting row and an error row; `dx serve` with a real key on
       desktop, then the iOS simulator.
 - [ ] **5. Review and refactor** — punch-list over `src/chat/`, `ui/chat.rs`, and the

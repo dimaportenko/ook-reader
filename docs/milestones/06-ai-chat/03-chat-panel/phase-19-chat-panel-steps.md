@@ -731,3 +731,12 @@ one-tap retry is a Phase 22 nicety), no scroll-to-bottom on a new bubble, no dis
 on the input while waiting — `ask` already refuses, and a greyed input would drop a
 half-typed follow-up. No new unit test: the pure-Rust transitions were pinned in Step 3,
 and the `Clone` derive has nothing to assert. Step 5 reviews the whole phase.
+
+**Found on the way.** The first draft put the waiting `li` after the `ul`'s closing brace,
+so it rendered outside the list — valid-looking on screen, but outside the list's scroll
+box and its `max-width` context. Moved inside, after the `for`.
+
+> **Status:** done — committed in `bae9d7c` (175 tests green, none new — the step planned
+> none; clippy clean). Desktop `dx serve` run with a real key confirmed by the learner.
+> **Still owed:** the iOS simulator end-to-end run and the safe-area geometry check carried
+> from Steps 1–2; it runs before Step 5 closes the phase.
