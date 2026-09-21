@@ -27,6 +27,14 @@ impl Message {
             text: text.into(),
         }
     }
+
+    pub(crate) fn role(&self) -> Role {
+        self.role
+    }
+
+    pub(crate) fn text(&self) -> &str {
+        &self.text
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

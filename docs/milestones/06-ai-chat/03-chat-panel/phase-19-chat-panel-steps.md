@@ -188,6 +188,195 @@ slide duration. Watched to fail by mutating the expected duration.
 > **Status:** done — committed in `c8e2488` (169 tests green). Desktop eyeball confirmed
 > by the learner; the iOS geometry check is still owed and runs before Step 2 lands.
 
+## Step 2 — The message list and input
+
+**What it is.** The drawer's body becomes a list of turns and a one-line input with a Send
+button. The list is a `Signal<Vec<Message>>` seeded with one user turn and one assistant
+turn, so both roles are on screen from the first render and the CSS for each can be tuned
+against something real. Submit — Enter in the input, or the button — appends a trimmed
+user turn and clears the input. Nothing is sent; the list only ever grows by user turns.
+
+**Check first — `dx serve`, eyeball.** Open a book, open the drawer:
+
+- Two seeded turns are visible, user right-aligned (or otherwise visibly distinct from)
+  assistant, both readable in light and dark theme.
+- Type `hello`, press Enter: a third bubble appears at the bottom, the input is empty.
+  Click Send after typing: same result.
+- Press Enter on a blank or whitespace-only input: nothing appends.
+- With the caret in the input, press `←` / `→` / `Space`: the page behind **must not turn**
+  and the caret must move as normal (see the propagation note under *Why*).
+- Forget the key in settings: the list and input give way to the "add a key" line; add it
+  back and the seeded turns are still there (the signal survived).
+
+Then `cargo clippy --all-targets`, and `cargo test` stays at 169 — nothing here is
+unit-testable; the trim rule gets its `#[test]` when Step 3 moves it onto `Conversation`.
+
+**Minimal implementation.**
+
+`src/ai/mod.rs`, in `impl Message` — pulled forward from Step 3 because the list cannot
+read a turn's private fields without them:
+
+```rust
+pub(crate) fn role(&self) -> Role {
+    self.role
+}
+
+pub(crate) fn text(&self) -> &str {
+    &self.text
+}
+```
+
+`src/ui/chat.rs` — new signals under `provider`, and the body replaces the "No messages
+yet." paragraph:
+
+```rust
+let mut messages = use_signal(|| {
+    vec![
+        Message::user("Which city is this set in?"),
+        Message::assistant("Ankh-Morpork."),
+    ]
+});
+let mut draft = use_signal(String::new);
+
+let mut submit = move || {
+    let question = draft.read().trim().to_owned();
+    if question.is_empty() {
+        return;
+    }
+    messages.write().push(Message::user(question));
+    draft.set(String::new());
+};
+```
+
+```rust
+aside {
+    // …existing attributes…
+    onkeydown: move |e| e.stop_propagation(),
+    div { class: "{Styles::chat_panel__header}", /* unchanged */ }
+    if provider.read().is_none() {
+        p { style: "padding: 1rem", "Add a Gemini key in settings to chat." }
+    } else {
+        ul {
+            class: "{Styles::chat_panel__messages}",
+            for message in messages.read().iter() {
+                li {
+                    class: if message.role() == Role::User {
+                        "{Styles::chat_panel__turn} {Styles::chat_panel__turn_user}"
+                    } else {
+                        "{Styles::chat_panel__turn}"
+                    },
+                    "{message.text()}"
+                }
+            }
+        }
+        div {
+            class: "{Styles::chat_panel__compose}",
+            input {
+                value: "{draft}",
+                placeholder: "Ask about this book",
+                oninput: move |e| draft.set(e.data.value()),
+                onkeydown: move |e| {
+                    if e.key() == Key::Enter {
+                        e.prevent_default();
+                        submit();
+                    }
+                },
+            }
+            button {
+                disabled: draft.read().trim().is_empty(),
+                onclick: move |_| submit(),
+                "Send"
+            }
+        }
+    }
+}
+```
+
+`use crate::ai::{Message, Role};` joins the imports.
+
+`src/ui/chat.css` — the drawer becomes a column so the list takes the slack and the
+compose row sits at the bottom, above the home indicator (the `padding` already pays the
+bottom inset):
+
+```css
+.chat_panel {
+  /* …existing… */
+  display: flex;
+  flex-direction: column;
+}
+
+.chat_panel__messages {
+  flex: 1;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0 1rem;
+  list-style: none;
+}
+
+.chat_panel__turn {
+  max-width: 85%;
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--USER__backgroundColor) 80%, black);
+}
+
+.chat_panel__turn_user {
+  margin-left: auto;
+  background: var(--primary-color-4);
+}
+
+.chat_panel__compose {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+}
+
+.chat_panel__compose input {
+  flex: 1;
+}
+```
+
+**Why it works.**
+
+- **`submit` is a closure, not a nested component or a second copy.** Enter and the button
+  are two events that mean the same thing; one `move ||` closure holding the two signal
+  handles (`Signal` is `Copy`, so `move` copies handles, not the data) keeps the trim rule
+  in exactly one place. Calling it from two handlers needs it to be `FnMut`, hence
+  `let mut submit`.
+- **`draft.read().trim().to_owned()` then `draft.set(…)` — in that order.** The `read()`
+  guard is a temporary that dies at the end of its statement, so by the time `set` runs the
+  borrow is gone. Writing `draft.set` *while* the guard is alive would panic at runtime,
+  the same rule the crux states for `.await`, just in miniature.
+- **`for … in messages.read().iter()` inside `rsx!`** subscribes the component to
+  `messages`; the `push` inside `submit` is a write, which schedules the re-render that
+  shows the new bubble. Nothing else needs to tell the list to refresh.
+- **`onkeydown: stop_propagation` on the `aside`** is the same fix `popover/component.rs`
+  applies: `reader-root` turns pages on arrow keys and Space, and a keydown inside the
+  input bubbles up to it. Stopping the event at the drawer keeps typing local. Without it
+  the eyeball check above fails — and it is the kind of bug a screenshot never shows.
+- **`prevent_default` on Enter** stops the browser's own handling (a beep on macOS
+  WebKit, an implicit form submit had this been a `form`). The `Key::Enter` pattern is the
+  one the `dioxus-07` skill documents; a `form { onsubmit }` would also work but adds a
+  default-action to reason about for no gain here.
+- **`disabled: draft.read().trim().is_empty()`** mirrors the Save button in settings — the
+  same rule as the early `return` in `submit`, expressed a second time so the UI *shows*
+  it. Step 3 makes it a single source of truth by moving the rule into `Conversation::ask`.
+- **The seed is deliberate scaffolding.** Two real `Message` values, not lorem-ipsum
+  strings, so the list is built against the type the provider actually returns; Step 3
+  deletes the seed when `Conversation::default()` takes over.
+- **`if`/`else`, not `match`, for the class.** `rsx!` only interpolates `"{…}"` literals
+  that sit directly in attribute position, and `if`/`else` there is special-cased; a
+  `match` arm's literal is a plain `&str` and lands in the DOM verbatim as
+  `{Styles::…}`. Found while building — a `match` would need `format!`.
+- **Class names use underscores.** `css_module` maps each CSS class to a Rust identifier,
+  so `chat_panel__turn_user` rather than a BEM `--user` modifier, matching `chat_panel`.
+
+**Scope.** No double-submit guard, no waiting or error row, no scroll-to-bottom on append,
+no `chat` module. Step 3 lifts the trim/append logic onto `Conversation` with tests; Step
+4 adds the network and the waiting row. The iOS geometry check owed from Step 1 runs on
+this build, now that there is a compose row to sit above the home indicator.
+
 ## Step 3 — The conversation state
 
 **What it is.** A `Conversation` value that knows the turns so far and whether it is waiting
@@ -289,17 +478,7 @@ mod test {
 
 **Minimal implementation.**
 
-`src/ai/mod.rs` — the UI will need to read a turn without owning it. Add to `impl Message`:
-
-```rust
-pub(crate) fn role(&self) -> Role {
-    self.role
-}
-
-pub(crate) fn text(&self) -> &str {
-    &self.text
-}
-```
+`src/ai/mod.rs` — the `role()` / `text()` accessors already landed in Step 2; nothing to add.
 
 `src/chat/mod.rs`:
 
