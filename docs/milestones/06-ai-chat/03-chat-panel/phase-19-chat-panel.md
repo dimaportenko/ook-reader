@@ -59,7 +59,7 @@ order".)
       `ChatPanel` drawer; with `None` in the provider signal it reads "add a key in
       settings"; `dx serve` eyeball, `cargo clippy`, then the iOS simulator for drawer
       geometry against the safe area.
-- [ ] **2. The message list and input** — the drawer renders a `Signal<Vec<Message>>`
+- [x] **2. The message list and input** — the drawer renders a `Signal<Vec<Message>>`
       seeded with one user and one assistant turn, so both roles are visible; submit
       appends a trimmed user turn and clears the input; no network; `dx serve` eyeball.
 - [ ] **3. The conversation state** — `src/chat/mod.rs`: `Conversation` with `ask` and

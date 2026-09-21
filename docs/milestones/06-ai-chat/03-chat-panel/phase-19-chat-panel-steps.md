@@ -377,6 +377,14 @@ no `chat` module. Step 3 lifts the trim/append logic onto `Conversation` with te
 4 adds the network and the waiting row. The iOS geometry check owed from Step 1 runs on
 this build, now that there is a compose row to sit above the home indicator.
 
+**Found on the way: `match` does not interpolate.** The first draft chose the bubble class
+with a `match` on the role; the literal reached the DOM as `{Styles::chat_panel__turn}`.
+Switched to `if`/`else`, which `rsx!` special-cases in attribute position.
+
+> **Status:** done — committed in `2352a77` (169 tests green, none new — the step planned
+> no unit test; clippy clean). Desktop eyeball by the learner. Still owed: the iOS
+> geometry check from Step 1, now against the compose row.
+
 ## Step 3 — The conversation state
 
 **What it is.** A `Conversation` value that knows the turns so far and whether it is waiting
