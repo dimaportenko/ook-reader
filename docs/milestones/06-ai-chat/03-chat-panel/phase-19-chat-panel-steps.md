@@ -593,3 +593,141 @@ on `true`. Clippy then flagged `settle`, `status` and `Failed` as dead until Ste
 > **Status:** done — committed in `43e8a9e` (175 tests green, 6 new in `chat::test`,
 > added at commit time; `asking_while_waiting_is_refused` watched to fail by inverting
 > its assertion). Clippy clean.
+
+## Step 4 — The async send
+
+**What it is.** Submit now sends. After `ask` accepts the turn, the handler `spawn`s a task
+that calls `complete` on the whole history and `settle`s the result. While the task runs
+the list shows a waiting row; if it fails, an error row sits under the list with the
+question still in place. This is the phase's crux made concrete: the component never
+waits — it renders *waiting* now and *answered* later, both from one signal.
+
+**Check first — `dx serve` with a real key, eyeball.** Save a Gemini key in settings, open
+a book, open the drawer:
+
+- Type a question, Enter: the user bubble appears, a waiting row ("…") appears under it,
+  the input is cleared. A second Enter while waiting does nothing (that is `ask` refusing).
+- A few seconds later the waiting row is replaced by an assistant bubble with a real answer.
+- Break the key (settings → forget → save `nope`): ask again. The waiting row appears, then
+  an error row reading `the provider rejected the request (400): …`. The question bubble
+  is still there. Fix the key, ask again: it works, and the error row is gone.
+- Close and reopen the drawer mid-wait: the answer still lands (the task is not tied to
+  the drawer being open).
+
+Then `cargo clippy --all-targets` — with the `#[allow(dead_code)]` on `mod chat` removed,
+because everything in it now has a caller — and `cargo test` stays at 175.
+
+**Second check — the iOS simulator.** `dx build --platform ios`, open via `agent-device`,
+and drive the same flow with the key saved on the device. This is the end-to-end run the
+phase's goal names, and it settles the geometry debt from Steps 1–2: read the compose
+row's and close button's `rect`s from `agent-device snapshot -i --json` against the safe
+area.
+
+**Minimal implementation.**
+
+`src/ai/gemini.rs` — the task needs its own `Gemini`, so the struct must be cloneable.
+`reqwest::Client` is an `Arc` inside, so the clone is two `String`s and a refcount bump:
+
+```rust
+#[derive(Clone)]
+pub(crate) struct Gemini { … }
+```
+
+`src/main.rs` — drop the `#[allow(dead_code)]` above `mod chat;`.
+
+`src/ui/chat.rs` — imports gain `ChatProvider` (the trait must be in scope to call
+`complete`) and `Status`:
+
+```rust
+use crate::{
+    ai::{gemini::Gemini, ChatProvider, Role},
+    chat::{Conversation, Status},
+    …
+};
+```
+
+`submit` grows the send:
+
+```rust
+let mut submit = move || {
+    let Some(gemini) = provider.read().clone() else {
+        return;
+    };
+    if !chat.write().ask(&draft.read()) {
+        return;
+    }
+    draft.set(String::new());
+
+    let history = chat.read().messages().to_vec();
+    spawn(async move {
+        let outcome = gemini.complete(&history).await;
+        chat.write().settle(outcome);
+    });
+};
+```
+
+The rows, after the `for message in …` loop inside the `ul`, then after the `ul`:
+
+```rust
+if *chat.read().status() == Status::Waiting {
+    li {
+        class: "{Styles::chat_panel__turn}",
+        aria_live: "polite",
+        "…"
+    }
+}
+```
+
+```rust
+if let Status::Failed(text) = chat.read().status() {
+    p {
+        class: "{Styles::chat_panel__error}",
+        role: "alert",
+        "{text}"
+    }
+}
+```
+
+`src/ui/chat.css`:
+
+```css
+.chat_panel__error {
+  margin: 0;
+  padding: 0.5rem 1rem;
+  color: var(--error-color, #b00020);
+}
+```
+
+**Why it works.**
+
+- **Everything the task needs is owned before `spawn`.** `gemini` is a clone, `history` is
+  a `to_vec()` — no `read()` guard is alive inside the `async move` block. The crux's rule
+  exactly: a guard held across the `.await` would make `chat.write().settle(...)` — or any
+  render that reads `chat` — panic on a borrow already taken. `chat` itself crosses into
+  the block as a `Copy` handle, which is fine; it is the *guards* that must not.
+- **`let … else` on the provider first.** If the key is gone, `submit` returns before `ask`
+  runs, so no user turn is recorded that nothing will ever settle. Order matters: `ask` is
+  the write that enters `Waiting`, and it must be the last check before the send.
+- **`spawn` returns a `Task` we drop on purpose.** In Dioxus 0.7 a task spawned from a
+  handler is owned by the component's scope and keeps running until it completes or the
+  component unmounts; the drawer staying mounted while closed (Step 1) is why "close mid-wait"
+  still lands the answer. Cancelling on re-ask is unnecessary — `ask` refuses while
+  `Waiting`, so there is at most one task in flight per conversation.
+- **`settle` runs on the main thread, after the await.** Dioxus's desktop and mobile
+  runtimes are single-threaded executors: the `.await` suspends, the future resumes on the
+  same thread, and `chat.write()` is an ordinary signal write that schedules a render. No
+  `Arc<Mutex>`, no channel.
+- **`history` is the whole list, on every request.** `generateContent` is stateless and the
+  request body already takes the full `contents`; the copy is the price of not holding a
+  borrow. Trimming is Phase 22's problem, as the phase doc records.
+- **`Status` is matched in render, never `clone()`d into the closure.** The rows read
+  `chat.read().status()` during render — a synchronous borrow that subscribes the
+  component — so when `settle` writes, both rows flip in the same render as the new bubble.
+- **`aria_live` / `role: "alert"`** are the difference between a sighted user seeing the
+  answer land and a VoiceOver user hearing it. Cheap now; retrofitting is not.
+
+**Scope.** No cancel button, no retry button (re-typing the question is the retry; a
+one-tap retry is a Phase 22 nicety), no scroll-to-bottom on a new bubble, no disabled state
+on the input while waiting — `ask` already refuses, and a greyed input would drop a
+half-typed follow-up. No new unit test: the pure-Rust transitions were pinned in Step 3,
+and the `Clone` derive has nothing to assert. Step 5 reviews the whole phase.
