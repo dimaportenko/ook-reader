@@ -72,3 +72,9 @@
 .chat_panel__compose input {
   flex: 1;
 }
+
+.chat_panel__error {
+  margin: 0;
+  padding: 0.5rem 1rem;
+  color: var(--error-color, #b00020);
+}

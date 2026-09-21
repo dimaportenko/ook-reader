@@ -6,7 +6,6 @@ use dioxus::prelude::*;
 
 #[allow(dead_code)]
 mod ai;
-#[allow(dead_code)]
 mod chat;
 mod clock;
 mod config;

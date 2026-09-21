@@ -80,6 +80,7 @@ fn reply_from(response: GenerateResponse) -> Result<Reply, ChatError> {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct Gemini {
     key: String,
     model: String,

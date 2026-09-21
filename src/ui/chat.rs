@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
 
 use crate::{
-    ai::{gemini::Gemini, Role},
-    chat::Conversation,
+    ai::{gemini::Gemini, ChatProvider, Role},
+    chat::{Conversation, Status},
     ui::components::icon::{self, Icon},
 };
 
@@ -17,9 +17,20 @@ pub(crate) fn ChatPanel(show_controls: bool) -> Element {
     let mut draft = use_signal(String::new);
 
     let mut submit = move || {
-        if chat.write().ask(&draft.read()) {
-            draft.set(String::new());
+        let Some(gemini) = provider.read().clone() else {
+            return;
+        };
+
+        if !chat.write().ask(&draft.read()) {
+            return;
         }
+        draft.set(String::new());
+
+        let history = chat.read().messages().to_vec();
+        spawn(async move {
+            let outcome = gemini.complete(&history).await;
+            chat.write().settle(outcome);
+        });
     };
 
     rsx! {
@@ -66,6 +77,20 @@ pub(crate) fn ChatPanel(show_controls: bool) -> Element {
                             class: if message.role() == Role::User { "{Styles::chat_panel__turn} {Styles::chat_panel__turn_user}" } else { "{Styles::chat_panel__turn}" },
                             "{message.text()}"
                         }
+                    }
+                    if *chat.read().status() == Status::Waiting {
+                        li {
+                            class: "{Styles::chat_panel__turn}",
+                            aria_live: "polite",
+                            "..."
+                        }
+                    }
+                }
+                if let Status::Failed(text) = chat.read().status() {
+                    p {
+                        class: "{Styles::chat_panel__error}",
+                        role: "alert",
+                        "{text}"
                     }
                 }
                 if chat.read().messages().is_empty() {
