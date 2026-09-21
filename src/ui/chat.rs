@@ -1,7 +1,8 @@
 use dioxus::prelude::*;
 
 use crate::{
-    ai::{gemini::Gemini, Message, Role},
+    ai::{gemini::Gemini, Role},
+    chat::Conversation,
     ui::components::icon::{self, Icon},
 };
 
@@ -12,21 +13,13 @@ struct Styles;
 pub(crate) fn ChatPanel(show_controls: bool) -> Element {
     let mut open = use_signal(|| false);
     let provider = use_context::<Signal<Option<Gemini>>>();
-    let mut messages = use_signal(|| {
-        vec![
-            Message::user("Which city is this set in?"),
-            Message::assistant("Ankh-Morpork."),
-        ]
-    });
+    let mut chat = use_signal(Conversation::default);
     let mut draft = use_signal(String::new);
 
     let mut submit = move || {
-        let question = draft.read().trim().to_owned();
-        if question.is_empty() {
-            return;
+        if chat.write().ask(&draft.read()) {
+            draft.set(String::new());
         }
-        messages.write().push(Message::user(question));
-        draft.set(String::new());
     };
 
     rsx! {
@@ -68,14 +61,14 @@ pub(crate) fn ChatPanel(show_controls: bool) -> Element {
             } else {
                 ul {
                     class: "{Styles::chat_panel__messages}",
-                    for message in messages.read().iter() {
+                    for message in chat.read().messages().iter() {
                         li {
                             class: if message.role() == Role::User { "{Styles::chat_panel__turn} {Styles::chat_panel__turn_user}" } else { "{Styles::chat_panel__turn}" },
                             "{message.text()}"
                         }
                     }
                 }
-                if messages.read().is_empty() {
+                if chat.read().messages().is_empty() {
                     p {
                         style: "padding: 1rem",
                         "No messages yet."
@@ -95,7 +88,7 @@ pub(crate) fn ChatPanel(show_controls: bool) -> Element {
                         },
                     }
                     button {
-                        disabled: draft.read().is_empty(),
+                        disabled: draft.read().trim().is_empty(),
                         onclick: move |_| submit(),
                         "Send"
                     }
