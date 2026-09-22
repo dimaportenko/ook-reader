@@ -17,7 +17,7 @@ and hide the button.
 1. ~~Ask AI opens a prefilled drawer~~ — lifted signals, a hard-coded passage, real title + chapter. **Done** — `742e2f7`.
 2. ~~A compose box that holds a quote~~ — `<textarea>`, Enter sends, Shift+Enter breaks the line. **Done** — `b499cf3`.
 3. ~~The author~~ — `OpenBook.author` into the `Passage`. **Done** — `21b4f65`.
-4. The real selection — `selectedText()` on the controller, an `async` handler that `eval`s it.
+4. ~~The real selection~~ — `selectedText()` on the controller, an `async` handler that `eval`s it. **Done** — `f30cfde`.
 5. Show *Ask AI* only while something is selected — `ook-selection` → `BridgeMsg::Selection`.
 6. Review and refactor.
 
@@ -301,6 +301,8 @@ library card's handler moves `book.author` into its closure the same way it alre
 `title`: each click builds a fresh `OpenBook`, so it clones from the closure's copy.
 
 ## Step 4 — The real selection
+
+> **Status:** done — committed in `f30cfde` (179 tests green, 2 ignored; clippy clean; `dx serve` checks confirmed by eye).
 
 > **Written by:** `lbb:next-implement`. The agent wrote the implementation and tests;
 > they are reviewed by hand.

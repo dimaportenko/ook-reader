@@ -70,7 +70,7 @@ built and tested in Phase 17.
 - [x] **3. The author** — `OpenBook.author` from the `books` row, passed into the
       `Passage`; `dx serve` eyeball on a book with and one without an author. *(Swapped
       ahead of the selection 2026-09-22: it landed first in the working tree.)*
-- [ ] **4. The real selection** — `selectedText()` on the reader controller; the *Ask AI*
+- [x] **4. The real selection** — `selectedText()` on the reader controller; the *Ask AI*
       handler goes `async`, `eval`s it and drafts from the answer; an empty selection only
       opens the drawer; a name-agreement `#[test]` + `dx serve` eyeball.
 - [ ] **5. Show *Ask AI* only while something is selected** — a `selectionchange`
