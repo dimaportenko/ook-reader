@@ -10,11 +10,13 @@ use crate::{
 struct Styles;
 
 #[component]
-pub(crate) fn ChatPanel(show_controls: bool) -> Element {
-    let mut open = use_signal(|| false);
+pub(crate) fn ChatPanel(
+    show_controls: bool,
+    mut open: Signal<bool>,
+    mut draft: Signal<String>,
+) -> Element {
     let provider = use_context::<Signal<Option<Gemini>>>();
     let mut chat = use_signal(Conversation::default);
-    let mut draft = use_signal(String::new);
 
     let mut submit = move || {
         let Some(gemini) = provider.read().clone() else {

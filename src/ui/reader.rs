@@ -4,6 +4,7 @@ use dioxus::core::use_hook_with_cleanup; // not re-exported through the prelude
 use dioxus::prelude::*;
 
 use crate::{
+    ai::prompt::{self, Passage},
     clock::now_secs,
     epub::{self, Locator},
     library::Library,
@@ -158,6 +159,9 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
     let show_controls = use_signal(|| true);
     let opened = use_signal(|| false);
 
+    let mut chat_draft = use_signal(String::new);
+    let mut chat_open = use_signal(|| false);
+
     use_effect(move || {
         let push = document::eval(THEME_PUSH_JS);
         _ = push.send(settings().css_vars());
@@ -249,8 +253,32 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                         on_pick,
                     }
                     SettingsPopover {}
+                    button {
+                        onclick: {
+                            let title = book.title.clone();
+                            let chapter = chapter_label.clone();
+                            move |_| {
+                                chat_draft
+                                    .set(
+                                        prompt::draft(
+                                            &Passage {
+                                                title: &title,
+                                                author: None,
+                                                chapter: Some(&chapter),
+                                                text: "Text",
+                                            },
+                                        ),
+                                    );
+                                chat_open.set(true);
+                            }
+                        },
+                        "Ask AI"
+                    }
+
                     ChatPanel {
                         show_controls: show_controls(),
+                        open: chat_open,
+                        draft: chat_draft,
                     }
                 }
 
