@@ -16,7 +16,7 @@ and hide the button.
 
 1. ~~Ask AI opens a prefilled drawer~~ — lifted signals, a hard-coded passage, real title + chapter. **Done** — `742e2f7`.
 2. ~~A compose box that holds a quote~~ — `<textarea>`, Enter sends, Shift+Enter breaks the line. **Done** — `b499cf3`.
-3. The author — `OpenBook.author` into the `Passage`.
+3. ~~The author~~ — `OpenBook.author` into the `Passage`. **Done** — `21b4f65`.
 4. The real selection — `selectedText()` on the controller, an `async` handler that `eval`s it.
 5. Show *Ask AI* only while something is selected — `ook-selection` → `BridgeMsg::Selection`.
 6. Review and refactor.
@@ -276,6 +276,8 @@ Gemini's Markdown (`**bold**`, lists) appears as raw characters, and rendering M
 not in this phase. Focusing the box on *Ask AI* is still unplanned.
 
 ## Step 3 — The author
+
+> **Status:** done — committed in `21b4f65` (178 tests green, 2 ignored; clippy clean; `dx serve` checked by eye).
 
 **What it is.** `OpenBook` carries the book's `author: Option<String>` from the `books` row
 it was opened from, and *Ask AI* passes it into the `Passage`, so the draft reads
