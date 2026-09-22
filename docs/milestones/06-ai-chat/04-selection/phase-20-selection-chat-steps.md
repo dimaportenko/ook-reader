@@ -14,7 +14,7 @@ and hide the button.
 
 ## Step plan
 
-1. Ask AI opens a prefilled drawer — lifted signals, a hard-coded passage, real title + chapter.
+1. ~~Ask AI opens a prefilled drawer~~ — lifted signals, a hard-coded passage, real title + chapter. **Done** — `742e2f7`.
 2. A compose box that holds a quote — `<textarea>`, Enter sends, Shift+Enter breaks the line.
 3. The real selection — `selectedText()` on the controller, an `async` handler that `eval`s it.
 4. The author — `OpenBook.author` into the `Passage`.
@@ -31,6 +31,8 @@ already works. The flag that hides the button comes last because it is polish, a
 the only step that adds a new message to the bridge.
 
 ## Step 1 — Ask AI opens a prefilled drawer
+
+> **Status:** done — committed in `742e2f7` (175 tests green, 2 ignored; clippy clean; `dx serve` checks confirmed by eye).
 
 **What it is.** A temporary text button, *Ask AI*, in the reader's control row next to
 the chat icon. Pressing it writes `prompt::draft(..)` into the chat's compose box and opens

@@ -60,7 +60,7 @@ it, then the real selection, then the remaining metadata, then the show/hide pol
 step ends with something to click. The only real abstraction (`prompt::draft`) was already
 built and tested in Phase 17.
 
-- [ ] **1. Ask AI opens a prefilled drawer** — lift `open` and `draft` from `ChatPanel`
+- [x] **1. Ask AI opens a prefilled drawer** — lift `open` and `draft` from `ChatPanel`
       into `Reader`; a temporary *Ask AI* button in the control row fills the draft from a
       hard-coded passage plus the real title and chapter label, then opens the drawer;
       `dx serve` eyeball, `cargo clippy`.
