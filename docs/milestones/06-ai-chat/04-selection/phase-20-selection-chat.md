@@ -64,7 +64,7 @@ built and tested in Phase 17.
       into `Reader`; a temporary *Ask AI* button in the control row fills the draft from a
       hard-coded passage plus the real title and chapter label, then opens the drawer;
       `dx serve` eyeball, `cargo clippy`.
-- [ ] **2. A compose box that holds a quote** — `<textarea>` in place of `<input>`; Enter
+- [x] **2. A compose box that holds a quote** — `<textarea>` in place of `<input>`; Enter
       sends, Shift+Enter breaks the line, an IME's confirming Enter does not send — the rule
       in a pure `sends` fn under `#[test]`; `dx serve` eyeball.
 - [ ] **3. The real selection** — `selectedText()` on the reader controller; the *Ask AI*

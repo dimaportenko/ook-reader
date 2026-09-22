@@ -15,7 +15,7 @@ and hide the button.
 ## Step plan
 
 1. ~~Ask AI opens a prefilled drawer~~ — lifted signals, a hard-coded passage, real title + chapter. **Done** — `742e2f7`.
-2. A compose box that holds a quote — `<textarea>`, Enter sends, Shift+Enter breaks the line.
+2. ~~A compose box that holds a quote~~ — `<textarea>`, Enter sends, Shift+Enter breaks the line. **Done** — `b499cf3`.
 3. The real selection — `selectedText()` on the controller, an `async` handler that `eval`s it.
 4. The author — `OpenBook.author` into the `Passage`.
 5. Show *Ask AI* only while something is selected — `ook-selection` → `BridgeMsg::Selection`.
@@ -139,6 +139,8 @@ which Step 5 changes too. The one-line draft is Step 2. Focusing the compose box
 drawer opens with a draft is not planned; if it itches after Step 2, raise it in Step 6.
 
 ## Step 2 — A compose box that holds a quote
+
+> **Status:** done — committed in `b499cf3` (178 tests green, 2 ignored; clippy clean; `dx serve` checks confirmed by eye).
 
 > **Written by:** `lbb:next-implement`. The agent wrote the implementation and tests;
 > they are reviewed by hand.
