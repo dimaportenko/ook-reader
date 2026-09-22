@@ -70,5 +70,5 @@ order".)
 - [x] **4. The async send** — submit `spawn`s `provider.complete` on the full history and
       `settle`s the result; a waiting row and an error row; `dx serve` with a real key on
       desktop, then the iOS simulator.
-- [ ] **5. Review and refactor** — punch-list over `src/chat/`, `ui/chat.rs`, and the
+- [ ] **5. Review and refactor** *(punch-list landed in `0302f0e`; iOS gate still owed)* — punch-list over `src/chat/`, `ui/chat.rs`, and the
       accessor change in `ai`; suite green, clippy clean.

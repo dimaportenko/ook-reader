@@ -904,3 +904,6 @@ item above exposes an edge the suite does not pin; none is expected.
 > the diff proposed nothing inside the step; the one candidate it surfaced — a
 > `Role::as_str()` so the `data-role` value is not spelled in the view — lives in
 > `ai/mod.rs` and is left for a later step. The iOS gate above is still owed.
+> **Status:** done — committed in `0302f0e` (175 tests green, none new — a refactor; clippy
+> clean). Phase 19 stays open: the iOS simulator end-to-end run and safe-area geometry
+> check are still owed, and the phase checklist ticks Step 5 only after that gate passes.
