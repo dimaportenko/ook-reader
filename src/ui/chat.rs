@@ -33,6 +33,9 @@ pub(crate) fn ChatPanel(show_controls: bool) -> Element {
         });
     };
 
+    let provider = provider.read();
+    let conversation = chat.read();
+
     rsx! {
         button {
             class: if show_controls { "icon-button" } else { "icon-button reader-control--hidden" },
@@ -64,39 +67,40 @@ pub(crate) fn ChatPanel(show_controls: bool) -> Element {
                 }
 
             }
-            if provider.read().is_none() {
+            if provider.is_none() {
                 p {
-                    style: "padding: 1rem",
+                    class: "{Styles::chat_panel__note}",
                     "Add a Gemini key in settings to chat."
                 }
             } else {
+                if conversation.messages().is_empty() {
+                    p {
+                        class: "{Styles::chat_panel__note}",
+                        "No messages yet."
+                    }
+                }
                 ul {
                     class: "{Styles::chat_panel__messages}",
-                    for message in chat.read().messages().iter() {
+                    aria_live: "polite",
+                    for message in conversation.messages().iter() {
                         li {
-                            class: if message.role() == Role::User { "{Styles::chat_panel__turn} {Styles::chat_panel__turn_user}" } else { "{Styles::chat_panel__turn}" },
+                            class: "{Styles::chat_panel__turn}",
+                            "data-role": if message.role() == Role::User { "user" } else { "assistant" },
                             "{message.text()}"
                         }
                     }
-                    if *chat.read().status() == Status::Waiting {
+                    if *conversation.status() == Status::Waiting {
                         li {
                             class: "{Styles::chat_panel__turn}",
-                            aria_live: "polite",
                             "..."
                         }
                     }
                 }
-                if let Status::Failed(text) = chat.read().status() {
+                if let Status::Failed(text) = conversation.status() {
                     p {
                         class: "{Styles::chat_panel__error}",
                         role: "alert",
                         "{text}"
-                    }
-                }
-                if chat.read().messages().is_empty() {
-                    p {
-                        style: "padding: 1rem",
-                        "No messages yet."
                     }
                 }
                 div {

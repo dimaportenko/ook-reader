@@ -28,13 +28,13 @@ impl Conversation {
     }
 
     pub(crate) fn settle(&mut self, outcome: Result<Reply, ChatError>) {
-        match outcome {
+        self.status = match outcome {
             Ok(reply) => {
                 self.messages.push(Message::assistant(reply.text));
-                self.status = Status::Idle
+                Status::Idle
             }
-            Err(error) => self.status = Status::Failed(error.to_string()),
-        }
+            Err(error) => Status::Failed(error.to_string()),
+        };
     }
 
     pub(crate) fn messages(&self) -> &[Message] {

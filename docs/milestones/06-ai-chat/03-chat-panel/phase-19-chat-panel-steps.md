@@ -740,3 +740,167 @@ box and its `max-width` context. Moved inside, after the `for`.
 > none; clippy clean). Desktop `dx serve` run with a real key confirmed by the learner.
 > **Still owed:** the iOS simulator end-to-end run and the safe-area geometry check carried
 > from Steps 1–2; it runs before Step 5 closes the phase.
+
+## Step 5 — Review and refactor
+
+**What it is.** The phase's code works; this pass makes it good. A punch-list over
+`src/chat/mod.rs`, `src/ui/chat.rs`, `src/ui/chat.css`, and the accessor change in
+`src/ai/mod.rs`, each item with its why. Behaviour does not change: the suite is the spec.
+
+**Check first — the safety net, not a target.** Before touching anything, record the
+baseline: `cargo test` is at 175 green and `cargo clippy --all-targets` is clean (measured
+2026-09-21). After every item on the list, both must read the same. If an item needs a test
+to change, it is not a refactor — stop and split it out.
+
+**Gate before the phase closes.** Step 4 still owes the iOS simulator end-to-end run and the
+safe-area geometry check carried from Steps 1–2. Run it once the punch-list is done, so the
+geometry read covers the final CSS: `dx build --platform ios`, open via `agent-device`, save
+the key on the device, ask a question, then read the compose row's and close button's
+`rect`s from `agent-device snapshot -i --json` against the safe area. The phase is marked
+done only after that run.
+
+**The punch-list.** Six items, highest leverage first. Tick them off as you go.
+
+- [x] **1. One `chat.read()` per render, not four** — `src/ui/chat.rs`.
+
+  Today the `rsx!` body calls `chat.read()` in four places: the `for`, the waiting row, the
+  error row, and the empty state. Bind it once, after `submit` is defined and before `rsx!`:
+
+  ```rust
+  let conversation = chat.read();
+
+  rsx! {
+      …
+      for message in conversation.messages().iter() { … }
+      if *conversation.status() == Status::Waiting { … }
+      if let Status::Failed(text) = conversation.status() { … }
+      if conversation.messages().is_empty() { … }
+  ```
+
+  *Why.* Each `read()` is its own `Ref` borrow and its own subscription bookkeeping; one
+  binding states the fact plainly — *this render reads the conversation* — and the body
+  reads like ordinary Rust against a value, not a signal. It is safe because `rsx!` builds
+  the nodes eagerly: the guard lives to the end of the function, and the only writes to
+  `chat` happen inside handlers, which run on a later event, not during this call. Note
+  what `submit` captures: the `Signal` handle (`Copy`), never the guard — which is why the
+  binding order does not matter for correctness, but putting the read *after* `submit`
+  makes that visible. The same holds for `provider.read()`, which is read twice; one
+  `let provider = provider.read();` is the same idiom (the `Some(gemini)` in `submit` is
+  a separate, short-lived read inside the handler, and stays).
+
+- [x] **2. `settle` assigns its status out of the `match`** — `src/chat/mod.rs`.
+
+  Before:
+
+  ```rust
+  match outcome {
+      Ok(reply) => {
+          self.messages.push(Message::assistant(reply.text));
+          self.status = Status::Idle
+      }
+      Err(error) => self.status = Status::Failed(error.to_string()),
+  }
+  ```
+
+  After:
+
+  ```rust
+  self.status = match outcome {
+      Ok(reply) => {
+          self.messages.push(Message::assistant(reply.text));
+          Status::Idle
+      }
+      Err(error) => Status::Failed(error.to_string()),
+  };
+  ```
+
+  *Why.* `match` is an expression. One assignment fed by every arm turns "every outcome sets
+  a status" from a convention into something the compiler checks: an arm that forgot to
+  yield a `Status` is a type error, where today it would be a silently unchanged `Waiting`.
+  It also removes the asymmetry between the arms (one a block with a trailing expression,
+  one a bare assignment) that made the first version read as two different shapes.
+
+- [x] **3. The live region is the list, not the waiting row** — `src/ui/chat.rs`.
+
+  Move `aria_live: "polite"` from the waiting `li` onto the `ul`, and drop it from the `li`.
+  Leave `role: "alert"` on the error `p` exactly as it is.
+
+  *Why.* A screen reader announces *changes inside* a live region it already knows about.
+  The waiting `li` is inserted with its `aria-live` already set, so it arrives as a new node,
+  not as a change — nothing is announced, and neither is the assistant bubble that replaces
+  it. With the `ul` as the region, every bubble that lands is a mutation inside a region that
+  existed at page load, and it is read out. `role="alert"` is the one exception that makes
+  the error row correct today: it is an implicit `aria-live="assertive"` that browsers fire
+  on insertion precisely so alerts can appear from nowhere. Knowing which one you have is
+  the whole distinction.
+
+- [x] **4. The turn's role is a data attribute, like the drawer's state** —
+  `src/ui/chat.rs`, `src/ui/chat.css`.
+
+  Before, the `li` concatenates class strings in an `if`:
+
+  ```rust
+  class: if message.role() == Role::User { "{Styles::chat_panel__turn} {Styles::chat_panel__turn_user}" } else { "{Styles::chat_panel__turn}" },
+  ```
+
+  After:
+
+  ```rust
+  class: "{Styles::chat_panel__turn}",
+  "data-role": if message.role() == Role::User { "user" } else { "assistant" },
+  ```
+
+  and in the CSS, `.chat_panel__turn_user` becomes `.chat_panel__turn[data-role="user"]`.
+
+  *Why.* The file already speaks this dialect: the drawer's open/closed state is
+  `data-state`, and the CSS selects on it. State goes on the element as data; how state
+  looks is the stylesheet's business. That keeps the rsx free of string-building and drops
+  a class whose only job was to be conditionally appended. `css_module` still hashes the
+  class name; an attribute selector on the hashed class works unchanged.
+
+- [x] **5. Stylesheet hygiene** — `src/ui/chat.css`, `src/ui/chat.rs`.
+
+  - Delete the commented-out `background:` pair in `.chat_panel`; it is scaffolding from
+    Step 1 and the live rule is the `color-mix` line under it.
+  - `var(--error-color, #b00020)` names a variable that does not exist anywhere in the
+    project, so the fallback is always what renders. The theme already defines
+    `--primary-error-color` (the popover stylesheet uses it); use that, with no fallback.
+  - The two `style: "padding: 1rem"` notes ("Add a Gemini key…", "No messages yet.") become
+    one `.chat_panel__note` class. Two identical inline styles is a class that has not been
+    named yet.
+  - Move the "No messages yet." `p` *above* the `ul`, so the DOM order is note → list →
+    error → compose, the same as the visual order. Today the empty state renders after an
+    empty list and the error row, which only reads right by accident.
+
+  *Why.* None of these change a pixel on the happy path. They change what the next reader
+  believes: a variable that exists, a class that says what the element is, and source order
+  that matches screen order.
+
+- [x] **6. Two considered non-changes, so they are not re-litigated later.**
+
+  - **`Status::Failed(String)`, not `Status::Failed(ChatError)`.** `Status` derives `Clone`
+    and `PartialEq` so the UI can compare it in render and tests can `assert_eq!` on it;
+    `ChatError` can derive neither, because `reqwest::Error` does not. Storing the rendered
+    message is the right trade for a value whose only consumer is a `<p>`. If a later phase
+    needs to *branch* on the error kind (retry on `Http`, not on `Api`), that is the moment
+    to revisit, with a small `Clone`-able summary enum — not now.
+  - **`Reply.text` is a public field while `Message` has accessors.** They are used
+    differently: `settle` *consumes* a `Reply` and moves its text into a `Message`, so a
+    field is the honest shape; the UI *reads* `Message`s it never constructs, so read
+    accessors with private fields are. Symmetry for its own sake would cost a `.into_text()`
+    nobody needs.
+
+**Doc reconciliation (done with this step).** The phase doc's design decision said the
+conversation signal is "created in `Reader`". The code creates it in `ChatPanel`, which
+`Reader` mounts, so it still drops with the book; the decision text now says so.
+
+**Scope.** No Escape-to-close, no scroll-to-bottom on a new bubble, no retry button, no
+cancel — all named in Step 4's scope note and not refactors. No new unit tests unless an
+item above exposes an edge the suite does not pin; none is expected.
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand. Items 1–5 applied 2026-09-22; item 6 is two recorded non-changes.
+> Suite unchanged at 175 green, clippy clean, before and after. The `simplify` pass over
+> the diff proposed nothing inside the step; the one candidate it surfaced — a
+> `Role::as_str()` so the `data-role` value is not spelled in the view — lives in
+> `ai/mod.rs` and is left for a later step. The iOS gate above is still owed.

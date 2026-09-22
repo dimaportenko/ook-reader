@@ -39,8 +39,10 @@ and calls those methods.
   (for `Message`, `Reply`, `ChatError`) and nothing else; `ui/chat.rs` depends on it.
 - **`Message` grows read accessors** (`role()`, `text()`) in `ai/mod.rs`. Its fields stay
   private; the UI reads, it never constructs a `Message` by hand.
-- **One conversation per open book**, held in a signal created in `Reader`, so closing the
-  book drops it. Persisting chats is not a Phase 19 requirement.
+- **One conversation per open book**, held in a signal owned by `ChatPanel`, which `Reader`
+  mounts — so closing the book unmounts the drawer and drops the chat with it. (Recorded as
+  "created in `Reader`" when planned; the code owns it one level down, with the same
+  lifetime. Reconciled in Step 5.) Persisting chats is not a Phase 19 requirement.
 - **The whole history goes on every request.** Gemini's `generateContent` is stateless; the
   request body already accepts the full `contents` list. Trimming is Phase 22's problem.
 - **A failed send keeps the question.** `Status::Failed(text)` sits beside the messages; the

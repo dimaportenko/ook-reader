@@ -6,8 +6,6 @@
   width: min(28rem, 100%);
   padding: env(safe-area-inset-top) env(safe-area-inset-right)
     env(safe-area-inset-bottom) 0;
-  /* background: var(--light, var(--primary-color)) */
-  /*   var(--dark, var(--primary-color-5)); */
   background-color: color-mix(in srgb, var(--USER__backgroundColor) 62%, white);
   z-index: 2;
   display: flex;
@@ -58,7 +56,7 @@
   background: color-mix(in srgb, var(--USER__backgroundColor) 80%, black);
 }
 
-.chat_panel__turn_user {
+.chat_panel__turn[data-role="user"] {
   margin-left: auto;
   background: color-mix(in srgb, var(--USER__backgroundColor) 10%, white);
 }
@@ -76,5 +74,9 @@
 .chat_panel__error {
   margin: 0;
   padding: 0.5rem 1rem;
-  color: var(--error-color, #b00020);
+  color: var(--primary-error-color);
+}
+
+.chat_panel__note {
+  padding: 1rem;
 }
