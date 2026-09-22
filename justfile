@@ -2,6 +2,11 @@ ios_app := "target/dx/ook-reader/debug/ios/OokReader.app"
 ios_device_app := "target/dx/ook-reader/release/ios/OokReader.app"
 bundle_id := "com.dimaportenko.ook-reader"
 
+# Dioxus 0.7 pins tao 0.34, which has no UIScene life cycle; the iOS 27 SDK (Xcode 27)
+# refuses to launch such apps. Until Dioxus bumps tao (DioxusLabs/dioxus#5853), iOS
+# builds link against the iOS 26 SDK from a side-by-side Xcode 26 install.
+ios_xcode := env("OOK_IOS_XCODE", "/Applications/Xcode-26.6.0.app")
+
 default:
     @just --list
 
@@ -39,11 +44,22 @@ boot-ios:
     open -a Simulator
     xcrun simctl bootstatus "$DEVICE" -b
 
-serve-ios: boot-ios
-    dx serve --platform ios
+check-ios-xcode:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -d "{{ios_xcode}}/Contents/Developer" ]; then
+      echo "Xcode 26 not found at {{ios_xcode}}." >&2
+      echo "Install it side by side (e.g. via Xcodes.app) or set OOK_IOS_XCODE to its path." >&2
+      echo "Why: Xcode 27's iOS SDK requires UIScene, which Dioxus 0.7's tao 0.34 lacks (DioxusLabs/dioxus#5853)." >&2
+      exit 1
+    fi
+    echo "Using $(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "{{ios_xcode}}/Contents/Info.plist" | sed 's/^/Xcode /') at {{ios_xcode}}"
 
-install-ios: boot-ios
-    dx build --platform ios
+serve-ios: check-ios-xcode boot-ios
+    DEVELOPER_DIR="{{ios_xcode}}/Contents/Developer" dx serve --platform ios
+
+install-ios: check-ios-xcode boot-ios
+    DEVELOPER_DIR="{{ios_xcode}}/Contents/Developer" dx build --platform ios
     cp assets/icons/ios/*.png {{ios_app}}/
     xcrun simctl install booted {{ios_app}}
 
@@ -103,9 +119,10 @@ pick-device query="":
     PY
     QUERY="{{query}}" python3 "$script" "$json"
 
-release-ios query="":
+release-ios query="": check-ios-xcode
     #!/usr/bin/env bash
     set -euo pipefail
+    export DEVELOPER_DIR="{{ios_xcode}}/Contents/Developer"
     udid=$(just pick-device "{{query}}")
     dx build --platform ios --release --device "$udid"
     cp assets/icons/ios/*.png "{{ios_device_app}}/"
