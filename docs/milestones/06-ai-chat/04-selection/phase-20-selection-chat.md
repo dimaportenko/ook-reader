@@ -56,7 +56,7 @@ sibling of that button. So there are two hand-offs to make, and each has one ide
 Detail for each lives in [`phase-20-selection-chat-steps.md`](phase-20-selection-chat-steps.md).
 
 The order is **entry point first with a faked passage, then the compose box that can show
-it, then the real selection, then the remaining metadata, then the show/hide polish**. Each
+it, then the remaining metadata, then the real selection, then the show/hide polish**. Each
 step ends with something to click. The only real abstraction (`prompt::draft`) was already
 built and tested in Phase 17.
 
@@ -67,11 +67,12 @@ built and tested in Phase 17.
 - [x] **2. A compose box that holds a quote** — `<textarea>` in place of `<input>`; Enter
       sends, Shift+Enter breaks the line, an IME's confirming Enter does not send — the rule
       in a pure `sends` fn under `#[test]`; `dx serve` eyeball.
-- [ ] **3. The real selection** — `selectedText()` on the reader controller; the *Ask AI*
+- [ ] **3. The author** — `OpenBook.author` from the `books` row, passed into the
+      `Passage`; `dx serve` eyeball on a book with and one without an author. *(Swapped
+      ahead of the selection 2026-09-22: it landed first in the working tree.)*
+- [ ] **4. The real selection** — `selectedText()` on the reader controller; the *Ask AI*
       handler goes `async`, `eval`s it and drafts from the answer; an empty selection only
-      opens the drawer; a three-hop agreement `#[test]` + `dx serve` eyeball.
-- [ ] **4. The author** — `OpenBook.author` from the `books` row, passed into the
-      `Passage`; `dx serve` eyeball on a book with and one without an author.
+      opens the drawer; a name-agreement `#[test]` + `dx serve` eyeball.
 - [ ] **5. Show *Ask AI* only while something is selected** — a `selectionchange`
       listener in the chapter posts `ook-selection` when the flag flips, the controller
       forwards it as `selection:true|false` (and `false` on a chapter change),

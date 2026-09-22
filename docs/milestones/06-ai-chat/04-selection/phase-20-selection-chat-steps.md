@@ -16,8 +16,8 @@ and hide the button.
 
 1. ~~Ask AI opens a prefilled drawer~~ — lifted signals, a hard-coded passage, real title + chapter. **Done** — `742e2f7`.
 2. ~~A compose box that holds a quote~~ — `<textarea>`, Enter sends, Shift+Enter breaks the line. **Done** — `b499cf3`.
-3. The real selection — `selectedText()` on the controller, an `async` handler that `eval`s it.
-4. The author — `OpenBook.author` into the `Passage`.
+3. The author — `OpenBook.author` into the `Passage`.
+4. The real selection — `selectedText()` on the controller, an `async` handler that `eval`s it.
 5. Show *Ask AI* only while something is selected — `ook-selection` → `BridgeMsg::Selection`.
 6. Review and refactor.
 
@@ -26,8 +26,9 @@ the controller method, then the button. That means two steps whose only check is
 test. Instead, Step 1 is the button the user will eventually press, wired to a fake passage,
 so the whole path from click to drawer to draft is on screen immediately. Step 1 also shows
 a real bug: the `<input>` flattens the quote onto one line. That is Step 2's reason to exist.
-The real selection replaces the fake in Step 3 as a one-line swap inside a handler that
-already works. The flag that hides the button comes last because it is polish, and it is
+The real selection replaces the fake in Step 4 as a swap inside a handler that already
+works. (Steps 3 and 4 were swapped on 2026-09-22 because the author landed first in the
+working tree, and neither step depends on the other.) The flag that hides the button comes last because it is polish, and it is
 the only step that adds a new message to the bridge.
 
 ## Step 1 — Ask AI opens a prefilled drawer
@@ -130,10 +131,10 @@ Plus `ai::prompt::{self, Passage}` in the `use crate::{…}` block.
   top to bottom on every render, and each run builds a *new* `onclick` closure.
   `chapter_label` is recomputed from the `chapter()` signal on each render, so each
   closure captures the label that was on screen when it was built. A signal is different:
-  it is read when the handler runs, not when it is built. Step 3 relies on that
+  it is read when the handler runs, not when it is built. Step 4 relies on that
   difference when the selection has to be read at click time.
 
-**Scope note.** The passage is fake until Step 3; `author` is `None` until Step 4; the
+**Scope note.** The passage is fake until Step 4; `author` is `None` until Step 3; the
 button is always visible until Step 5, and it is hidden along with the other controls by a tap,
 which Step 5 changes too. The one-line draft is Step 2. Focusing the compose box when the
 drawer opens with a draft is not planned; if it itches after Step 2, raise it in Step 6.
@@ -270,6 +271,152 @@ and `.chat_panel__turn` gains `white-space: pre-wrap;`.
   and still wraps long lines. This step owns the fix because it is the first to put a
   newline into a turn. Gemini's replies benefit too, since they often have paragraphs.
 
-**Scope note.** The passage is still fake until Step 3. Replies are shown as plain text:
+**Scope note.** The passage is still fake until Step 4. Replies are shown as plain text:
 Gemini's Markdown (`**bold**`, lists) appears as raw characters, and rendering Markdown is
 not in this phase. Focusing the box on *Ask AI* is still unplanned.
+
+## Step 3 — The author
+
+**What it is.** `OpenBook` carries the book's `author: Option<String>` from the `books` row
+it was opened from, and *Ask AI* passes it into the `Passage`, so the draft reads
+`I'm reading *<title>* by <author>, …`. Written ahead of the plan. It was Step 4 until
+the swap.
+
+**Check first: `dx serve`, eyeball.** Open a book that has an author and press *Ask AI*:
+the header reads `by <author>`. Open one without an author (the library card shows no
+author line) and press it again: the header goes straight from the title to the chapter,
+with no stray `by`. That second case is `prompt::draft`'s job and is already under
+`missing_author_and_chapter_leave_no_holes`. This check only confirms the `None` gets there.
+
+**Minimal implementation.** `author: Option<String>` on `OpenBook` in `ui/library.rs`,
+filled from `book.author` where the library card builds the `OpenBook`; in `Reader`, clone
+it next to `title` and pass `author: author.as_deref()`.
+
+**Why it works.** `Passage` borrows (`Option<&str>`), `OpenBook` owns
+(`Option<String>`). `as_deref()` is the bridge: it turns `&Option<String>` into
+`Option<&str>` without cloning, the `Option` equivalent of `&String → &str`. The
+library card's handler moves `book.author` into its closure the same way it already moves
+`title`: each click builds a fresh `OpenBook`, so it clones from the closure's copy.
+
+## Step 4 — The real selection
+
+**What it is.** *Ask AI* stops drafting from a hard-coded sentence and drafts from what is
+actually selected in the chapter. The click handler becomes `async`: it runs a one-line
+script through `document::eval` that asks the reader controller for the active frame's
+selection, `.await`s the string, and builds the draft from it. If nothing is selected,
+the drawer opens and the draft is left alone.
+
+**Check first (part 1): `cargo test ui::reader`.** Add this to `mod test` in
+`src/ui/reader.rs`. It fails to compile until `SELECTED_TEXT_JS` exists, then fails on
+the controller half until `selectedText` is written:
+
+```rust
+#[test]
+fn ask_ai_and_the_controller_agree_on_how_to_read_the_selection() {
+    // Rust names a JS method in a string; nothing checks that the method exists.
+    // Rename it on one side and Ask AI silently drafts nothing.
+    assert!(SELECTED_TEXT_JS.contains("__ookReader?.selectedText()"));
+    assert!(READER_CONTROLLER_JS.contains("selectedText()"));
+    assert!(READER_CONTROLLER_JS.contains("getSelection()"));
+}
+```
+
+**Check first (part 2): `dx serve`, eyeball.**
+
+1. Select a sentence in the chapter and press *Ask AI*. The draft quotes **that sentence**.
+2. Select across a paragraph break. Each paragraph is quoted on its own `> ` line, with
+   no `> ` line at the very start or end.
+3. Click in the text to clear the selection and press *Ask AI*. The drawer opens, and the
+   draft from step 2 is still there, untouched.
+4. Turn to the next chapter, select something there, and press *Ask AI*. The quote comes
+   from the new chapter, not the one before. This checks that the method reads the active
+   slot and not a preloaded one.
+5. `cargo clippy --all-targets` is clean.
+
+**Minimal implementation.**
+
+`src/web/assets/host/reader/reader-controller.js`: a method on the `reader` object, next to
+`resolveGesture`:
+
+```js
+selectedText() {
+  return (
+    this.slots[this.active].frame.contentWindow?.getSelection()?.toString() ?? ""
+  );
+},
+```
+
+Also add a line to the `ReaderController` typedef: ` * @property {() => string} selectedText`.
+
+`src/ui/reader.rs`: a constant next to `GESTURE_RESULT_JS`:
+
+```rust
+const SELECTED_TEXT_JS: &str = r#"return window.__ookReader?.selectedText() ?? "";"#;
+```
+
+and the *Ask AI* handler, which reads the selection before drafting:
+
+```rust
+onclick: {
+    let title = book.title.clone();
+    let author = book.author.clone();
+    let chapter = chapter_label.clone();
+    move |_| {
+        let (title, author, chapter) = (title.clone(), author.clone(), chapter.clone());
+        async move {
+            let selected = document::eval(SELECTED_TEXT_JS)
+                .join::<String>()
+                .await
+                .unwrap_or_default();
+            let text = selected.trim();
+            if !text.is_empty() {
+                chat_draft.set(prompt::draft(&Passage {
+                    title: &title,
+                    author: author.as_deref(),
+                    chapter: Some(&chapter),
+                    text,
+                }));
+            }
+            chat_open.set(true);
+        }
+    }
+},
+```
+
+**Why it works.**
+
+- **Why it has to be `async`.** Rust never sees the DOM. `document::eval` sends the
+  script to the webview and returns immediately. The answer comes back later as a message,
+  so reading it is an `.await`. Dioxus accepts an event handler that returns a future and
+  spawns it on the component's scope, the same machinery as Phase 19's `spawn`, without
+  spelling it out.
+- **Why `return` in the script, and `.join::<String>()`.** Dioxus wraps an `eval` script
+  in an async JS function. Its `return` value is serialized to JSON and becomes what
+  `join` deserializes. `join` consumes the `Eval`, so it suits a one-shot question.
+  `recv` is for streams of messages (the bridge's `while let … recv()` loop). `?? ""`
+  on the JS side covers the reader controller not being mounted yet: the result is still a
+  string, never `null`, so `join::<String>` cannot fail on a type mismatch.
+- **Why the second round of clones inside the closure.** The closure is called once per
+  click, but `async move` needs to **own** everything it uses, because the future may
+  outlive the call that created it. It cannot take the closure's own `title`, since the
+  next click needs it too. So each call clones from the closure's copies and moves those
+  clones into that click's future. Two layers: the outer block clones out of the render,
+  and the inner line clones out of the closure.
+- **Why the `trim`.** `Selection.toString()` often carries a leading or trailing newline
+  when a selection starts or ends at a paragraph edge. Untrimmed, `draft` would quote it
+  as an empty `> ` line (check 2). `trim` returns a `&str` into `selected`, so nothing is
+  copied. `selected` has to live in its own `let` for that borrow to have something to
+  point at.
+- **Why read from the controller and not from `document.querySelector("iframe")`.** Two
+  iframes are always mounted, the active one and a preloaded one. Only the controller
+  knows which slot is `active`. Asking it keeps that knowledge in one place (check 4).
+  The host can call `getSelection()` on the frame's window at all because the chapter is
+  a `blob:` URL the host created, inside a sandbox with `allow-same-origin`, so the two
+  documents share an origin.
+
+**Scope note.** The button is still always visible, even with nothing selected. Step 5
+hides it until there is a selection. The empty-selection branch stays anyway, for the
+moment between the selection clearing and the click arriving. The selection is read as
+plain text: images, footnote markers and ruby annotations come through as whatever
+`toString()` makes of them. The 4,000-character cap in `prompt::draft` already bounds a
+long selection, and says so with `...`.
