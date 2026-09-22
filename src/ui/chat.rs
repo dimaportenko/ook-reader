@@ -107,12 +107,13 @@ pub(crate) fn ChatPanel(
                 }
                 div {
                     class: "{Styles::chat_panel__compose}",
-                    input {
+                    textarea {
+                        rows: 6,
                         value: "{draft}",
                         placeholder: "Ask about this book",
                         oninput: move |e| draft.set(e.data.value()),
                         onkeydown: move |e| {
-                            if e.key() == Key::Enter {
+                            if sends(&e.key(), e.modifiers().shift(), e.is_composing()) {
                                 e.prevent_default();
                                 submit();
                             }
@@ -129,8 +130,16 @@ pub(crate) fn ChatPanel(
     }
 }
 
+fn sends(key: &Key, shift: bool, composing: bool) -> bool {
+    *key == Key::Enter && !shift && !composing
+}
+
 #[cfg(test)]
 mod test {
+    use dioxus::prelude::Key;
+
+    use super::sends;
+
     const CHAT_CSS: &str = include_str!("chat.css");
     const SLIDE: &str = "0.2s";
 
@@ -161,5 +170,25 @@ mod test {
              hit-testable off-screen",
         );
         assert!(CHAT_CSS.contains("@media (prefers-reduced-motion: reduce)"));
+    }
+
+    #[test]
+    fn enter_sends_but_shift_enter_breaks_the_line() {
+        assert!(sends(&Key::Enter, false, false));
+        assert!(!sends(&Key::Enter, true, false), "Shift+Enter is a newline");
+    }
+
+    #[test]
+    fn enter_that_confirms_an_ime_composition_does_not_send() {
+        assert!(
+            !sends(&Key::Enter, false, true),
+            "the Enter that picks a kana candidate would otherwise send half a word",
+        );
+    }
+
+    #[test]
+    fn only_enter_sends() {
+        assert!(!sends(&Key::Character("a".into()), false, false));
+        assert!(!sends(&Key::Tab, false, false));
     }
 }

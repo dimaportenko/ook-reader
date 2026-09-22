@@ -54,6 +54,7 @@
   padding: 0.5rem 0.75rem;
   border-radius: 0.75rem;
   background: color-mix(in srgb, var(--USER__backgroundColor) 80%, black);
+  white-space: pre-wrap;
 }
 
 .chat_panel__turn[data-role="user"] {
@@ -67,8 +68,10 @@
   padding: 0.5rem 1rem;
 }
 
-.chat_panel__compose input {
+.chat_panel__compose textarea {
   flex: 1;
+  font: inherit;
+  resize: vertical;
 }
 
 .chat_panel__error {

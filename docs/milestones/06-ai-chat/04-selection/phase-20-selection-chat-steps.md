@@ -137,3 +137,137 @@ Plus `ai::prompt::{self, Passage}` in the `use crate::{…}` block.
 button is always visible until Step 5, and it is hidden along with the other controls by a tap,
 which Step 5 changes too. The one-line draft is Step 2. Focusing the compose box when the
 drawer opens with a draft is not planned; if it itches after Step 2, raise it in Step 6.
+
+## Step 2 — A compose box that holds a quote
+
+> **Written by:** `lbb:next-implement`. The agent wrote the implementation and tests;
+> they are reviewed by hand.
+
+**What it is.** The compose `<input>` becomes a `<textarea>`, so the draft from Step 1 shows
+as the lines `prompt::draft` wrote: a header, a blank line, `> `-quoted lines, and an
+empty line for the question. Enter still sends. Shift+Enter now inserts a newline, and
+Enter pressed while an input method is composing (Japanese, Chinese, dead-key accents)
+confirms the composition instead of sending. That three-way rule lives in a small
+pure function so it can be tested.
+
+**Check first (part 1): `cargo test ui::chat`.** Add this to the existing `mod test` in
+`src/ui/chat.rs`. It fails to compile until `sends` exists:
+
+```rust
+use dioxus::prelude::Key;
+
+use super::sends;
+
+#[test]
+fn enter_sends_but_shift_enter_breaks_the_line() {
+    assert!(sends(&Key::Enter, false, false));
+    assert!(!sends(&Key::Enter, true, false), "Shift+Enter is a newline");
+}
+
+#[test]
+fn enter_that_confirms_an_ime_composition_does_not_send() {
+    assert!(
+        !sends(&Key::Enter, false, true),
+        "the Enter that picks a kana candidate would otherwise send half a word",
+    );
+}
+
+#[test]
+fn only_enter_sends() {
+    assert!(!sends(&Key::Character("a".into()), false, false));
+    assert!(!sends(&Key::Tab, false, false));
+}
+```
+
+**Check first (part 2): `dx serve`, eyeball.**
+
+1. Press *Ask AI*. The compose box shows the draft **on several lines**: the
+   `I'm reading …` header, a blank line, the `> ` quote, then an empty line where the
+   cursor goes. It is tall enough to show the quote without scrolling.
+2. Click at the end, type a question, and press Enter. The turn lands in the list with its
+   line breaks intact, as the quote and then the question. This needs the one-line CSS
+   change to `.chat_panel__turn` below; without it, the turn is flattened.
+3. Type `one`, press Shift+Enter, type `two`. The box has two lines and nothing was sent.
+4. An empty box with just Shift+Enter newlines still leaves Send disabled, and Enter
+   does not send, because `ask` trims and refuses a blank turn.
+5. `cargo clippy --all-targets` is clean.
+
+**Minimal implementation.**
+
+`src/ui/chat.rs`, a free function below the component:
+
+```rust
+fn sends(key: &Key, shift: bool, composing: bool) -> bool {
+    *key == Key::Enter && !shift && !composing
+}
+```
+
+In the compose `div`, replace `input { … }` with a `textarea`. Only the element name, one
+attribute and the key test change:
+
+```rust
+textarea {
+    rows: 6,
+    value: "{draft}",
+    placeholder: "Ask about this book",
+    oninput: move |e| draft.set(e.data.value()),
+    onkeydown: move |e| {
+        if sends(&e.key(), e.modifiers().shift(), e.is_composing()) {
+            e.prevent_default();
+            submit();
+        }
+    },
+}
+```
+
+`src/ui/chat.css`: the `input` selector becomes `textarea`, and the box gets the page's
+font and a vertical-only resize handle:
+
+```css
+.chat_panel__compose textarea {
+  flex: 1;
+  font: inherit;
+  resize: vertical;
+}
+```
+
+and `.chat_panel__turn` gains `white-space: pre-wrap;`.
+
+**Why it works.**
+
+- **Why the `<input>` lost the newlines.** The HTML spec's *value sanitization* for a
+  single-line text field strips every CR and LF from the value. The string in `draft` was
+  always correct. The browser discarded the line breaks when it wrote the string into the
+  element. A `<textarea>` is the multi-line control and keeps them. `value:` on a
+  `textarea` in Dioxus sets the DOM **property**, so it stays a controlled field like the
+  `input` was. The signal is still the single source of truth.
+- **Why `prevent_default` matters more now.** In an `<input>`, Enter's default action
+  inserted nothing, so `prevent_default` was a formality. In a `<textarea>`, Enter's
+  default action is to insert `\n`. Without `prevent_default`, a sent message would
+  leave a stray newline in the freshly cleared box: `submit` sets `draft` to `""`, then the
+  browser applies the keypress. Shift+Enter skips the `if`, so the default applies and
+  inserts the newline, and no code is needed for that case.
+- **Why `is_composing`.** With an IME, the keydown for the Enter that *commits* a
+  candidate still reports `key == Enter`. Without the check, a Japanese user sends
+  half-typed text every time they confirm a word. It is one boolean, and forgetting it is
+  a classic chat-box bug, which is why it gets a named test.
+- **Why a free function and not a closure.** `sends` has no signals and no DOM, only three
+  values in and a `bool` out. Pulled out of the handler, it can be tested with
+  `cargo test` instead of by pressing keys. The handler is left with the plumbing:
+  read the event, call `sends`, act on the answer. This is the same split as
+  `Turn::of_swipe` in `reader.rs`.
+- **`e.modifiers()`** comes from the `ModifiersInteraction` trait, which the Dioxus prelude
+  brings into scope. If the compiler says there is no method `modifiers`, add
+  `use dioxus::html::ModifiersInteraction;`. `Modifiers::shift()` is a
+  `keyboard_types` convenience for `contains(Modifiers::SHIFT)`.
+
+- **Why `white-space: pre-wrap` on the turn.** HTML's default `white-space: normal`
+  collapses every run of whitespace, newlines included, into one space. So a turn
+  flattens in the `li` just as it did in the `<input>`, but for a different reason:
+  the text is intact and only its rendering collapses it. `pre-wrap` keeps the newlines
+  and still wraps long lines. This step owns the fix because it is the first to put a
+  newline into a turn. Gemini's replies benefit too, since they often have paragraphs.
+
+**Scope note.** The passage is still fake until Step 3. Replies are shown as plain text:
+Gemini's Markdown (`**bold**`, lists) appears as raw characters, and rendering Markdown is
+not in this phase. Focusing the box on *Ask AI* is still unplanned.

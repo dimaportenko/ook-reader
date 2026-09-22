@@ -65,7 +65,8 @@ built and tested in Phase 17.
       hard-coded passage plus the real title and chapter label, then opens the drawer;
       `dx serve` eyeball, `cargo clippy`.
 - [ ] **2. A compose box that holds a quote** — `<textarea>` in place of `<input>`; Enter
-      sends, Shift+Enter breaks the line; `dx serve` eyeball.
+      sends, Shift+Enter breaks the line, an IME's confirming Enter does not send — the rule
+      in a pure `sends` fn under `#[test]`; `dx serve` eyeball.
 - [ ] **3. The real selection** — `selectedText()` on the reader controller; the *Ask AI*
       handler goes `async`, `eval`s it and drafts from the answer; an empty selection only
       opens the drawer; a three-hop agreement `#[test]` + `dx serve` eyeball.
