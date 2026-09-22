@@ -11,7 +11,7 @@ pub(crate) struct Passage<'a> {
 }
 
 pub(crate) fn draft(passage: &Passage) -> String {
-    let mut out = format!("I'm reading *{}*", passage.title);
+    let mut out = format!("Я читаю *{}*", passage.title);
     if let Some(author) = passage.author {
         write!(out, " by {author}").expect("writing to a String cannot fail");
     }
@@ -19,7 +19,7 @@ pub(crate) fn draft(passage: &Passage) -> String {
         write!(out, ", chapter \"{chapter}\"").expect("writing to a String cannot fail");
     }
 
-    out.push_str(".\n\n");
+    out.push_str(" переклади та поясни наступний текст українською.\n\n");
     for line in clipped(passage.text).lines() {
         writeln!(out, "> {line}").expect("writing to a String cannot fail");
     }
