@@ -302,6 +302,9 @@ library card's handler moves `book.author` into its closure the same way it alre
 
 ## Step 4 — The real selection
 
+> **Written by:** `lbb:next-implement`. The agent wrote the implementation and tests;
+> they are reviewed by hand.
+
 **What it is.** *Ask AI* stops drafting from a hard-coded sentence and drafts from what is
 actually selected in the chapter. The click handler becomes `async`: it runs a one-line
 script through `document::eval` that asks the reader controller for the active frame's

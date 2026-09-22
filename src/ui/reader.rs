@@ -29,6 +29,7 @@ const GESTURE_RESULT_JS: &str = r#"
     const accepted = await dioxus.recv();
     window.__ookReader?.resolveGesture(accepted);
 "#;
+const SELECTED_TEXT_JS: &str = r#"return window.__ookReader?.selectedText() ?? "";"#;
 
 const FRAME_ID: &str = "reader-frame-0";
 
@@ -259,18 +260,32 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                             let author = book.author.clone();
                             let chapter = chapter_label.clone();
                             move |_| {
-                                chat_draft
-                                    .set(
-                                        prompt::draft(
-                                            &Passage {
-                                                title: &title,
-                                                author: author.as_deref(),
-                                                chapter: Some(&chapter),
-                                                text: "Text",
-                                            },
-                                        ),
-                                    );
-                                chat_open.set(true);
+                                let (title, author, chapter) = (
+                                    title.clone(),
+                                    author.clone(),
+                                    chapter.clone(),
+                                );
+                                async move {
+                                    let selected = document::eval(SELECTED_TEXT_JS)
+                                        .join::<String>()
+                                        .await
+                                        .unwrap_or_default();
+                                    let text = selected.trim();
+                                    if !text.is_empty() {
+                                        chat_draft
+                                            .set(
+                                                prompt::draft(
+                                                    &Passage {
+                                                        title: &title,
+                                                        author: author.as_deref(),
+                                                        chapter: Some(&chapter),
+                                                        text,
+                                                    },
+                                                ),
+                                            );
+                                    }
+                                    chat_open.set(true);
+                                }
                             }
                         },
                         "Ask AI"
@@ -511,6 +526,13 @@ mod test {
         assert!(assets.contains("e.pointerType !== \"mouse\""));
         assert!(assets.contains("Math.abs(e.deltaX) <= Math.abs(e.deltaY)"));
         assert!(assets.contains("wheelHandled"));
+    }
+
+    #[test]
+    fn ask_ai_and_the_controller_agree_on_how_to_read_the_selection() {
+        assert!(SELECTED_TEXT_JS.contains("__ookReader?.selectedText()"));
+        assert!(READER_CONTROLLER_JS.contains("selectedText()"));
+        assert!(READER_CONTROLLER_JS.contains("getSelection()"));
     }
 
     #[test]

@@ -68,6 +68,7 @@
  * @property {(dx: number) => void} drag
  * @property {() => void} cancelDrag
  * @property {(accepted: boolean) => void} resolveGesture
+ * @property {() => string} selectedText
  * @property {() => void} finishNavigation
  * @property {() => void} destroy
  */
@@ -370,6 +371,13 @@ if (!hostWindow.__ookReader) {
       this.slots[this.active].frame.contentWindow?.postMessage(
         { kind: "ook-cancel-swipe" },
         "*",
+      );
+    },
+
+    selectedText() {
+      return (
+        this.slots[this.active].frame.contentWindow?.getSelection()?.toString() ??
+        ""
       );
     },
 
