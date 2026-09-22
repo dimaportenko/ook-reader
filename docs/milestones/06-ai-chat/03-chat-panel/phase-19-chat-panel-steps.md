@@ -907,3 +907,85 @@ item above exposes an edge the suite does not pin; none is expected.
 > **Status:** done — committed in `0302f0e` (175 tests green, none new — a refactor; clippy
 > clean). Phase 19 stays open: the iOS simulator end-to-end run and safe-area geometry
 > check are still owed, and the phase checklist ticks Step 5 only after that gate passes.
+
+## Gate — the iOS end-to-end run
+
+**What it is.** Not a code step. The phase's goal has two halves — a real Gemini answer on
+desktop (Step 4, done) and *the same drawer opens on the iOS simulator* — and the second
+half has been carried as a debt since Step 1. This entry runs it once, against the final
+CSS, and records what the simulator said. Nothing in `src/` changes unless the run finds
+something, in which case the finding becomes a fix step *inside* Phase 19, not a note for
+Phase 21.
+
+**Why it is last, and why it is not optional.** Every earlier step deferred the geometry
+read with "before the next step lands", and every next step landed on the desktop eyeball
+instead. That is the usual way a safe-area bug reaches a phone: each step is individually
+cheap to eyeball, and nobody pays the build-and-drive cost until the CSS is final. Paying it
+once at the end is the deal Step 5 recorded; this is the payment.
+
+**The check (all of it, in order).**
+
+1. `just install-ios` — builds against the iOS 26 SDK (`bc054c5`) and installs on the
+   booted simulator. A build that dies at launch with the *UIScene life cycle* message means
+   `OOK_IOS_XCODE` points at the wrong Xcode, not that the app is broken.
+2. `agent-device open com.dimaportenko.ook-reader --platform ios --foreground`, open a book
+   from the library (import one if the library is empty), tap the control labelled
+   **Chat** (the control row is hidden by the tap-to-hide rule; tap the page once if the
+   button is not in the snapshot).
+3. **No-key state.** With no key saved, the drawer body must read the "add a key in
+   settings" line, and the compose row must not be there.
+4. **Geometry.** `agent-device snapshot -i --json`. Read the `rect` of the **Close chat**
+   button and of the drawer's compose row (the input and its send button), and compare with
+   the device frame: on the iPhone 17 simulator the top inset is the Dynamic Island band and
+   the bottom inset is the home-indicator band. Pass means the close button's rect starts
+   below the top inset and the compose row's rect ends above the bottom inset. An
+   `off-screen and not safe to press` refusal from the driver is a *fail*, recorded as such.
+5. **Key + question.** Settings → save a real Gemini key → back to the drawer → the
+   compose row appears → type a question → send. The waiting row shows, then an assistant
+   bubble with a real answer, or the error row with a real message. Either is a pass for
+   the *plumbing*; only the answer is a pass for the *phase goal*.
+6. **Anonymous nodes.** Anything the snapshot shows without a name is an accessibility gap
+   in our markup; list it here. It does not block the gate, but it does become a TODO.
+
+**What "done" looks like.** A short table below with the two rects, the insets, and
+pass/fail per line, plus the model's answer text (first line) as proof of the round trip.
+Then the phase checklist ticks Step 5, the phase doc's `**Status:**` flips to ✅ with the
+date, and the milestone README and roadmap's *Current focus* move on to Phase 20.
+
+**Scope.** No fix is planned inside this entry. If the geometry fails, the fix is a new
+Step 6 in this phase (a CSS change under the same safe-area padding rule Step 1 set), with
+the rect read repeated as its check.
+
+**Run 1 — 2026-09-22, iPhone 17 simulator (iOS 27.0), no key.** The library was empty, so
+the Sherlock fixture was seeded into the sandbox the way Phase 9 did it: file copied to
+`books/sherlock.epub`, one row in `books` with `path = 'sherlock.epub'`. Driven by
+`agent-device`; rects from `snapshot -i --json`, screen 402 × 874.
+
+| Element | rect (x, y, w, h) | Against the inset | Result |
+|---|---|---|---|
+| Drawer (`complementary`) | 0, 0, 402, 874 | full width on a phone (`min(28rem, 100%)`) | as designed |
+| **Close chat** button | 346, 70, 40, 40 | starts 8pt below the 62pt island band | ✅ |
+| "Add a Gemini key…" note | 16, 150, 239, 20 | — | ✅ text as planned |
+| Compose row | not rendered | needs a saved key | ⏳ owed |
+
+Open → tap book → **Chat** → drawer → **Close chat** all succeeded with no driver refusal.
+The drawer paints edge to edge and pads itself with `env(safe-area-inset-*)`, so the
+bottom-edge question only has an answer once the compose row exists.
+
+**Accessibility gap found.** The reader's close-book button (`src/ui/reader.rs`, the
+`icon::CLOSE` button in the header) has no `aria_label`; the snapshot lists it as an
+anonymous `Button` at (16, 74). Everything else in the tree is named. One-line fix,
+recorded in `TODO.md`.
+
+**Still owed for the gate:** the key-and-question half. It needs a real Gemini key typed
+into the simulator's settings row, which only the learner can supply: save the key, reopen
+the drawer, read the compose row's rect (its bottom must stay above 874 − 34 = 840), ask a
+question, and paste the first line of the answer here.
+
+**Run 2 — 2026-09-22, real iPhone, release build.** The learner ran the key half on
+hardware: key saved in settings, question asked from the drawer, real Gemini answer back
+in the list. Reported as working; the compose-row rect was not read on the device
+(`agent-device` was not attached), so the geometry evidence is the simulator run above
+plus an eyeball on the phone. Accepted as the gate.
+
+> **Status:** gate passed — Phase 19 closes here. Step 5 ticked in the phase doc.

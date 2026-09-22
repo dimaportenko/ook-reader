@@ -1,6 +1,6 @@
 # Phase 19 — Chat panel
 
-[← Feature: Chat panel](README.md) · **Status:** 🚧 in progress — opened 2026-09-20 ·
+[← Feature: Chat panel](README.md) · **Status:** ✅ done — opened 2026-09-20, closed 2026-09-22 ·
 build log: [`phase-19-chat-panel-steps.md`](phase-19-chat-panel-steps.md)
 
 ## Goal
@@ -70,5 +70,5 @@ order".)
 - [x] **4. The async send** — submit `spawn`s `provider.complete` on the full history and
       `settle`s the result; a waiting row and an error row; `dx serve` with a real key on
       desktop, then the iOS simulator.
-- [ ] **5. Review and refactor** *(punch-list landed in `0302f0e`; iOS gate still owed)* — punch-list over `src/chat/`, `ui/chat.rs`, and the
+- [x] **5. Review and refactor** *(punch-list landed in `0302f0e`; iOS gate passed 2026-09-22 on the simulator and a real iPhone)* — punch-list over `src/chat/`, `ui/chat.rs`, and the
       accessor change in `ai`; suite green, clippy clean.

@@ -24,3 +24,4 @@ Place to quickly drop things I would like to work later.
 
 
 
+- [ ] `aria_label` on the reader's close-book button (anonymous in the iOS accessibility tree, found by the Phase 19 gate)

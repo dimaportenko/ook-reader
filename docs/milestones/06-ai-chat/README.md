@@ -7,7 +7,7 @@ a chat whose first message is already filled in — book title, author, the sele
 so the only thing left to type is the question. First provider: **Gemini Flash-Lite**.
 The provider and model must be swappable later without touching the reader.
 
-**Status:** 🚧 in progress — captured 2026-09-11; [Phase 17](01-provider/phase-17-provider-boundary.md) closed 2026-09-13; [Phase 18](02-key-storage/phase-18-key-storage.md) closed 2026-09-20; [Phase 19](03-chat-panel/phase-19-chat-panel.md) opened the same day. No ADR yet. Sits behind
+**Status:** 🚧 in progress — captured 2026-09-11; [Phase 17](01-provider/phase-17-provider-boundary.md) closed 2026-09-13; [Phase 18](02-key-storage/phase-18-key-storage.md) closed 2026-09-20; [Phase 19](03-chat-panel/phase-19-chat-panel.md) closed 2026-09-22. No ADR yet. Sits behind
 nothing: Milestones 3 and 5 both have no phase in progress.
 
 ## The idea in one paragraph

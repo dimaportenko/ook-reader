@@ -10,4 +10,4 @@ the conversation is* is a plain struct under `cargo test`; only the drawer itsel
 
 | # | Phase | Status |
 |---|---|---|
-| 19 | [Chat panel](phase-19-chat-panel.md) | 🚧 in progress |
+| 19 | [Chat panel](phase-19-chat-panel.md) | ✅ done — closed 2026-09-22 |
