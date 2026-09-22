@@ -256,6 +256,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                     button {
                         onclick: {
                             let title = book.title.clone();
+                            let author = book.author.clone();
                             let chapter = chapter_label.clone();
                             move |_| {
                                 chat_draft
@@ -263,7 +264,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                                         prompt::draft(
                                             &Passage {
                                                 title: &title,
-                                                author: None,
+                                                author: author.as_deref(),
                                                 chapter: Some(&chapter),
                                                 text: "Text",
                                             },

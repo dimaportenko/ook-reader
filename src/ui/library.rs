@@ -29,6 +29,7 @@ static PLACEHOLDER_2: Asset = asset!("/assets/books/placeholder-2.jpg");
 pub(crate) struct OpenBook {
     pub(crate) id: i64,
     pub(crate) title: String,
+    pub(crate) author: Option<String>,
     pub(crate) epub: Rc<Epub>,
     pub(crate) docs: Rc<Vec<String>>,
 }
@@ -119,6 +120,7 @@ pub(crate) fn LibraryBooks() -> Element {
                                 let library = Rc::clone(&library);
                                 let id = book.id;
                                 let title = book.title;
+                                let author = book.author;
                                 let file_name = book.file_name;
 
                                 move |_| {
@@ -136,6 +138,7 @@ pub(crate) fn LibraryBooks() -> Element {
                                                     Some(OpenBook {
                                                         id,
                                                         title: title.clone(),
+                                                        author: author.clone(),
                                                         epub: Rc::new(epub),
                                                         docs: Rc::new(docs),
                                                     }),
