@@ -78,10 +78,10 @@ built and tested in Phase 17.
 - [x] **4½. Send on open** *(manual, outside the plan)* — the draft from a selection is
       sent at once through an `autosend` flag; the trigger becomes the toolbar's chat icon;
       Reset, and closing the drawer, cancel the pending reply and clear the chat. `4218631`.
-- [ ] **4¾. The drawer** *(manual, outside the plan)* — a tappable backdrop; swipe right
+- [x] **4¾. The drawer** *(manual, outside the plan)* — a tappable backdrop; swipe right
       to close, with the drawer and backdrop following the finger; a reusable `Drawer` in
       `src/ui/drawer.rs` with the chat reset on any close; `takeSelectedText()` clears the
-      selection so reopening doesn't re-send it. Backdrop `29abaa7`; the rest in flight.
+      selection so reopening doesn't re-send it. `29abaa7`, `7c9ce86`.
 - [ ] **5. Show *Ask AI* only while something is selected** — a `selectionchange`
       listener in the chapter posts `ook-selection` when the flag flips, the controller
       forwards it as `selection:true|false` (and `false` on a chapter change),

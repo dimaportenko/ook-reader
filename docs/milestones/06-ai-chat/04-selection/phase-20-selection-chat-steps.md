@@ -19,7 +19,7 @@ and hide the button.
 3. ~~The author~~ — `OpenBook.author` into the `Passage`. **Done** — `21b4f65`.
 4. ~~The real selection~~ — `selectedText()` on the controller, an `async` handler that `eval`s it. **Done** — `f30cfde`.
 4½. ~~Send on open~~ *(manual)* — `autosend` flag, toolbar chat icon, Reset. **Done** — `4218631`.
-4¾. The drawer *(manual)* — backdrop, swipe and drag to close, a reusable `Drawer`, and a selection that feeds the chat once. Backdrop committed in `29abaa7`; the rest in flight.
+4¾. ~~The drawer~~ *(manual)* — backdrop, swipe and drag to close, a reusable `Drawer`, and a selection that feeds the chat once. **Done** — `29abaa7`, `7c9ce86`.
 5. Show *Ask AI* only while something is selected — `ook-selection` → `BridgeMsg::Selection`.
 6. Review and refactor.
 
@@ -500,9 +500,10 @@ change only the icon's label and behaviour. Decide that before starting it.
 
 ## Between Steps 4½ and 5 — The drawer (manual changes)
 
-> **Status:** in flight — the backdrop is committed in `29abaa7`; the rest is uncommitted
-> (39 `ui::` tests green; swipe to close was confirmed by hand; the drag, the fade, the
-> reset on swipe and the one-shot selection are still to check on the simulator).
+> **Status:** done — backdrop in `29abaa7`, the rest in `7c9ce86` (188 tests green,
+> 2 ignored; clippy clean). Swipe to close was confirmed by hand; the drag, the fade, the
+> reset on swipe, the one-shot selection and the desktop mouse guard were committed on
+> the learner's go-ahead without a separate device report.
 
 > **Written by:** the agent at the learner's request, one ask at a time; the backdrop fade
 > while dragging is the learner's. Outside the step plan, like 4½.
