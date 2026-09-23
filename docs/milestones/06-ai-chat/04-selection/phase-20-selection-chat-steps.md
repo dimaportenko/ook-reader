@@ -19,6 +19,7 @@ and hide the button.
 3. ~~The author~~ — `OpenBook.author` into the `Passage`. **Done** — `21b4f65`.
 4. ~~The real selection~~ — `selectedText()` on the controller, an `async` handler that `eval`s it. **Done** — `f30cfde`.
 4½. ~~Send on open~~ *(manual)* — `autosend` flag, toolbar chat icon, Reset. **Done** — `4218631`.
+4¾. The drawer *(manual)* — backdrop, swipe and drag to close, a reusable `Drawer`, and a selection that feeds the chat once. Backdrop committed in `29abaa7`; the rest in flight.
 5. Show *Ask AI* only while something is selected — `ook-selection` → `BridgeMsg::Selection`.
 6. Review and refactor.
 
@@ -496,3 +497,128 @@ turn of a fresh chat, with the drawer shut. It was removed before the commit.
 while nothing is selected would lock the drawer away. Step 5 needs a new shape: perhaps a
 selection-only *Ask AI* affordance next to an always-visible chat icon. Or the flag could
 change only the icon's label and behaviour. Decide that before starting it.
+
+## Between Steps 4½ and 5 — The drawer (manual changes)
+
+> **Status:** in flight — the backdrop is committed in `29abaa7`; the rest is uncommitted
+> (39 `ui::` tests green; swipe to close was confirmed by hand; the drag, the fade, the
+> reset on swipe and the one-shot selection are still to check on the simulator).
+
+> **Written by:** the agent at the learner's request, one ask at a time; the backdrop fade
+> while dragging is the learner's. Outside the step plan, like 4½.
+
+**What it is.** Five small changes to how the chat drawer opens, closes and feels on a
+phone, plus a bug fix the new gestures exposed:
+
+1. **Backdrop.** A 40% black layer behind the drawer. Tapping it closes the chat.
+2. **Swipe to close.** A long, mostly horizontal drag to the right closes the drawer.
+3. **Drag follows the finger.** While you drag, the drawer tracks your finger. On release
+   it springs back, or slides the rest of the way out.
+4. **The backdrop fades while you drag**, in proportion to how far the drawer has moved.
+5. **`Drawer` extracted.** `src/ui/drawer.rs` owns the backdrop, the gestures, the header
+   and ✕. `ChatPanel` is now `Drawer { open, label: "Chat", ChatConversation { .. } }`.
+   The conversation resets itself when `open` goes false, so every way of closing resets.
+6. **Fix: a selection feeds the chat once.** Reopening the chat after a swipe re-sent the
+   same passage. The controller's `selectedText()` became `takeSelectedText()`, which
+   reads the frame's selection and then clears it with `removeAllRanges()`.
+
+**Check.**
+
+- `cargo test ui::`: the drawer's CSS and gesture tests now live in `drawer.rs` (safe
+  area, slide timing, backdrop hit-testing, `pan-y`, `data-dragging`, `closes`,
+  `drag_offset`, `backdrop_opacity`). In `reader.rs`, `a_selection_feeds_the_chat_once`
+  checks the controller clears the selection.
+- On the simulator:
+  1. Tap the backdrop. The drawer closes.
+  2. Swipe right across the messages. The drawer closes.
+  3. Swipe up and down over the messages. They scroll and the drawer stays open.
+  4. Swipe left. Nothing happens.
+  5. Drag partway and let go. The drawer follows your finger, the backdrop fades with it,
+     and the drawer springs back.
+  6. Drag in the text box. The text is selected and the drawer does not move.
+  7. Select a passage, open the chat so it sends, close it, then reopen it. The chat is
+     empty and nothing is sent.
+
+**Shape.**
+
+```rust
+#[component]
+pub(crate) fn ChatPanel(open: Signal<bool>, draft: Signal<String>, autosend: Signal<bool>) -> Element {
+    rsx! {
+        Drawer { open, label: "Chat",
+            ChatConversation { open, draft, autosend }
+        }
+    }
+}
+
+// in ChatConversation
+use_effect(move || {
+    if !open() {
+        reset();
+    }
+});
+```
+
+```js
+takeSelectedText() {
+  const selection = this.slots[this.active].frame.contentWindow?.getSelection();
+  const text = selection?.toString() ?? "";
+  selection?.removeAllRanges();
+  return text;
+},
+```
+
+**Why it works.**
+
+- **Why the backdrop hides with `visibility`, not just `opacity`.** At `opacity: 0` the
+  layer is invisible but still receives taps, so it would swallow every tap on the page.
+  The delayed `visibility` transition, the same trick the drawer uses, lets it fade out
+  and then stop catching taps.
+- **Why `cursor: pointer` on a `div`.** Dioxus delegates events to the root. iOS WebKit
+  doesn't reliably send a `click` from a plain, non-interactive element through that path
+  unless the element looks clickable.
+- **Why `touch-action: pan-y`.** Without it, WebKit treats a horizontal finger drag as its
+  own pan. It fires `pointercancel` and never sends `pointerup`, so the swipe does
+  nothing. `pan-y` leaves vertical scrolling to the browser and horizontal drags to the
+  app.
+- **Why `data-dragging` turns off transitions.** The inline `translateX` changes on every
+  `pointermove`. With the 0.2s easing still on, each move starts a new transition and the
+  drawer lags behind the finger. On release, `drag_dx` goes back to 0: the inline style
+  and the attribute disappear, the transition comes back, and the same rule animates
+  either the spring-back or the slide-out, starting from where the finger left off.
+- **Why the compose box stops `pointerdown`.** Selecting text in the textarea is also a
+  horizontal drag. Stopping the event there keeps the drawer from ever seeing it.
+- **Why `SWIPE_MIN_PX` is shared.** Page turns and closing the chat use one threshold, so
+  the two gestures agree on how far a swipe has to go.
+- **Why reset through an effect on `open`.** Once the drawer is generic, it can't call the
+  chat's `reset`, because the conversation owns it. Watching `open` covers ✕, the backdrop,
+  a swipe and the reader setting `open` from outside. Rendering the conversation only while
+  the drawer is open would also drop its state, but the drawer would go blank during the
+  slide-out.
+- **Why take the selection rather than read it.** An unfocused frame keeps its selection
+  but stops painting it. So the passage was invisible yet still there, and every reopen
+  drafted and sent it again. Clearing it on read means each selection is used once.
+  Remembering the last passage in Rust instead would stop you asking about the same
+  passage twice on purpose.
+
+**Found in review.** The pointer handlers also responded to the mouse. On desktop,
+selecting a message's text from left to right dragged the drawer with it. Pressing in
+the panel and releasing over the backdrop left a drag half-started, so the drawer then
+followed the mouse with no button held. `onpointerdown` now ignores mouse pointers
+through `drags(pointer_type)`, pinned by `only_a_finger_or_a_pen_drags_the_drawer`. That
+matches the chapter's page swipe (`pointerType !== "mouse"`). On desktop the drawer still
+closes with ✕ and the backdrop.
+
+**What this changes for Step 5.** `takeSelectedText()` clears the selection when the chat
+opens. A `selectionchange` listener would then report `false` right after the click, which
+is the state the chat icon should return to anyway. Step 5 still needs the new shape noted
+under 4½.
+
+**For Step 6's punch-list.**
+
+- `SWIPE_MIN_PX` lives in `reader.rs` but `drawer.rs` uses it too; it may belong in a
+  shared gesture module.
+- `Drawer` re-measures its width on every `pointerdown` with an async `get_client_rect`.
+  That's correct across rotation, but the first moves of a drag run before the answer
+  arrives, and `backdrop_opacity` falls back to fully opaque until then.
+- `.drawer`'s old `background-color` line is still there, commented out.

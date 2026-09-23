@@ -3,7 +3,7 @@ use dioxus::{core::Task, prelude::*};
 use crate::{
     ai::{gemini::Gemini, ChatProvider, Role},
     chat::{Conversation, Status},
-    ui::components::icon::{self, Icon},
+    ui::drawer::Drawer,
 };
 
 #[css_module("/src/ui/chat.css")]
@@ -11,7 +11,26 @@ struct Styles;
 
 #[component]
 pub(crate) fn ChatPanel(
-    mut open: Signal<bool>,
+    open: Signal<bool>,
+    draft: Signal<String>,
+    autosend: Signal<bool>,
+) -> Element {
+    rsx! {
+        Drawer {
+            open,
+            label: "Chat",
+            ChatConversation {
+                open,
+                draft,
+                autosend,
+            }
+        }
+    }
+}
+
+#[component]
+fn ChatConversation(
+    open: Signal<bool>,
     mut draft: Signal<String>,
     mut autosend: Signal<bool>,
 ) -> Element {
@@ -44,10 +63,11 @@ pub(crate) fn ChatPanel(
         chat.set(Conversation::default());
     };
 
-    let mut close = move || {
-        open.set(false);
-        reset();
-    };
+    use_effect(move || {
+        if !open() {
+            reset();
+        }
+    });
 
     use_effect(move || {
         if autosend() {
@@ -60,97 +80,70 @@ pub(crate) fn ChatPanel(
     let conversation = chat.read();
 
     rsx! {
-        div {
-            class: "{Styles::chat_panel__backdrop}",
-            "data-state": if open() { "open" } else { "closed" },
-            aria_hidden: true,
-            onclick: move |_| close(),
-        }
-        aside {
-            class: "{Styles::chat_panel}",
-            "data-state": if open() { "open" } else { "closed" },
-            inert: if !open() { true },
-            aria_label: "Chat",
-            onkeydown: move |e| e.stop_propagation(),
-            div {
-                class: "{Styles::chat_panel__header}",
-                span {
-                    "Chat"
-                }
-                button {
-                    class: "icon-button",
-                    aria_label: "Close chat",
-                    onclick: move |_| close(),
-                    Icon {
-                        icon: icon::CLOSE,
-                    }
-                }
-
+        if provider.is_none() {
+            p {
+                class: "{Styles::chat_panel__note}",
+                "Add a Gemini key in settings to chat."
             }
-            if provider.is_none() {
+        } else {
+            if conversation.messages().is_empty() {
                 p {
                     class: "{Styles::chat_panel__note}",
-                    "Add a Gemini key in settings to chat."
+                    "No messages yet."
                 }
-            } else {
-                if conversation.messages().is_empty() {
-                    p {
-                        class: "{Styles::chat_panel__note}",
-                        "No messages yet."
+            }
+            ul {
+                class: "{Styles::chat_panel__messages}",
+                aria_live: "polite",
+                for message in conversation.messages().iter() {
+                    li {
+                        class: "{Styles::chat_panel__turn}",
+                        "data-role": if message.role() == Role::User { "user" } else { "assistant" },
+                        "{message.text()}"
                     }
                 }
-                ul {
-                    class: "{Styles::chat_panel__messages}",
-                    aria_live: "polite",
-                    for message in conversation.messages().iter() {
-                        li {
-                            class: "{Styles::chat_panel__turn}",
-                            "data-role": if message.role() == Role::User { "user" } else { "assistant" },
-                            "{message.text()}"
+                if *conversation.status() == Status::Waiting {
+                    li {
+                        class: "{Styles::chat_panel__turn}",
+                        "..."
+                    }
+                }
+            }
+            if let Status::Failed(text) = conversation.status() {
+                p {
+                    class: "{Styles::chat_panel__error}",
+                    role: "alert",
+                    "{text}"
+                }
+            }
+            div {
+                class: "{Styles::chat_panel__compose}",
+                onpointerdown: move |e| e.stop_propagation(),
+                textarea {
+                    rows: 6,
+                    value: "{draft}",
+                    placeholder: "Ask about this book",
+                    oninput: move |e| draft.set(e.data.value()),
+                    onkeydown: move |e| {
+                        if sends(&e.key(), e.modifiers().shift(), e.is_composing()) {
+                            e.prevent_default();
+                            submit();
                         }
-                    }
-                    if *conversation.status() == Status::Waiting {
-                        li {
-                            class: "{Styles::chat_panel__turn}",
-                            "..."
-                        }
-                    }
-                }
-                if let Status::Failed(text) = conversation.status() {
-                    p {
-                        class: "{Styles::chat_panel__error}",
-                        role: "alert",
-                        "{text}"
-                    }
+                    },
                 }
                 div {
-                    class: "{Styles::chat_panel__compose}",
-                    textarea {
-                        rows: 6,
-                        value: "{draft}",
-                        placeholder: "Ask about this book",
-                        oninput: move |e| draft.set(e.data.value()),
-                        onkeydown: move |e| {
-                            if sends(&e.key(), e.modifiers().shift(), e.is_composing()) {
-                                e.prevent_default();
-                                submit();
-                            }
-                        },
+                    class: "{Styles::chat_panel__compose_actions}",
+                    button {
+                        class: "{Styles::chat_panel__compose_action}",
+                        disabled: conversation.messages().is_empty() || *conversation.status() != Status::Idle,
+                        onclick: move |_| reset(),
+                        "Reset"
                     }
-                    div {
-                        class: "{Styles::chat_panel__compose_actions}",
-                        button {
-                            class: "{Styles::chat_panel__compose_action}",
-                            disabled: conversation.messages().is_empty() || *conversation.status() != Status::Idle,
-                            onclick: move |_| reset(),
-                            "Reset"
-                        }
-                        button {
-                            class: "{Styles::chat_panel__compose_action}",
-                            disabled: draft.read().trim().is_empty(),
-                            onclick: move |_| submit(),
-                            "Send"
-                        }
+                    button {
+                        class: "{Styles::chat_panel__compose_action}",
+                        disabled: draft.read().trim().is_empty(),
+                        onclick: move |_| submit(),
+                        "Send"
                     }
                 }
             }
@@ -167,55 +160,6 @@ mod test {
     use dioxus::prelude::Key;
 
     use super::sends;
-
-    const CHAT_CSS: &str = include_str!("chat.css");
-    const SLIDE: &str = "0.2s";
-
-    #[test]
-    fn the_drawer_pays_its_own_safe_area_because_fixed_escapes_the_body_box() {
-        assert_eq!(
-            CHAT_CSS.matches("env(safe-area-inset-").count(),
-            3,
-            "top, right and bottom touch the screen edge; the left edge is over the page",
-        );
-        assert!(!CHAT_CSS.contains("safe-aria"));
-    }
-
-    #[test]
-    fn the_drawer_stays_visible_for_the_whole_slide_out() {
-        let closed = CHAT_CSS
-            .split_once(".chat_panel {")
-            .expect("the closed state is the base rule")
-            .1
-            .split_once('}')
-            .expect("an unclosed rule")
-            .0;
-
-        assert!(closed.contains(&format!("transform {SLIDE}")));
-        assert!(
-            closed.contains(&format!("visibility 0s linear {SLIDE}")),
-            "a shorter delay hides the drawer mid-slide; a longer one leaves it \
-             hit-testable off-screen",
-        );
-        assert!(CHAT_CSS.contains("@media (prefers-reduced-motion: reduce)"));
-    }
-
-    #[test]
-    fn the_backdrop_fades_with_the_slide_and_stops_catching_taps_once_gone() {
-        let closed = CHAT_CSS
-            .split_once(".chat_panel__backdrop {")
-            .expect("the backdrop's closed state is its base rule")
-            .1
-            .split_once('}')
-            .expect("an unclosed rule")
-            .0;
-
-        assert!(closed.contains(&format!("opacity {SLIDE}")));
-        assert!(
-            closed.contains(&format!("visibility 0s linear {SLIDE}")),
-            "an invisible backdrop that stays visible to hit-testing swallows every tap on the page",
-        );
-    }
 
     #[test]
     fn enter_sends_but_shift_enter_breaks_the_line() {

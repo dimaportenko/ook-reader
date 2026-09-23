@@ -68,7 +68,7 @@
  * @property {(dx: number) => void} drag
  * @property {() => void} cancelDrag
  * @property {(accepted: boolean) => void} resolveGesture
- * @property {() => string} selectedText
+ * @property {() => string} takeSelectedText
  * @property {() => void} finishNavigation
  * @property {() => void} destroy
  */
@@ -374,11 +374,11 @@ if (!hostWindow.__ookReader) {
       );
     },
 
-    selectedText() {
-      return (
-        this.slots[this.active].frame.contentWindow?.getSelection()?.toString() ??
-        ""
-      );
+    takeSelectedText() {
+      const selection = this.slots[this.active].frame.contentWindow?.getSelection();
+      const text = selection?.toString() ?? "";
+      selection?.removeAllRanges();
+      return text;
     },
 
     finishNavigation() {

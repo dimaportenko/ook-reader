@@ -29,11 +29,11 @@ const GESTURE_RESULT_JS: &str = r#"
     const accepted = await dioxus.recv();
     window.__ookReader?.resolveGesture(accepted);
 "#;
-const SELECTED_TEXT_JS: &str = r#"return window.__ookReader?.selectedText() ?? "";"#;
+const SELECTED_TEXT_JS: &str = r#"return window.__ookReader?.takeSelectedText() ?? "";"#;
 
 const FRAME_ID: &str = "reader-frame-0";
 
-const SWIPE_MIN_PX: u32 = 40;
+pub(crate) const SWIPE_MIN_PX: u32 = 40;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Turn {
@@ -536,9 +536,18 @@ mod test {
 
     #[test]
     fn ask_ai_and_the_controller_agree_on_how_to_read_the_selection() {
-        assert!(SELECTED_TEXT_JS.contains("__ookReader?.selectedText()"));
-        assert!(READER_CONTROLLER_JS.contains("selectedText()"));
+        assert!(SELECTED_TEXT_JS.contains("__ookReader?.takeSelectedText()"));
+        assert!(READER_CONTROLLER_JS.contains("takeSelectedText()"));
         assert!(READER_CONTROLLER_JS.contains("getSelection()"));
+    }
+
+    #[test]
+    fn a_selection_feeds_the_chat_once() {
+        assert!(
+            READER_CONTROLLER_JS.contains("removeAllRanges()"),
+            "an unfocused frame hides its selection but keeps it, so reopening the chat \
+             would draft and send the same passage again",
+        );
     }
 
     #[test]

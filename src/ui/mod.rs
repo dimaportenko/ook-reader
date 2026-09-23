@@ -1,5 +1,6 @@
 pub mod chat;
 pub mod components;
+pub mod drawer;
 pub mod font;
 pub mod library;
 pub mod reader;
