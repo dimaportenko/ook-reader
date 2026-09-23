@@ -1,4 +1,7 @@
-use std::rc::Rc;
+use std::{
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 use dioxus::{html::geometry::ClientPoint, prelude::*};
 
@@ -10,9 +13,26 @@ use crate::ui::{
 #[css_module("/src/ui/drawer.css")]
 struct Styles;
 
+const LONG_PRESS: Duration = Duration::from_millis(300);
+const DRAG_SLOP_PX: f64 = 10.0;
+
+#[derive(Clone, Copy)]
+struct Drag {
+    from: ClientPoint,
+    at: Instant,
+    moving: bool,
+}
+
+#[derive(Debug, PartialEq)]
+enum Press {
+    Undecided,
+    Drag,
+    Select,
+}
+
 #[component]
 pub(crate) fn Drawer(mut open: Signal<bool>, label: String, children: Element) -> Element {
-    let mut drag_start = use_signal(|| None::<ClientPoint>);
+    let mut drag = use_signal(|| None::<Drag>);
     let mut drag_dx = use_signal(|| 0.0);
     let mut drawer_el = use_signal(|| None::<Rc<MountedData>>);
     let mut width = use_signal(|| 0.0);
@@ -39,7 +59,11 @@ pub(crate) fn Drawer(mut open: Signal<bool>, label: String, children: Element) -
                 if !drags(&e.pointer_type()) {
                     return;
                 }
-                drag_start.set(Some(e.client_coordinates()));
+                drag.set(Some(Drag {
+                    from: e.client_coordinates(),
+                    at: Instant::now(),
+                    moving: false,
+                }));
                 let Some(el) = drawer_el() else {
                     return;
                 };
@@ -50,25 +74,35 @@ pub(crate) fn Drawer(mut open: Signal<bool>, label: String, children: Element) -
                 });
             },
             onpointermove: move |e| {
-                let Some(start) = drag_start() else {
+                let Some(current) = drag() else {
                     return;
                 };
-                let delta = e.client_coordinates() - start;
+                let delta = e.client_coordinates() - current.from;
+                if !current.moving {
+                    match press(current.at.elapsed(), delta.length()) {
+                        Press::Undecided => return,
+                        Press::Select => {
+                            drag.set(None);
+                            return;
+                        }
+                        Press::Drag => drag.set(Some(Drag { moving: true, ..current })),
+                    }
+                }
                 drag_dx.set(drag_offset(delta.x, delta.y));
             },
             onpointerup: move |e| {
                 drag_dx.set(0.0);
-                let Some(start) = drag_start.take() else {
+                let Some(current) = drag.take() else {
                     return;
                 };
-                let delta = e.client_coordinates() - start;
+                let delta = e.client_coordinates() - current.from;
                 if closes(delta.x as i32, delta.y as i32) {
                     open.set(false);
                 }
             },
             onpointercancel: move |_| {
                 drag_dx.set(0.0);
-                drag_start.set(None);
+                drag.set(None);
             },
             div {
                 class: "{Styles::drawer__header}",
@@ -93,6 +127,16 @@ fn drags(pointer_type: &str) -> bool {
     pointer_type != "mouse"
 }
 
+fn press(held: Duration, moved: f64) -> Press {
+    if held > LONG_PRESS {
+        Press::Select
+    } else if moved > DRAG_SLOP_PX {
+        Press::Drag
+    } else {
+        Press::Undecided
+    }
+}
+
 fn closes(dx: i32, dy: i32) -> bool {
     dx > 0 && dx.unsigned_abs() >= SWIPE_MIN_PX && dx.unsigned_abs() > dy.unsigned_abs()
 }
@@ -114,7 +158,9 @@ fn drag_offset(dx: f64, dy: f64) -> f64 {
 
 #[cfg(test)]
 mod test {
-    use super::{backdrop_opacity, closes, drag_offset, drags};
+    use std::time::Duration;
+
+    use super::{backdrop_opacity, closes, drag_offset, drags, press, Press};
 
     const DRAWER_CSS: &str = include_str!("drawer.css");
     const SLIDE: &str = "0.2s";
@@ -221,6 +267,20 @@ mod test {
             !drags("mouse"),
             "selecting a message with the mouse would otherwise slide the drawer",
         );
+    }
+
+    #[test]
+    fn a_quick_move_drags_but_a_long_press_selects() {
+        let quick = Duration::from_millis(80);
+        let long = Duration::from_millis(600);
+
+        assert_eq!(press(quick, 15.0), Press::Drag);
+        assert_eq!(
+            press(long, 15.0),
+            Press::Select,
+            "iOS starts a text selection with a long press, then the finger moves",
+        );
+        assert_eq!(press(quick, 3.0), Press::Undecided, "jitter is not a drag yet");
     }
 
     #[test]
