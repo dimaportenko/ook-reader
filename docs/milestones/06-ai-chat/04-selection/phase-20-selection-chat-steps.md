@@ -18,6 +18,7 @@ and hide the button.
 2. ~~A compose box that holds a quote~~ — `<textarea>`, Enter sends, Shift+Enter breaks the line. **Done** — `b499cf3`.
 3. ~~The author~~ — `OpenBook.author` into the `Passage`. **Done** — `21b4f65`.
 4. ~~The real selection~~ — `selectedText()` on the controller, an `async` handler that `eval`s it. **Done** — `f30cfde`.
+4½. ~~Send on open~~ *(manual)* — `autosend` flag, toolbar chat icon, Reset. **Done** — `4218631`.
 5. Show *Ask AI* only while something is selected — `ook-selection` → `BridgeMsg::Selection`.
 6. Review and refactor.
 
@@ -427,3 +428,71 @@ moment between the selection clearing and the click arriving. The selection is r
 plain text: images, footnote markers and ruby annotations come through as whatever
 `toString()` makes of them. The 4,000-character cap in `prompt::draft` already bounds a
 long selection, and says so with `...`.
+
+## Between Steps 4 and 5 — Send on open (manual changes)
+
+> **Status:** done — committed in `4218631` (179 tests green, 2 ignored; clippy clean;
+> the send-on-open interaction is a `dx serve` check, done by hand).
+
+> **Written by:** the learner, outside the step plan. The agent reviewed it.
+
+**What it is.** Pressing the chat icon with text selected now **sends** the drafted
+question right away, instead of leaving it in the compose box. The *Ask AI* text button
+became the toolbar's chat icon (`ChatPanel` dropped its own trigger and `show_controls`).
+The compose area gained **Reset**, and closing the drawer resets the conversation too.
+The drawer is wider, and its turn colours were restyled.
+
+**Check: `dx serve`, eyeball.**
+
+1. Select a passage and tap the chat icon. The drawer opens with the passage as a user
+   turn, then `...`. The textarea is empty.
+2. Tap the icon with nothing selected. The drawer opens and nothing is sent.
+3. With no Gemini key, select and tap. The draft stays in the textarea, unsent.
+4. Close the drawer while a reply is pending, then reopen it. The chat is empty, and no
+   late answer shows up.
+
+**Shape.**
+
+```rust
+use_effect(move || {
+    if autosend() {
+        autosend.set(false);
+        submit();
+    }
+});
+```
+
+`autosend: Signal<bool>` is owned by `Reader` and passed in like `open` and `draft`.
+`Reader` sets it only inside the `if !text.is_empty()` branch of the click handler.
+
+**Why it works.**
+
+- **Why a flag, and why `Reader` owns it.** Only the click knows that the draft came from
+  a selection. `submit` needs `chat` and the provider, which `ChatPanel` owns. The flag is
+  the smallest message between the two: `Reader` says "send this", and the panel decides
+  how. A local `use_signal(|| true)` inside `ChatPanel` looked similar but did nothing.
+  The effect fired once on mount with an empty draft, cleared the flag, and nothing ever
+  raised it again.
+- **Why clear the flag before `submit()`.** A `use_effect` subscribes to every signal it
+  reads during a run. On a `true` run, `submit` reads `chat`, `draft` and `provider`, so
+  `chat.settle()` re-runs the effect later. Clearing first makes that re-run see `false`
+  and return. Subscriptions are rebuilt on every run, so it goes back to watching only
+  `autosend`.
+- **Why `submit` can be shared.** It captures only `Signal`s, which are `Copy`, so the
+  closure is `Copy` too. The effect, `onkeydown` and the Send button each get their own
+  copy.
+- **Why the failure path is graceful.** When there is no provider, or `ask` refuses
+  because a reply is pending, `submit` returns before clearing `draft`. The passage stays
+  in the textarea.
+- **Why keep the `Task`.** `spawn` returns a handle. Storing it lets `reset` `cancel()`
+  the in-flight `complete`. Without that, a reply to the old conversation would `settle`
+  into the fresh one. `take()` leaves `None` behind, so there is no separate `set(None)`.
+
+**Found in review.** A draft of the close handler also did `autosend.set(true)`. With text
+in the compose box, closing the drawer would have sent that text to Gemini as the first
+turn of a fresh chat, with the drawer shut. It was removed before the commit.
+
+**What this changes for Step 5.** The icon is now the only way into the chat, so hiding it
+while nothing is selected would lock the drawer away. Step 5 needs a new shape: perhaps a
+selection-only *Ask AI* affordance next to an always-visible chat icon. Or the flag could
+change only the icon's label and behaviour. Decide that before starting it.

@@ -45,6 +45,8 @@ sibling of that button. So there are two hand-offs to make, and each has one ide
 - **The draft replaces the compose box.** Pressing *Ask AI* sets `draft` outright, even if
   something half-typed was there. The conversation is untouched: *Ask AI* on a second passage
   continues the same chat.
+  *(Amended after Step 4, `4218631`: with a selection, the draft is also **sent** at once,
+  through an `autosend` flag. Closing the drawer or pressing Reset starts a fresh chat.)*
 - **An empty selection still opens the chat**, leaving the draft as it was. The button is
   hidden in that state from Step 5 on, so this only covers the race where the selection
   clears between the flag and the click.
@@ -73,11 +75,15 @@ built and tested in Phase 17.
 - [x] **4. The real selection** — `selectedText()` on the reader controller; the *Ask AI*
       handler goes `async`, `eval`s it and drafts from the answer; an empty selection only
       opens the drawer; a name-agreement `#[test]` + `dx serve` eyeball.
+- [x] **4½. Send on open** *(manual, outside the plan)* — the draft from a selection is
+      sent at once through an `autosend` flag; the trigger becomes the toolbar's chat icon;
+      Reset, and closing the drawer, cancel the pending reply and clear the chat. `4218631`.
 - [ ] **5. Show *Ask AI* only while something is selected** — a `selectionchange`
       listener in the chapter posts `ook-selection` when the flag flips, the controller
       forwards it as `selection:true|false` (and `false` on a chapter change),
       `BridgeMsg::Selection(bool)` drives a `Signal<bool>`; parse + three-hop `#[test]`,
-      `dx serve` eyeball.
+      `dx serve` eyeball. *Needs rethinking: after 4½ the icon is the only way into the chat,
+      so it can't simply be hidden.*
 - [ ] **6. Review and refactor** — punch-list over the lifted props, the async handler, the
       new bridge message and the controller method; whether `#[allow(dead_code)]` on
       `mod ai` can go now that `prompt` has a caller; suite green, clippy clean.
