@@ -6,7 +6,8 @@
   width: min(42rem, 100%);
   padding: env(safe-area-inset-top) env(safe-area-inset-right)
     env(safe-area-inset-bottom) 0;
-  background-color: color-mix(in srgb, var(--USER__backgroundColor) 62%, white);
+  /* background-color: color-mix(in srgb, var(--USER__backgroundColor) 62%, white); */
+  background-color: var(--USER__backgroundColor);
   z-index: 2;
   display: flex;
   flex-direction: column;
@@ -27,8 +28,31 @@
     visibility 0s;
 }
 
+.chat_panel__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  background: rgb(0 0 0 / 0.4);
+  cursor: pointer;
+
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.2s ease-in-out,
+    visibility 0s linear 0.2s;
+}
+
+.chat_panel__backdrop[data-state="open"] {
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity 0.2s ease-in-out,
+    visibility 0s;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .chat_panel {
+  .chat_panel,
+  .chat_panel__backdrop {
     transition: none;
   }
 }
@@ -53,14 +77,14 @@
   margin: 0.5rem 0;
   padding: 0.5rem 0.75rem;
   border-radius: 0.75rem;
-  background: color-mix(in srgb, var(--USER__backgroundColor) 10%, white);
+  background: color-mix(in srgb, var(--USER__backgroundColor) 40%, white);
   white-space: pre-wrap;
   font-size: calc(var(--USER__fontSize) * 0.85);
 }
 
 .chat_panel__turn[data-role="user"] {
   margin-left: auto;
-  background: color-mix(in srgb, var(--USER__backgroundColor) 80%, black);
+  background: color-mix(in srgb, var(--USER__backgroundColor) 90%, black);
 }
 
 .chat_panel__compose {

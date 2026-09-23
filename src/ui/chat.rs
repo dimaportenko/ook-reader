@@ -44,6 +44,11 @@ pub(crate) fn ChatPanel(
         chat.set(Conversation::default());
     };
 
+    let mut close = move || {
+        open.set(false);
+        reset();
+    };
+
     use_effect(move || {
         if autosend() {
             autosend.set(false);
@@ -55,6 +60,12 @@ pub(crate) fn ChatPanel(
     let conversation = chat.read();
 
     rsx! {
+        div {
+            class: "{Styles::chat_panel__backdrop}",
+            "data-state": if open() { "open" } else { "closed" },
+            aria_hidden: true,
+            onclick: move |_| close(),
+        }
         aside {
             class: "{Styles::chat_panel}",
             "data-state": if open() { "open" } else { "closed" },
@@ -69,10 +80,7 @@ pub(crate) fn ChatPanel(
                 button {
                     class: "icon-button",
                     aria_label: "Close chat",
-                    onclick: move |_| {
-                        open.set(false);
-                        reset();
-                    },
+                    onclick: move |_| close(),
                     Icon {
                         icon: icon::CLOSE,
                     }
@@ -190,6 +198,23 @@ mod test {
              hit-testable off-screen",
         );
         assert!(CHAT_CSS.contains("@media (prefers-reduced-motion: reduce)"));
+    }
+
+    #[test]
+    fn the_backdrop_fades_with_the_slide_and_stops_catching_taps_once_gone() {
+        let closed = CHAT_CSS
+            .split_once(".chat_panel__backdrop {")
+            .expect("the backdrop's closed state is its base rule")
+            .1
+            .split_once('}')
+            .expect("an unclosed rule")
+            .0;
+
+        assert!(closed.contains(&format!("opacity {SLIDE}")));
+        assert!(
+            closed.contains(&format!("visibility 0s linear {SLIDE}")),
+            "an invisible backdrop that stays visible to hit-testing swallows every tap on the page",
+        );
     }
 
     #[test]
