@@ -1,4 +1,4 @@
-use dioxus::prelude::*;
+use dioxus::{core::Task, prelude::*};
 
 use crate::{
     ai::{gemini::Gemini, ChatProvider, Role},
@@ -11,12 +11,13 @@ struct Styles;
 
 #[component]
 pub(crate) fn ChatPanel(
-    show_controls: bool,
     mut open: Signal<bool>,
     mut draft: Signal<String>,
+    mut autosend: Signal<bool>,
 ) -> Element {
     let provider = use_context::<Signal<Option<Gemini>>>();
     let mut chat = use_signal(Conversation::default);
+    let mut pending_task = use_signal(|| None::<Task>);
 
     let mut submit = move || {
         let Some(gemini) = provider.read().clone() else {
@@ -29,25 +30,31 @@ pub(crate) fn ChatPanel(
         draft.set(String::new());
 
         let history = chat.read().messages().to_vec();
-        spawn(async move {
+        pending_task.set(Some(spawn(async move {
             let outcome = gemini.complete(&history).await;
             chat.write().settle(outcome);
-        });
+            pending_task.set(None);
+        })));
     };
+
+    let mut reset = move || {
+        if let Some(task) = pending_task.take() {
+            task.cancel();
+        }
+        chat.set(Conversation::default());
+    };
+
+    use_effect(move || {
+        if autosend() {
+            autosend.set(false);
+            submit();
+        }
+    });
 
     let provider = provider.read();
     let conversation = chat.read();
 
     rsx! {
-        button {
-            class: if show_controls { "icon-button" } else { "icon-button reader-control--hidden" },
-            aria_label: "Chat",
-            onclick: move |_| open.set(true),
-            Icon {
-                icon: icon::MESSAGE,
-            }
-        }
-
         aside {
             class: "{Styles::chat_panel}",
             "data-state": if open() { "open" } else { "closed" },
@@ -62,7 +69,10 @@ pub(crate) fn ChatPanel(
                 button {
                     class: "icon-button",
                     aria_label: "Close chat",
-                    onclick: move |_| open.set(false),
+                    onclick: move |_| {
+                        open.set(false);
+                        reset();
+                    },
                     Icon {
                         icon: icon::CLOSE,
                     }
@@ -119,10 +129,20 @@ pub(crate) fn ChatPanel(
                             }
                         },
                     }
-                    button {
-                        disabled: draft.read().trim().is_empty(),
-                        onclick: move |_| submit(),
-                        "Send"
+                    div {
+                        class: "{Styles::chat_panel__compose_actions}",
+                        button {
+                            class: "{Styles::chat_panel__compose_action}",
+                            disabled: conversation.messages().is_empty() || *conversation.status() != Status::Idle,
+                            onclick: move |_| reset(),
+                            "Reset"
+                        }
+                        button {
+                            class: "{Styles::chat_panel__compose_action}",
+                            disabled: draft.read().trim().is_empty(),
+                            onclick: move |_| submit(),
+                            "Send"
+                        }
                     }
                 }
             }

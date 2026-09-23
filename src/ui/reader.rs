@@ -162,6 +162,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
 
     let mut chat_draft = use_signal(String::new);
     let mut chat_open = use_signal(|| false);
+    let mut autosend = use_signal(|| false);
 
     use_effect(move || {
         let push = document::eval(THEME_PUSH_JS);
@@ -255,6 +256,8 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                     }
                     SettingsPopover {}
                     button {
+                        class: "icon-button",
+                        aria_label: "AI Chat",
                         onclick: {
                             let title = book.title.clone();
                             let author = book.author.clone();
@@ -283,18 +286,21 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                                                     },
                                                 ),
                                             );
+                                        autosend.set(true);
                                     }
                                     chat_open.set(true);
                                 }
                             }
                         },
-                        "Ask AI"
+                        Icon {
+                            icon: icon::MESSAGE,
+                        }
                     }
 
                     ChatPanel {
-                        show_controls: show_controls(),
                         open: chat_open,
                         draft: chat_draft,
+                        autosend,
                     }
                 }
 
