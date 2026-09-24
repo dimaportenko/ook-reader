@@ -12,12 +12,12 @@ use crate::{
     settings::Settings,
     toc::{self, TocEntry},
     ui::{
-        chat::ChatPanel,
+        chat::{use_chat_handle, ChatPanel},
         components::icon::{self, Icon},
         library::OpenBook,
         settings::SettingsPopover,
         toc::ContentsPopover,
-        OrLog,
+        OrLog, SWIPE_MIN_PX,
     },
 };
 
@@ -29,11 +29,9 @@ const GESTURE_RESULT_JS: &str = r#"
     const accepted = await dioxus.recv();
     window.__ookReader?.resolveGesture(accepted);
 "#;
-const SELECTED_TEXT_JS: &str = r#"return window.__ookReader?.takeSelectedText() ?? "";"#;
+const TAKE_SELECTION_JS: &str = r#"return window.__ookReader?.takeSelectedText() ?? "";"#;
 
 const FRAME_ID: &str = "reader-frame-0";
-
-pub(crate) const SWIPE_MIN_PX: u32 = 40;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Turn {
@@ -124,6 +122,23 @@ fn chapter_label(entries: &[TocEntry], chapter: usize, chapter_count: usize) -> 
     }
 }
 
+fn selection_draft(
+    title: &str,
+    author: Option<&str>,
+    chapter: &str,
+    selected: &str,
+) -> Option<String> {
+    let text = selected.trim();
+    (!text.is_empty()).then(|| {
+        prompt::draft(&Passage {
+            title,
+            author,
+            chapter: Some(chapter),
+            text,
+        })
+    })
+}
+
 fn page_label(page: usize, count: usize) -> String {
     match count {
         0 => "…".to_string(),
@@ -160,9 +175,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
     let show_controls = use_signal(|| true);
     let opened = use_signal(|| false);
 
-    let mut chat_draft = use_signal(String::new);
-    let mut chat_open = use_signal(|| false);
-    let mut autosend = use_signal(|| false);
+    let chat = use_chat_handle();
 
     use_effect(move || {
         let push = document::eval(THEME_PUSH_JS);
@@ -269,26 +282,14 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                                     chapter.clone(),
                                 );
                                 async move {
-                                    let selected = document::eval(SELECTED_TEXT_JS)
+                                    let selected = document::eval(TAKE_SELECTION_JS)
                                         .join::<String>()
                                         .await
                                         .unwrap_or_default();
-                                    let text = selected.trim();
-                                    if !text.is_empty() {
-                                        chat_draft
-                                            .set(
-                                                prompt::draft(
-                                                    &Passage {
-                                                        title: &title,
-                                                        author: author.as_deref(),
-                                                        chapter: Some(&chapter),
-                                                        text,
-                                                    },
-                                                ),
-                                            );
-                                        autosend.set(true);
+                                    match selection_draft(&title, author.as_deref(), &chapter, &selected) {
+                                        Some(text) => chat.send(text),
+                                        None => chat.show(),
                                     }
-                                    chat_open.set(true);
                                 }
                             }
                         },
@@ -297,11 +298,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                         }
                     }
 
-                    ChatPanel {
-                        open: chat_open,
-                        draft: chat_draft,
-                        autosend,
-                    }
+                    ChatPanel { chat }
                 }
 
             }
@@ -464,6 +461,18 @@ mod test {
     use super::*;
 
     #[test]
+    fn a_blank_selection_drafts_nothing() {
+        assert_eq!(selection_draft("Dune", None, "Book I", " \n\t"), None);
+        let draft = selection_draft("Dune", Some("Frank Herbert"), "Book I", "  spice\n")
+            .expect("a real selection drafts");
+        assert!(draft.contains("> spice\n"), "trimmed and quoted: {draft:?}");
+        assert!(
+            !draft.contains(">   spice"),
+            "leading whitespace is trimmed"
+        );
+    }
+
+    #[test]
     fn the_chapter_label_prefers_the_toc_entry_over_the_ordinal() {
         let (epub, docs) =
             epub::open_with_spine(Path::new(crate::TEST_BOOK)).expect("open fixture book");
@@ -535,8 +544,8 @@ mod test {
     }
 
     #[test]
-    fn ask_ai_and_the_controller_agree_on_how_to_read_the_selection() {
-        assert!(SELECTED_TEXT_JS.contains("__ookReader?.takeSelectedText()"));
+    fn the_chat_icon_and_the_controller_agree_on_taking_the_selection() {
+        assert!(TAKE_SELECTION_JS.contains("__ookReader?.takeSelectedText()"));
         assert!(READER_CONTROLLER_JS.contains("takeSelectedText()"));
         assert!(READER_CONTROLLER_JS.contains("getSelection()"));
     }

@@ -6,7 +6,6 @@
   width: min(42rem, 100%);
   padding: env(safe-area-inset-top) env(safe-area-inset-right)
     env(safe-area-inset-bottom) 0;
-  /* background-color: color-mix(in srgb, var(--USER__backgroundColor) 62%, white); */
   background-color: var(--USER__backgroundColor);
   z-index: 2;
   display: flex;

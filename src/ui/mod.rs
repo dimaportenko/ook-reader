@@ -8,6 +8,8 @@ pub mod settings;
 pub mod theme;
 pub mod toc;
 
+pub(crate) const SWIPE_MIN_PX: u32 = 40;
+
 pub(crate) trait OrLog<T> {
     fn or_log(self, action: &str) -> Option<T>;
 }

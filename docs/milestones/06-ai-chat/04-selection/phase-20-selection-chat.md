@@ -42,6 +42,7 @@ sibling of that button. So there are two hand-offs to make, and each has one ide
   `selectedText()` method on the reader controller, next to `resolveGesture`. The
   frame reports only a `selection:true|false` bridge message, and only when the value flips.
   Streaming the text on every `selectionchange` would put a round-trip on every drag.
+  *(The flag half was dropped with Step 5 on 2026-09-23. Only the pull is built.)*
 - **The draft replaces the compose box.** Pressing *Ask AI* sets `draft` outright, even if
   something half-typed was there. The conversation is untouched: *Ask AI* on a second passage
   continues the same chat.
@@ -82,12 +83,11 @@ built and tested in Phase 17.
       to close, with the drawer and backdrop following the finger; a reusable `Drawer` in
       `src/ui/drawer.rs` with the chat reset on any close; `takeSelectedText()` clears the
       selection so reopening doesn't re-send it. `29abaa7`, `7c9ce86`.
-- [ ] **5. Show *Ask AI* only while something is selected** — a `selectionchange`
-      listener in the chapter posts `ook-selection` when the flag flips, the controller
-      forwards it as `selection:true|false` (and `false` on a chapter change),
-      `BridgeMsg::Selection(bool)` drives a `Signal<bool>`; parse + three-hop `#[test]`,
-      `dx serve` eyeball. *Needs rethinking: after 4½ the icon is the only way into the chat,
-      so it can't simply be hidden.*
-- [ ] **6. Review and refactor** — punch-list over the lifted props, the async handler, the
-      new bridge message and the controller method; whether `#[allow(dead_code)]` on
-      `mod ai` can go now that `prompt` has a caller; suite green, clippy clean.
+- [x] ~~**5. Show *Ask AI* only while something is selected**~~ — **skipped 2026-09-23.**
+      After 4½ the chat icon is the only way into the chat, and it already sends a
+      selection when there is one, so there is no selection-only button left to show or
+      hide. The `selection:true|false` bridge message is not built.
+- [ ] **6. Review and refactor** — drop `#[allow(dead_code)]` on `mod ai`; a pure
+      `selection_draft` out of the chat icon's handler; the three chat signals as one
+      `Copy` `ChatHandle`; `SWIPE_MIN_PX` out of `reader.rs`; stale names and a dead CSS
+      line; suite green, clippy clean.

@@ -20,8 +20,8 @@ and hide the button.
 4. ~~The real selection~~ — `selectedText()` on the controller, an `async` handler that `eval`s it. **Done** — `f30cfde`.
 4½. ~~Send on open~~ *(manual)* — `autosend` flag, toolbar chat icon, Reset. **Done** — `4218631`.
 4¾. ~~The drawer~~ *(manual)* — backdrop, swipe and drag to close, a reusable `Drawer`, and a selection that feeds the chat once. **Done** — `29abaa7`, `7c9ce86`.
-5. Show *Ask AI* only while something is selected — `ook-selection` → `BridgeMsg::Selection`.
-6. Review and refactor.
+5. ~~Show *Ask AI* only while something is selected~~ — **Skipped** 2026-09-23: the chat icon is the only way in, and it already sends a selection.
+6. Review and refactor — `mod ai` allow, `selection_draft`, `ChatHandle`, `SWIPE_MIN_PX`, stale names.
 
 **Why this order.** Dependency order would start at the bottom: the selection bridge, then
 the controller method, then the button. That means two steps whose only check is a string
@@ -623,3 +623,182 @@ under 4½.
   That's correct across rotation, but the first moves of a drag run before the answer
   arrives, and `backdrop_opacity` falls back to fully opaque until then.
 - `.drawer`'s old `background-color` line is still there, commented out.
+
+## Step 5 — Show *Ask AI* only while something is selected
+
+> **Status:** skipped 2026-09-23, by the learner's choice. Nothing was built.
+
+After 4½ the toolbar's chat icon is the only way into the chat, so it can't be hidden
+while nothing is selected. It already does the selection-only job anyway: with text
+selected it drafts and sends the passage, and without a selection it just opens the chat.
+The `ook-selection` → `BridgeMsg::Selection(bool)` bridge message would only have restyled
+the icon, so it was dropped rather than re-planned. `takeSelectedText()` from 4¾ is still
+the only link from the chapter's selection to the chat.
+
+If it comes back later, the plumbing is still as planned: a `selectionchange` listener
+posts only when the flag flips, the controller forwards it (plus `false` on a chapter
+change), and a `Signal<bool>` in `Reader` drives the icon. One catch to handle then: a tap
+hides the control row, so on a phone a selection can exist while the icon is off screen.
+
+## Step 6 — Review and refactor
+
+> **Written by:** the agent, at the learner's request ("implement"). All six items are in
+> the working tree, not yet committed: 190 passed, 2 ignored, clippy clean. The `dx serve`
+> pass is still to do.
+
+**Check: the suite stays green and clippy stays clean.** This step changes no behaviour, so
+the existing tests are the spec. Baseline before any edit (2026-09-23, `acfef6d`):
+
+```sh
+cargo test      # 189 passed, 2 ignored
+cargo clippy --all-targets   # clean
+```
+
+After the punch-list: **190 passed** (one new test, item 5), 2 ignored, clippy clean. Then
+one `dx serve` pass through the chat to confirm nothing moved: select and tap the icon (it
+sends); tap with nothing selected (it only opens); ✕, the backdrop and Reset all clear the
+chat.
+
+Work top to bottom. The easy ones come first, so the file you restructure in items 5–6 is
+already tidy.
+
+### Punch-list
+
+- [x] **1. Drop `#[allow(dead_code)]` on `mod ai`** (`src/main.rs:7`).
+  The attribute went in when `ai` had no caller yet. Now `prompt::draft` is called from
+  the reader and `Gemini`/`ChatProvider`/`Role` from the chat. *Checked:* with the line
+  removed, `cargo build` and `cargo clippy --all-targets` report nothing.
+  **Why:** a blanket `allow` on a whole module hides every future unused item in it. The
+  lint is how you notice that a refactor left something dead, so it should be switched
+  back on as soon as it has nothing to report.
+
+- [x] **2. Delete the commented-out `background-color`** in `.drawer`
+  (`src/ui/drawer.css:9`). **Why:** git already remembers it. A commented-out declaration
+  makes the next reader wonder whether it is meant to come back.
+
+- [x] **3. Move `SWIPE_MIN_PX` out of `reader.rs`.** `drawer.rs` imports it from
+  `ui::reader`, so the generic component depends on one specific screen. Put it in
+  `src/ui/mod.rs` next to `OrLog`, the other thing `ui` shares, and import it as
+  `crate::ui::SWIPE_MIN_PX` in both files.
+  ```rust
+  // src/ui/mod.rs
+  pub(crate) const SWIPE_MIN_PX: u32 = 40;
+  ```
+  **Why:** a dependency should point from the specific to the general. `Drawer` is meant
+  to be reused, and a second screen that uses it shouldn't have to pull in the reader's
+  module. `reader.rs` then stops exporting it (`pub(crate)` goes away there), which also
+  makes the reader module's surface smaller.
+
+- [x] **4. Rename what still says "Ask AI".** The button is gone, and 4¾ turned
+  `selectedText` into `takeSelectedText`.
+  - `SELECTED_TEXT_JS` → `TAKE_SELECTION_JS` (`src/ui/reader.rs:32`), so the Rust name
+    says the same verb as the JS method: reading it *clears* the selection.
+  - The test `ask_ai_and_the_controller_agree_on_how_to_read_the_selection` →
+    `the_chat_icon_and_the_controller_agree_on_taking_the_selection`.
+
+  **Why:** a test name is the first thing you read when it fails. If it names a button
+  that doesn't exist, you have to work out what it means before you can work out what
+  broke.
+
+- [x] **5. Pull the draft out of the icon's handler: `selection_draft`.** The `onclick` in
+  `Reader` is about 35 lines of nesting inside `rsx!`: the clone dance, the `eval`, the
+  trim, the empty check, the `Passage` literal and three signal writes. The only decision
+  in there ("a blank selection drafts nothing") can be a pure function you can test.
+  Test first, in `reader.rs`'s `mod test`:
+  ```rust
+  #[test]
+  fn a_blank_selection_drafts_nothing() {
+      assert_eq!(selection_draft("Dune", None, "Book I", " \n\t"), None);
+      let draft = selection_draft("Dune", Some("Frank Herbert"), "Book I", "  spice\n")
+          .expect("a real selection drafts");
+      assert!(draft.contains("> spice\n"), "trimmed and quoted: {draft:?}");
+      assert!(!draft.contains(">   spice"), "leading whitespace is trimmed");
+  }
+  ```
+  Then the function, next to `chapter_label`:
+  ```rust
+  fn selection_draft(title: &str, author: Option<&str>, chapter: &str, selected: &str) -> Option<String> {
+      let text = selected.trim();
+      (!text.is_empty()).then(|| {
+          prompt::draft(&Passage { title, author, chapter: Some(chapter), text })
+      })
+  }
+  ```
+  The handler's body becomes:
+  ```rust
+  let selected = document::eval(TAKE_SELECTION_JS).join::<String>().await.unwrap_or_default();
+  if let Some(text) = selection_draft(&title, author.as_deref(), &chapter, &selected) {
+      chat_draft.set(text);
+      autosend.set(true);
+  }
+  chat_open.set(true);
+  ```
+  **Why:** it takes `&str`s, not `&OpenBook`, because `OpenBook` holds an `Rc<Epub>`
+  that a test can't easily build. It needs only three strings, so it asks for only
+  those, and that is what makes it testable. `bool::then` turns "if non-empty, build it"
+  into an `Option` in one expression, and the `if let Some` at the call site reads as
+  that decision. The `async` handler is left doing only the async parts: ask, wait,
+  write.
+
+- [x] **6. One `Copy` handle for the chat instead of three loose signals.** `open`,
+  `draft` and `autosend` are created in `Reader`, passed together to `ChatPanel`, and
+  passed together again to `ChatConversation`. `Reader` also has to know the protocol:
+  "set the draft, *then* raise `autosend`, then open". Bundle them in `src/ui/chat.rs`:
+  ```rust
+  #[derive(Clone, Copy, PartialEq)]
+  pub(crate) struct ChatHandle {
+      open: Signal<bool>,
+      draft: Signal<String>,
+      autosend: Signal<bool>,
+  }
+
+  pub(crate) fn use_chat_handle() -> ChatHandle {
+      ChatHandle {
+          open: use_signal(|| false),
+          draft: use_signal(String::new),
+          autosend: use_signal(|| false),
+      }
+  }
+
+  impl ChatHandle {
+      pub(crate) fn show(mut self) { self.open.set(true); }
+      pub(crate) fn send(mut self, text: String) {
+          self.draft.set(text);
+          self.autosend.set(true);
+          self.open.set(true);
+      }
+  }
+  ```
+  `Reader` does `let chat = use_chat_handle();`, the handler becomes
+  `if let Some(text) = selection_draft(..) { chat.send(text) } else { chat.show() }`, and
+  it renders `ChatPanel { chat }`. Inside, `ChatPanel` passes `chat.open` to `Drawer` and
+  the handle to `ChatConversation { handle: chat }`. The conversation destructures it once
+  at the top (`let ChatHandle { open, mut draft, mut autosend } = handle;`) so the rest of
+  its body doesn't change. The prop there is `handle`, not `chat`, because the body
+  already has a `chat` signal for the `Conversation`, and reusing the name would shadow
+  the prop. Keep the fields private: only `chat.rs` touches them.
+  **Why:**
+  - *A struct of `Signal`s is itself `Copy`.* Each `Signal` is a small handle to state
+    stored elsewhere, so copying the struct copies three handles, not the state. That's
+    why `#[derive(Clone, Copy)]` is allowed and why `send` can take `self` by value.
+  - *`PartialEq` is required for props.* Dioxus compares old and new props to decide
+    whether to re-render a child. `Signal` compares by identity, so the derive works.
+  - *`use_chat_handle` is a hook,* because it calls `use_signal`. It follows the same
+    rules: call it at the top of the component, unconditionally, and name it `use_…` so
+    that is visible.
+  - *The payoff is the protocol, not the line count.* 4½'s "Found in review" bug was a
+    close handler that raised `autosend` by mistake. With private fields, `Reader` can
+    only `show` or `send`; it can't raise `autosend` without a draft. `ChatPanel`'s
+    three props become one, so adding a fourth later doesn't mean editing three
+    signatures.
+
+  This is the biggest item. If it feels like too much for one sitting, land 1–5 alone
+  first; they stand on their own.
+
+### Not in this step (behaviour changes, not refactors)
+
+- `Drawer` measures its width with an async `get_client_rect` on every `pointerdown`, so
+  the first moves of a drag use `width = 0` and the backdrop stays opaque until the
+  answer arrives. Measuring on `onmounted` plus a resize would fix it. That changes
+  behaviour, so it would be its own step if it's ever noticeable.
+- The selection flag from Step 5.

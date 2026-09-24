@@ -9,31 +9,51 @@ use crate::{
 #[css_module("/src/ui/chat.css")]
 struct Styles;
 
-#[component]
-pub(crate) fn ChatPanel(
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) struct ChatHandle {
     open: Signal<bool>,
     draft: Signal<String>,
     autosend: Signal<bool>,
-) -> Element {
+}
+
+pub(crate) fn use_chat_handle() -> ChatHandle {
+    ChatHandle {
+        open: use_signal(|| false),
+        draft: use_signal(String::new),
+        autosend: use_signal(|| false),
+    }
+}
+
+impl ChatHandle {
+    pub(crate) fn show(mut self) {
+        self.open.set(true);
+    }
+
+    pub(crate) fn send(mut self, text: String) {
+        self.draft.set(text);
+        self.autosend.set(true);
+        self.open.set(true);
+    }
+}
+
+#[component]
+pub(crate) fn ChatPanel(chat: ChatHandle) -> Element {
     rsx! {
         Drawer {
-            open,
+            open: chat.open,
             label: "Chat",
-            ChatConversation {
-                open,
-                draft,
-                autosend,
-            }
+            ChatConversation { handle: chat }
         }
     }
 }
 
 #[component]
-fn ChatConversation(
-    open: Signal<bool>,
-    mut draft: Signal<String>,
-    mut autosend: Signal<bool>,
-) -> Element {
+fn ChatConversation(handle: ChatHandle) -> Element {
+    let ChatHandle {
+        open,
+        mut draft,
+        mut autosend,
+    } = handle;
     let provider = use_context::<Signal<Option<Gemini>>>();
     let mut chat = use_signal(Conversation::default);
     let mut pending_task = use_signal(|| None::<Task>);

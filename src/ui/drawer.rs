@@ -7,7 +7,7 @@ use dioxus::{html::geometry::ClientPoint, prelude::*};
 
 use crate::ui::{
     components::icon::{self, Icon},
-    reader::SWIPE_MIN_PX,
+    SWIPE_MIN_PX,
 };
 
 #[css_module("/src/ui/drawer.css")]
