@@ -7,7 +7,7 @@ a chat whose first message is already filled in — book title, author, the sele
 so the only thing left to type is the question. First provider: **Gemini Flash-Lite**.
 The provider and model must be swappable later without touching the reader.
 
-**Status:** 🚧 in progress — captured 2026-09-11; [Phase 17](01-provider/phase-17-provider-boundary.md) closed 2026-09-13; [Phase 18](02-key-storage/phase-18-key-storage.md) closed 2026-09-20; [Phase 19](03-chat-panel/phase-19-chat-panel.md) closed 2026-09-22; [Phase 20](04-selection/phase-20-selection-chat.md) opened 2026-09-22. No ADR yet. Sits behind
+**Status:** 🚧 in progress — captured 2026-09-11; [Phase 17](01-provider/phase-17-provider-boundary.md) closed 2026-09-13; [Phase 18](02-key-storage/phase-18-key-storage.md) closed 2026-09-20; [Phase 19](03-chat-panel/phase-19-chat-panel.md) closed 2026-09-22; [Phase 20](04-selection/phase-20-selection-chat.md) closed 2026-09-24. No ADR yet. Sits behind
 nothing: Milestones 3 and 5 both have no phase in progress.
 
 ## The idea in one paragraph
@@ -28,7 +28,7 @@ deliberately pushed to its own phase so the first end-to-end slice is request/re
 | 17 | [Provider boundary + Gemini](01-provider/phase-17-provider-boundary.md) | A `ChatProvider` trait with one method, a Gemini implementation behind it, a `#[test]` against a fake — no UI, the key read from an env var | ✅ |
 | 18 | [API key storage + settings row](02-key-storage/phase-18-key-storage.md) | Key entered in the settings panel, stored in the OS keychain (not SQLite), read back on launch; provider/model chosen from a list | ✅ |
 | 19 | [Chat panel](03-chat-panel/phase-19-chat-panel.md) | A drawer showing a message list and an input; sends through the provider; conversation held in memory | ✅ |
-| 20 | [Selection → prefilled chat (desktop)](04-selection/phase-20-selection-chat.md) | Read the selection out of the WebView via the existing eval bridge; a menu item opens the chat with the template filled in | 🚧 |
+| 20 | [Selection → prefilled chat (desktop)](04-selection/phase-20-selection-chat.md) | Read the selection out of the WebView via the existing eval bridge; a menu item opens the chat with the template filled in | ✅ |
 | 21 | Selection → prefilled chat (iOS) | *Ask AI* in the native edit menu via `buildMenuWithBuilder:` (objc2), reusing Phase 20's template | ⬜ |
 | 22 | Streaming replies | Tokens appear as they arrive; cancel mid-reply | ⬜ |
 

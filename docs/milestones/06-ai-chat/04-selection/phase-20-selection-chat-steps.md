@@ -21,7 +21,7 @@ and hide the button.
 4½. ~~Send on open~~ *(manual)* — `autosend` flag, toolbar chat icon, Reset. **Done** — `4218631`.
 4¾. ~~The drawer~~ *(manual)* — backdrop, swipe and drag to close, a reusable `Drawer`, and a selection that feeds the chat once. **Done** — `29abaa7`, `7c9ce86`.
 5. ~~Show *Ask AI* only while something is selected~~ — **Skipped** 2026-09-23: the chat icon is the only way in, and it already sends a selection.
-6. Review and refactor — `mod ai` allow, `selection_draft`, `ChatHandle`, `SWIPE_MIN_PX`, stale names.
+6. ~~Review and refactor~~ — `mod ai` allow, `selection_draft`, `ChatHandle`, `SWIPE_MIN_PX`, stale names. **Done** — `2f01fc9`.
 
 **Why this order.** Dependency order would start at the bottom: the selection bridge, then
 the controller method, then the button. That means two steps whose only check is a string
@@ -642,9 +642,11 @@ hides the control row, so on a phone a selection can exist while the icon is off
 
 ## Step 6 — Review and refactor
 
-> **Written by:** the agent, at the learner's request ("implement"). All six items are in
-> the working tree, not yet committed: 190 passed, 2 ignored, clippy clean. The `dx serve`
-> pass is still to do.
+> **Status:** done — committed in `2f01fc9` (190 tests green, 2 ignored; clippy clean). The
+> new `a_blank_selection_drafts_nothing` was seen to fail with its expectation inverted. The
+> `dx serve` pass was not reported before the commit.
+
+> **Written by:** the agent, at the learner's request ("implement").
 
 **Check: the suite stays green and clippy stays clean.** This step changes no behaviour, so
 the existing tests are the spec. Baseline before any edit (2026-09-23, `acfef6d`):

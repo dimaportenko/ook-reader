@@ -10,4 +10,4 @@ exists (`ai::prompt::draft`, Phase 17 Step 2); this feature is the plumbing that
 
 | # | Phase | Status |
 |---|---|---|
-| 20 | [Selection → prefilled chat (desktop)](phase-20-selection-chat.md) | 🚧 in progress — opened 2026-09-22 |
+| 20 | [Selection → prefilled chat (desktop)](phase-20-selection-chat.md) | ✅ done — closed 2026-09-24 |

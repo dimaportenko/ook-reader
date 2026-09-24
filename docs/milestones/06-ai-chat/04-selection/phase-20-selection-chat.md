@@ -1,6 +1,6 @@
 # Phase 20 — Selection → prefilled chat (desktop)
 
-[← Feature: Selection → prefilled chat](README.md) · **Status:** 🚧 in progress — opened 2026-09-22 ·
+[← Feature: Selection → prefilled chat](README.md) · **Status:** ✅ done — opened 2026-09-22, closed 2026-09-24 (`2f01fc9`, 190 tests) ·
 build log: [`phase-20-selection-chat-steps.md`](phase-20-selection-chat-steps.md)
 
 ## Goal
@@ -87,7 +87,7 @@ built and tested in Phase 17.
       After 4½ the chat icon is the only way into the chat, and it already sends a
       selection when there is one, so there is no selection-only button left to show or
       hide. The `selection:true|false` bridge message is not built.
-- [ ] **6. Review and refactor** — drop `#[allow(dead_code)]` on `mod ai`; a pure
+- [x] **6. Review and refactor** — drop `#[allow(dead_code)]` on `mod ai`; a pure
       `selection_draft` out of the chat icon's handler; the three chat signals as one
       `Copy` `ChatHandle`; `SWIPE_MIN_PX` out of `reader.rs`; stale names and a dead CSS
-      line; suite green, clippy clean.
+      line; suite green, clippy clean. `2f01fc9`.
