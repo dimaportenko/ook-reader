@@ -17,7 +17,7 @@ and that is the whole of *Stop*.
 2. ~~Stop~~ — `Conversation::stop`, a *Stop* button that cancels the task. **Done** — `8aecc9a`.
 3. ~~The SSE line buffer~~ — `src/ai/sse.rs`, pure, under `#[test]`. **Done** — `8f1bfa9`.
 4. ~~The real stream~~ — `ChatProvider::stream` with `on_text`, Gemini `alt=sse`, the fake removed. **Done** — `6f03994`.
-5. Review and refactor.
+5. ~~Review and refactor~~ — `complete` deleted, one endpoint, `api_error`, a missing `content` read as no text. **Done** — `8aa13ec`.
 
 **Why this order.** Dependency order would start with the SSE parser and a trait change,
 which means two steps with nothing new on screen. Instead, Step 1 builds the part the user
@@ -679,6 +679,8 @@ Step 5 candidate.
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `8aa13ec` (205 tests green, 2 ignored; clippy clean). Closes the phase.
 
 **What it is.** The phase's closing pass. Step 4 left the non-streaming path alive behind
 `#[cfg(test)]` and handed a punch-list forward. This step works through it. Nothing on

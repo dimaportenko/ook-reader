@@ -1,6 +1,6 @@
 # Phase 22 — Streaming replies
 
-[← Feature: Streaming replies](README.md) · **Status:** 🚧 in progress — opened 2026-09-25 ·
+[← Feature: Streaming replies](README.md) · **Status:** ✅ done — opened 2026-09-25, closed 2026-09-27 ·
 build log: [`phase-22-streaming-steps.md`](phase-22-streaming-steps.md)
 
 ## Goal
@@ -73,5 +73,5 @@ against tests before anything runs through it.
       `:streamGenerateContent?alt=sse` read with `chunk()` through the buffer; the fake
       loop and its `tokio` dependency removed; `#[test]` against the `Fake` + `dx serve` and
       iOS simulator eyeball.
-- [ ] **5. Review and refactor** — whether `complete` still earns its place, the
+- [x] **5. Review and refactor** — whether `complete` still earns its place, the
       per-chunk text extraction shared with `reply_from`, names; suite green, clippy clean.

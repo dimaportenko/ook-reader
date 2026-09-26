@@ -9,4 +9,4 @@ Gemini's `:streamGenerateContent?alt=sse`.
 
 | # | Phase | Status |
 |---|---|---|
-| 22 | [Streaming replies](phase-22-streaming.md) | 🚧 in progress — opened 2026-09-25 |
+| 22 | [Streaming replies](phase-22-streaming.md) | ✅ done — closed 2026-09-27 |
