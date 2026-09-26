@@ -14,7 +14,7 @@ and that is the whole of *Stop*.
 ## Step plan
 
 1. ~~The reply types itself in~~ — `Replying(String)`, `append`, the real answer fed back word by word. **Done** — `a158b50`.
-2. Stop — `Conversation::stop`, a *Stop* button that cancels the task.
+2. ~~Stop~~ — `Conversation::stop`, a *Stop* button that cancels the task. **Done** — `8aecc9a`.
 3. The SSE line buffer — `src/ai/sse.rs`, pure, under `#[test]`.
 4. The real stream — `ChatProvider::stream` with `on_text`, Gemini `alt=sse`, the fake removed.
 5. Review and refactor.
@@ -203,6 +203,8 @@ Step 4 adds that case.
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `8aecc9a` (196 tests green, 2 ignored; clippy clean; `dx serve` checks confirmed by eye).
 
 **What it is.** While a reply is typing itself in, the drawer's *Send* button becomes
 *Stop*. Pressing it ends the reply where it is. The words already on screen stay as an

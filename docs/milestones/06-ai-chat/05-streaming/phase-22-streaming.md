@@ -65,7 +65,7 @@ against tests before anything runs through it.
       `Conversation::append`; the drawer renders the partial turn; the real `complete`
       answer is fed back word by word with a short sleep (faked at the edge); `#[test]` +
       `dx serve` eyeball.
-- [ ] **2. Stop** — `Conversation::stop` keeps the partial as an assistant turn; a *Stop*
+- [x] **2. Stop** — `Conversation::stop` keeps the partial as an assistant turn; a *Stop*
       button while replying cancels the task; `#[test]` + `dx serve` eyeball.
 - [ ] **3. The SSE line buffer** — `src/ai/sse.rs`: bytes in, complete `data:` payloads out,
       correct across split lines, CRLF and a split multi-byte character; `#[test]` only.
