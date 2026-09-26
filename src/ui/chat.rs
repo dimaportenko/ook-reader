@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use dioxus::{core::Task, prelude::*};
 
 use crate::{
@@ -71,6 +73,12 @@ fn ChatConversation(handle: ChatHandle) -> Element {
         let history = chat.read().messages().to_vec();
         pending_task.set(Some(spawn(async move {
             let outcome = gemini.complete(&history).await;
+            if let Ok(reply) = &outcome {
+                for word in reply.text.split_inclusive(' ') {
+                    chat.write().append(word);
+                    tokio::time::sleep(Duration::from_millis(40)).await;
+                }
+            }
             chat.write().settle(outcome);
             pending_task.set(None);
         })));
@@ -122,10 +130,11 @@ fn ChatConversation(handle: ChatHandle) -> Element {
                         "{message.text()}"
                     }
                 }
-                if *conversation.status() == Status::Waiting {
+                if let Status::Replying(text) = conversation.status() {
                     li {
                         class: "{Styles::chat_panel__turn}",
-                        "..."
+                        "data-role": "assistant",
+                        if text.is_empty() { "..." } else { "{text}" }
                     }
                 }
             }

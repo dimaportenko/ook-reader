@@ -30,6 +30,9 @@ fake ones, and the fake goes away.
 
 ## Step 1 — The reply types itself in
 
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
 **What it is.** The "..." placeholder in the drawer becomes the assistant's reply, growing
 word by word. There is no streaming from Gemini yet. The whole answer still arrives from
 `complete`, and the component feeds it back into the conversation in pieces with a 40 ms
@@ -89,8 +92,13 @@ fn asking_while_replying_is_refused() {
 
     assert!(!chat.ask("Second?"));
 
+    assert_eq!(chat.messages().len(), 1);
 }
 ```
+
+`asking_while_replying_is_refused` replaces `asking_while_waiting_is_refused`. Its name
+pointed at a variant that no longer exists, and it covered a subset of the new test. Its
+`messages().len()` assertion moves across.
 
 It fails to compile at first (`Replying` and `append` don't exist). That counts as red.
 
