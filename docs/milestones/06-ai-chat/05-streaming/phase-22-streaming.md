@@ -67,7 +67,7 @@ against tests before anything runs through it.
       `dx serve` eyeball.
 - [x] **2. Stop** — `Conversation::stop` keeps the partial as an assistant turn; a *Stop*
       button while replying cancels the task; `#[test]` + `dx serve` eyeball.
-- [ ] **3. The SSE line buffer** — `src/ai/sse.rs`: bytes in, complete `data:` payloads out,
+- [x] **3. The SSE line buffer** — `src/ai/sse.rs`: bytes in, complete `data:` payloads out,
       correct across split lines, CRLF and a split multi-byte character; `#[test]` only.
 - [ ] **4. The real stream** — `ChatProvider::stream` with an `on_text` callback; Gemini's
       `:streamGenerateContent?alt=sse` read with `chunk()` through the buffer; the fake

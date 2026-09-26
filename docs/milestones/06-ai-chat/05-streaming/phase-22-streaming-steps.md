@@ -15,7 +15,7 @@ and that is the whole of *Stop*.
 
 1. ~~The reply types itself in~~ — `Replying(String)`, `append`, the real answer fed back word by word. **Done** — `a158b50`.
 2. ~~Stop~~ — `Conversation::stop`, a *Stop* button that cancels the task. **Done** — `8aecc9a`.
-3. The SSE line buffer — `src/ai/sse.rs`, pure, under `#[test]`.
+3. ~~The SSE line buffer~~ — `src/ai/sse.rs`, pure, under `#[test]`. **Done** — `8f1bfa9`.
 4. The real stream — `ChatProvider::stream` with `on_text`, Gemini `alt=sse`, the fake removed.
 5. Review and refactor.
 
@@ -357,6 +357,8 @@ Escape key and a keyboard shortcut for *Stop* are out of scope.
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `8f1bfa9` (202 tests green, 2 ignored; clippy clean).
 
 **What it is.** A small pure type, `SseBuffer`, in `src/ai/sse.rs`. You feed it the body
 of an HTTP response in whatever pieces the network hands over. It gives back the payload
