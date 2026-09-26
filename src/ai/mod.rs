@@ -56,9 +56,6 @@ pub(crate) enum ChatError {
 }
 
 pub(crate) trait ChatProvider {
-    #[cfg(test)]
-    async fn complete(&self, messages: &[Message]) -> Result<Reply, ChatError>;
-
     async fn stream(
         &self,
         messages: &[Message],
@@ -77,37 +74,19 @@ mod test {
     }
 
     impl ChatProvider for Fake {
-        async fn complete(&self, messages: &[Message]) -> Result<Reply, ChatError> {
-            self.seen.borrow_mut().extend_from_slice(messages);
-            Ok(Reply {
-                text: self.reply.to_string(),
-            })
-        }
-
         async fn stream(
             &self,
             messages: &[Message],
             mut on_text: impl FnMut(&str),
         ) -> Result<Reply, ChatError> {
+            self.seen.borrow_mut().extend_from_slice(messages);
             for word in self.reply.split_inclusive(' ') {
                 on_text(word);
             }
-            self.complete(messages).await
+            Ok(Reply {
+                text: self.reply.to_string(),
+            })
         }
-    }
-
-    #[test]
-    fn a_provider_receives_the_conversation_and_answers() {
-        let fake = Fake {
-            reply: "Ankh-Morpork",
-            seen: RefCell::new(Vec::new()),
-        };
-        let question = Message::user("Which city?");
-
-        let reply = pollster::block_on(fake.complete(std::slice::from_ref(&question))).unwrap();
-
-        assert_eq!(reply.text, "Ankh-Morpork");
-        assert_eq!(fake.seen.borrow().as_slice(), &[question]);
     }
 
     #[test]

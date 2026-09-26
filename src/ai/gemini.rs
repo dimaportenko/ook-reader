@@ -1,4 +1,3 @@
-#[cfg(test)]
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 
@@ -48,10 +47,11 @@ struct GenerateResponse {
 
 #[derive(Debug, Deserialize)]
 struct Candidate {
+    #[serde(default)]
     content: ResponseContent,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct ResponseContent {
     #[serde(default)]
     parts: Vec<ResponsePart>,
@@ -76,11 +76,6 @@ fn text_of(response: GenerateResponse) -> String {
                 .collect()
         })
         .unwrap_or_default()
-}
-
-#[cfg(test)]
-fn reply_from(response: GenerateResponse) -> Result<Reply, ChatError> {
-    non_empty_reply(text_of(response))
 }
 
 fn non_empty_reply(text: String) -> Result<Reply, ChatError> {
@@ -108,31 +103,24 @@ impl Gemini {
     }
 }
 
-#[cfg(test)]
 fn endpoint(model: &str) -> String {
-    format!("https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent")
-}
-
-fn stream_endpoint(model: &str) -> String {
     format!("https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse")
 }
 
-#[cfg(test)]
-fn check_status(status: StatusCode, body: String) -> Result<String, ChatError> {
-    if status.is_success() {
-        Ok(body)
-    } else {
-        Err(ChatError::Api {
-            status: status.as_u16(),
-            body,
-        })
+fn api_error(status: StatusCode, body: String) -> ChatError {
+    ChatError::Api {
+        status: status.as_u16(),
+        body,
     }
 }
 
 impl ChatProvider for Gemini {
-    #[cfg(test)]
-    async fn complete(&self, messages: &[Message]) -> Result<Reply, ChatError> {
-        let response = self
+    async fn stream(
+        &self,
+        messages: &[Message],
+        mut on_text: impl FnMut(&str),
+    ) -> Result<Reply, ChatError> {
+        let mut response = self
             .client
             .post(endpoint(&self.model))
             .header("x-goog-api-key", &self.key)
@@ -141,31 +129,8 @@ impl ChatProvider for Gemini {
             .await?;
 
         let status = response.status();
-        let body = check_status(status, response.text().await?)?;
-
-        let parsed: GenerateResponse = serde_json::from_str(&body)?;
-        reply_from(parsed)
-    }
-
-    async fn stream(
-        &self,
-        messages: &[Message],
-        mut on_text: impl FnMut(&str),
-    ) -> Result<Reply, ChatError> {
-        let mut response = self
-            .client
-            .post(stream_endpoint(&self.model))
-            .header("x-goog-api-key", &self.key)
-            .json(&request_body(messages))
-            .send()
-            .await?;
-
-        let status = response.status();
         if !status.is_success() {
-            return Err(ChatError::Api {
-                status: status.as_u16(),
-                body: response.text().await?,
-            });
+            return Err(api_error(status, response.text().await?));
         }
 
         let mut sse = SseBuffer::default();
@@ -216,8 +181,8 @@ mod test {
     }
 
     #[test]
-    fn a_captured_success_becomes_a_reply() {
-        let body = r#"{
+    fn a_captured_chunk_yields_its_text() {
+        let payload = r#"{
             "candidates": [
                 {
                     "content": { "role": "model", "parts": [ { "text": "Ankh-Morpork" } ] },
@@ -227,67 +192,22 @@ mod test {
             "usageMetadata": { "promptTokenCount": 9, "candidatesTokenCount": 3 }
         }"#;
 
-        let reply = reply_from(serde_json::from_str(body).unwrap()).unwrap();
-
-        assert_eq!(reply.text, "Ankh-Morpork");
+        assert_eq!(
+            text_of(serde_json::from_str(payload).unwrap()),
+            "Ankh-Morpork"
+        );
     }
 
     #[test]
-    fn several_text_parts_are_joined_into_one_reply() {
-        let body = r#"{ "candidates": [ { "content": { "parts": [
+    fn several_text_parts_are_joined() {
+        let payload = r#"{ "candidates": [ { "content": { "parts": [
             { "text": "Ankh-" }, { "text": "Morpork" }
         ] } } ] }"#;
 
-        let reply = reply_from(serde_json::from_str(body).unwrap()).unwrap();
-
-        assert_eq!(reply.text, "Ankh-Morpork");
-    }
-
-    #[test]
-    fn a_blocked_prompt_has_no_candidates_and_is_empty() {
-        let body = r#"{ "promptFeedback": { "blockReason": "SAFETY" } }"#;
-
-        let result = reply_from(serde_json::from_str(body).unwrap());
-
-        assert!(matches!(result, Err(ChatError::Empty)), "{result:?}");
-    }
-
-    #[test]
-    fn a_candidate_with_no_text_is_empty_too() {
-        let body = r#"{ "candidates": [ { "content": { "parts": [ {} ] } } ] }"#;
-
-        let result = reply_from(serde_json::from_str(body).unwrap());
-
-        assert!(matches!(result, Err(ChatError::Empty)), "{result:?}");
-    }
-
-    #[test]
-    fn the_endpoint_names_the_model_and_the_method() {
-        let url = endpoint("gemini-3.5-flash-lite");
-
         assert_eq!(
-            url,
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"
+            text_of(serde_json::from_str(payload).unwrap()),
+            "Ankh-Morpork"
         );
-    }
-
-    #[test]
-    fn a_chosen_model_reaches_the_endpoint() {
-        let gemini = Gemini::new("key".to_owned(), "gemini-3.5-flash");
-
-        assert_eq!(
-            endpoint(&gemini.model),
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
-        );
-    }
-
-    #[test]
-    fn a_streamed_chunk_yields_its_text() {
-        let payload = r#"{ "candidates": [ { "content": { "role": "model", "parts": [
-            { "text": "Ankh-" }
-        ] } } ] }"#;
-
-        assert_eq!(text_of(serde_json::from_str(payload).unwrap()), "Ankh-");
     }
 
     #[test]
@@ -300,20 +220,58 @@ mod test {
     }
 
     #[test]
-    fn the_stream_endpoint_asks_for_server_sent_events() {
+    fn a_blocked_prompt_has_no_candidates_and_yields_nothing() {
+        let payload = r#"{ "promptFeedback": { "blockReason": "SAFETY" } }"#;
+
+        assert_eq!(text_of(serde_json::from_str(payload).unwrap()), "");
+    }
+
+    #[test]
+    fn a_candidate_with_no_text_part_yields_nothing() {
+        let payload = r#"{ "candidates": [ { "content": { "parts": [ {} ] } } ] }"#;
+
+        assert_eq!(text_of(serde_json::from_str(payload).unwrap()), "");
+    }
+
+    #[test]
+    fn a_candidate_stopped_for_safety_has_no_content_and_yields_nothing() {
+        let payload = r#"{ "candidates": [ { "finishReason": "SAFETY" } ] }"#;
+
+        assert_eq!(text_of(serde_json::from_str(payload).unwrap()), "");
+    }
+
+    #[test]
+    fn a_stream_with_no_text_is_an_empty_reply() {
+        let result = non_empty_reply(String::new());
+
+        assert!(matches!(result, Err(ChatError::Empty)), "{result:?}");
+    }
+
+    #[test]
+    fn the_endpoint_asks_for_server_sent_events() {
         assert_eq!(
-            stream_endpoint("gemini-3.5-flash-lite"),
+            endpoint("gemini-3.5-flash-lite"),
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:streamGenerateContent?alt=sse"
         );
     }
 
     #[test]
+    fn a_chosen_model_reaches_the_endpoint() {
+        let gemini = Gemini::new("key".to_owned(), "gemini-3.5-flash");
+
+        assert_eq!(
+            endpoint(&gemini.model),
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:streamGenerateContent?alt=sse"
+        );
+    }
+
+    #[test]
     fn a_non_success_status_becomes_an_api_error() {
-        let result = check_status(StatusCode::BAD_REQUEST, r#"{"error":{"code":400}}"#.into());
+        let error = api_error(StatusCode::BAD_REQUEST, r#"{"error":{"code":400}}"#.into());
 
         assert!(
-            matches!(&result, Err(ChatError::Api { status: 400, body }) if body.contains("400")),
-            "{result:?}"
+            matches!(&error, ChatError::Api { status: 400, body } if body.contains("400")),
+            "{error:?}"
         );
     }
 
@@ -331,17 +289,5 @@ mod test {
 
         assert!(pieces.len() > 1, "{pieces:?}");
         assert_eq!(pieces.concat(), reply.text);
-    }
-
-    #[tokio::test]
-    #[ignore = "needs GEMINI_API_KEY and the network"]
-    async fn a_real_gemini_answers_through_the_trait() {
-        let key = std::env::var("GEMINI_API_KEY").expect("set GEMINI_API_KEY to run this");
-        let gemini = Gemini::new(key, "gemini-3.5-flash-lite");
-        let messages = [Message::user("Reply with exactly one word: pong")];
-
-        let reply = ChatProvider::complete(&gemini, &messages).await.unwrap();
-
-        assert!(reply.text.to_lowercase().contains("pong"), "{reply:?}");
     }
 }

@@ -674,3 +674,99 @@ duplicated base URL between `endpoint` and `stream_endpoint`, and the two copies
 `Api` error are all Step 5. A candidate with no `content` at all (a mid-stream safety stop)
 would fail to parse as `Json`, not `Empty`. `complete` has the same gap, and it is also a
 Step 5 candidate.
+
+## Step 5 — Review and refactor
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**What it is.** The phase's closing pass. Step 4 left the non-streaming path alive behind
+`#[cfg(test)]` and handed a punch-list forward. This step works through it. Nothing on
+screen changes. The one behaviour change is a parse that used to fail.
+
+**Check first — `cargo test ai::`.** One new test pins the behaviour change. The refactor
+itself is guarded by the tests already there, rewritten to target what survives:
+
+```rust
+#[test]
+fn a_candidate_stopped_for_safety_has_no_content_and_yields_nothing() {
+    let payload = r#"{ "candidates": [ { "finishReason": "SAFETY" } ] }"#;
+
+    assert_eq!(text_of(serde_json::from_str(payload).unwrap()), "");
+}
+```
+
+Red: `called Result::unwrap() on an Err value: Error("missing field 'content'", …)`.
+
+**The punch-list, and what each item became.**
+
+1. **`complete` doesn't earn its place: deleted.** Its last caller left in Step 4, so it
+   only survived behind `#[cfg(test)]`, and the trait had a different shape in test builds
+   than in the app. `ChatProvider` is now one method, `stream`. `reply_from` and
+   `check_status` go with it, and so do the `Fake`'s `complete` and its test
+   (`a_provider_streams_its_answer_in_pieces` already checks what the provider was sent)
+   and the `#[ignore]`d live `complete` test.
+2. **One endpoint: `stream_endpoint` → `endpoint`.** With `:generateContent` gone there is
+   one URL, so the base address no longer appears twice and the name doesn't need a
+   qualifier. The two endpoint tests now expect `:streamGenerateContent?alt=sse`.
+3. **Two copies of the `Api` error → `api_error(status, body) -> ChatError`.** `stream`
+   calls it on a non-2xx, and `a_non_success_status_becomes_an_api_error` tests it
+   directly. Unlike `check_status` it doesn't take the body up front, so the success path
+   never has to read the whole stream.
+4. **The text extraction is shared.** Step 4 already did most of this by pulling out
+   `text_of`. The old `reply_from` tests now call `text_of` (they expect `""` where they
+   used to expect `Err(Empty)`). A new `a_stream_with_no_text_is_an_empty_reply` pins
+   `non_empty_reply`, which is where `Empty` comes from now. `a_streamed_chunk_yields_its_text`
+   folded into `a_captured_chunk_yields_its_text`, because the two tested the same thing.
+5. **A candidate with no `content` → `#[serde(default)]`.** When Gemini stops a candidate
+   for safety it can omit `content` entirely. That was a `Json` error ("could not read the
+   provider's answer"), which is misleading. Now `content` defaults to no parts. On the
+   last chunk the reply is either what arrived so far, or `Empty` if nothing did.
+
+**Minimal code.**
+
+```rust
+#[derive(Debug, Deserialize)]
+struct Candidate {
+    #[serde(default)]
+    content: ResponseContent,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ResponseContent { /* unchanged */ }
+
+fn api_error(status: StatusCode, body: String) -> ChatError {
+    ChatError::Api { status: status.as_u16(), body }
+}
+```
+
+and in `stream`:
+
+```rust
+if !status.is_success() {
+    return Err(api_error(status, response.text().await?));
+}
+```
+
+**Why it works.**
+
+- **`#[serde(default)]` needs `Default` on the field's type.** When the key is missing,
+  serde calls `ResponseContent::default()`, so the derive is part of the fix, not an extra.
+  `parts` already had `#[serde(default)]`, so the empty `Vec` falls out.
+- **Deleting a trait method is the cheap kind of refactor in Rust.** Every `impl` that still
+  defined `complete` would fail to compile (`method complete is not a member of trait`), and
+  so would every caller. The compiler lists what's left to delete, so nothing stale can
+  hang on quietly.
+- **Why `api_error` returns `ChatError`, not `Result`.** The caller has already decided
+  it's a failure. Returning the error value leaves the `return Err(…)` visible at the call
+  site, where the control flow is.
+
+**Kept on purpose.** `stream` still returns the full text, which `append` has also built up
+in `Status::Replying`. That double accumulation is the Step 4 decision to leave `settle`
+unchanged, and the simplify pass agreed to leave it.
+
+**Scope note.** Markdown rendering stays out, as the phase decided. A stream that breaks
+partway still drops its partial (a design decision, revisit if it bites). The suite
+went from 206 passing and 3 ignored to 205 and 2. Two tests were added. Four were deleted or
+merged: the `Fake`'s `complete` test, the ignored live `complete` test, the duplicate
+chunk test and the duplicate endpoint test. Six more were rewritten against what survives.
