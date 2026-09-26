@@ -33,6 +33,18 @@ impl Conversation {
         }
     }
 
+    pub(crate) fn stop(&mut self) {
+        let Status::Replying(text) = &mut self.status else {
+            return;
+        };
+        let text = std::mem::take(text);
+        self.status = Status::Idle;
+
+        if !text.is_empty() {
+            self.messages.push(Message::assistant(text));
+        }
+    }
+
     pub(crate) fn settle(&mut self, outcome: Result<Reply, ChatError>) {
         self.status = match outcome {
             Ok(reply) => {
@@ -180,5 +192,47 @@ mod test {
         assert!(!chat.ask("Second?"));
 
         assert_eq!(chat.messages().len(), 1);
+    }
+
+    #[test]
+    fn stopping_keeps_the_partial_as_an_assistant_turn() {
+        let mut chat = Conversation::default();
+        chat.ask("Which city?");
+        chat.append("Ankh-");
+
+        chat.stop();
+
+        assert_eq!(
+            chat.messages(),
+            &[Message::user("Which city?"), Message::assistant("Ankh-")]
+        );
+        assert_eq!(chat.status(), &Status::Idle);
+        assert!(chat.ask("And the river?"), "a stopped chat accepts a new turn");
+    }
+
+    #[test]
+    fn stopping_before_the_first_word_keeps_only_the_question() {
+        let mut chat = Conversation::default();
+        chat.ask("Which city?");
+
+        chat.stop();
+
+        assert_eq!(chat.messages(), &[Message::user("Which city?")]);
+        assert_eq!(chat.status(), &Status::Idle);
+    }
+
+    #[test]
+    fn stopping_with_no_reply_in_progress_changes_nothing() {
+        let mut chat = Conversation::default();
+        chat.ask("Which city?");
+        chat.settle(Err(ChatError::Empty));
+
+        chat.stop();
+
+        assert_eq!(chat.messages(), &[Message::user("Which city?")]);
+        assert_eq!(
+            chat.status(),
+            &Status::Failed("the provider returned no answer".to_owned())
+        );
     }
 }

@@ -198,3 +198,155 @@ deletes the loop and the dependency.
 Gemini round-trip. *Stop* is Step 2. A failure partway through a reply can't happen with
 this fake, because `complete` either succeeded before the loop or the loop never runs.
 Step 4 adds that case.
+
+## Step 2 — Stop
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**What it is.** While a reply is typing itself in, the drawer's *Send* button becomes
+*Stop*. Pressing it ends the reply where it is. The words already on screen stay as an
+assistant turn, and the next question can be asked straight away. The Step 1 fake's 40 ms
+sleep between words is what makes a reply slow enough to stop.
+
+**Check first — `cargo test chat::`.** Add these to the `test` module in
+`src/chat/mod.rs`:
+
+```rust
+#[test]
+fn stopping_keeps_the_partial_as_an_assistant_turn() {
+    let mut chat = Conversation::default();
+    chat.ask("Which city?");
+    chat.append("Ankh-");
+
+    chat.stop();
+
+    assert_eq!(
+        chat.messages(),
+        &[Message::user("Which city?"), Message::assistant("Ankh-")]
+    );
+    assert_eq!(chat.status(), &Status::Idle);
+    assert!(chat.ask("And the river?"), "a stopped chat accepts a new turn");
+}
+
+#[test]
+fn stopping_before_the_first_word_keeps_only_the_question() {
+    let mut chat = Conversation::default();
+    chat.ask("Which city?");
+
+    chat.stop();
+
+    assert_eq!(chat.messages(), &[Message::user("Which city?")]);
+    assert_eq!(chat.status(), &Status::Idle);
+}
+
+#[test]
+fn stopping_with_no_reply_in_progress_changes_nothing() {
+    let mut chat = Conversation::default();
+    chat.ask("Which city?");
+    chat.settle(Err(ChatError::Empty));
+
+    chat.stop();
+
+    assert_eq!(chat.messages(), &[Message::user("Which city?")]);
+    assert_eq!(
+        chat.status(),
+        &Status::Failed("the provider returned no answer".to_owned())
+    );
+}
+```
+
+They fail to compile at first (`no method named stop`). That counts as red.
+
+**Then the eyeball — `dx serve`.** Open the chat and ask for something long:
+
+1. While the "..." bubble shows and while words are appearing, the right-hand button reads
+   *Stop*, not *Send*.
+2. Press *Stop* partway through. The words stop coming, the bubble keeps what it had and
+   looks like an ordinary assistant turn, and the button goes back to *Send*.
+3. Ask a follow-up. It sends, and the reply refers to the cut-off answer, because the
+   partial is part of the history now.
+4. Press *Stop* during the "..." (before any words). The bubble disappears, the question
+   stays, and *Send* is back.
+
+**Minimal code.**
+
+In `src/chat/mod.rs`:
+
+```rust
+pub(crate) fn stop(&mut self) {
+    let Status::Replying(text) = &mut self.status else {
+        return;
+    };
+    let text = std::mem::take(text);
+    self.status = Status::Idle;
+
+    if !text.is_empty() {
+        self.messages.push(Message::assistant(text));
+    }
+}
+```
+
+In `src/ui/chat.rs`, a `stop` closure takes over `reset`'s cancel lines, and `reset`
+becomes "stop, then start over":
+
+```rust
+let mut stop = move || {
+    if let Some(task) = pending_task.take() {
+        task.cancel();
+    }
+    chat.write().stop();
+};
+
+let mut reset = move || {
+    stop();
+    chat.set(Conversation::default());
+};
+```
+
+and the *Send* button becomes one branch of an `if`:
+
+```rust
+if matches!(conversation.status(), Status::Replying(_)) {
+    button {
+        class: "{Styles::chat_panel__compose_action}",
+        onclick: move |_| stop(),
+        "Stop"
+    }
+} else {
+    button { /* Send, unchanged */ }
+}
+```
+
+**Why it works.**
+
+- **`Task::cancel` is the whole of stopping the work.** The spawned future is parked at
+  one of its `.await`s: `complete`, or the 40 ms sleep. Cancelling drops the future right
+  there, so the code after that `.await` never runs. No more `append`, no `settle`, no
+  `pending_task.set(None)`. That is why the closure `take()`s the task itself. In Step 4 the
+  future owns the open `reqwest::Response`, so dropping it closes the connection too.
+- **`let … else` then `mem::take`.** `let Status::Replying(text) = &mut self.status else {
+  return; }` is the early return from `ask`, written as a pattern: any other status is left
+  exactly as it was, including `Failed`. `text` is a `&mut String` pointing into the enum.
+  `std::mem::take` moves the `String` out and leaves an empty one behind, so we own the
+  text without cloning it. After that line nothing uses the borrow, so assigning
+  `self.status = Status::Idle` compiles. Assigning first would not: the borrow would still
+  be needed for the `take`.
+- **Why an empty partial adds no turn.** An empty assistant message would be a blank bubble
+  in the drawer, and a blank turn in the history sent to Gemini. The question stays on its
+  own, the same as after a failed `complete`. Phase 19 already allows two user turns in a
+  row that way.
+- **Why `reset` can call `stop` and `stop` can still be used later.** A closure is `Copy`
+  when everything it captures is `Copy`. `stop` captures only two `Signal`s, which are
+  `Copy` handles, so `move` into `reset` copies `stop` instead of moving it away, and the
+  *Stop* button's `move |_| stop()` gets its own copy too. `reset` briefly writes the
+  partial turn into the conversation and then replaces the whole conversation. Both writes
+  happen in the same event handler, so Dioxus renders once.
+- **Why Send turns into Stop, not a third button.** `ask` refuses while a reply is in
+  progress, so *Send* has nothing to do during a reply. Showing one button whose job
+  matches the state is also the familiar chat-app pattern.
+
+**Scope note.** The fake is still in place, so stopping during "..." cancels `complete`
+before Gemini has answered. The request is dropped, but the client can't tell Gemini to
+stop generating until Step 4's stream owns the connection. The
+Escape key and a keyboard shortcut for *Stop* are out of scope.

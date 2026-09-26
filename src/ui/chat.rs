@@ -84,10 +84,15 @@ fn ChatConversation(handle: ChatHandle) -> Element {
         })));
     };
 
-    let mut reset = move || {
+    let mut stop = move || {
         if let Some(task) = pending_task.take() {
             task.cancel();
         }
+        chat.write().stop();
+    };
+
+    let mut reset = move || {
+        stop();
         chat.set(Conversation::default());
     };
 
@@ -168,11 +173,19 @@ fn ChatConversation(handle: ChatHandle) -> Element {
                         onclick: move |_| reset(),
                         "Reset"
                     }
-                    button {
-                        class: "{Styles::chat_panel__compose_action}",
-                        disabled: draft.read().trim().is_empty(),
-                        onclick: move |_| submit(),
-                        "Send"
+                    if matches!(conversation.status(), Status::Replying(_)) {
+                        button {
+                            class: "{Styles::chat_panel__compose_action}",
+                            onclick: move |_| stop(),
+                            "Stop"
+                        }
+                    } else {
+                        button {
+                            class: "{Styles::chat_panel__compose_action}",
+                            disabled: draft.read().trim().is_empty(),
+                            onclick: move |_| submit(),
+                            "Send"
+                        }
                     }
                 }
             }
