@@ -506,3 +506,169 @@ scope for the same reason. There is no `flush()` for a last line that arrives wi
 `\n` (SSE ends every event with a blank line, so a well-formed stream leaves nothing
 behind), and no cap on how long `pending` may grow. Parsing the JSON payload into text is
 Step 4.
+
+## Step 4 — The real stream
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**What it is.** The fake goes away. `ChatProvider` gains `stream`, which takes an `on_text`
+callback. Gemini's `stream` calls `:streamGenerateContent?alt=sse`, reads the body with
+`Response::chunk()`, runs each chunk through Step 3's `SseBuffer`, parses each `data:`
+payload as a `GenerateResponse`, and hands its text to `on_text`. The drawer's spawned task
+now makes one call: `gemini.stream(&history, |delta| chat.write().append(delta))`. The
+`tokio` `time` dependency goes too.
+
+**Check first — `cargo test ai::`.** In `src/ai/mod.rs`, the `Fake` has to speak the new
+method, and a test pins what the contract promises: the pieces arrive in order and add up to
+the returned reply.
+
+```rust
+#[test]
+fn a_provider_streams_its_answer_in_pieces() {
+    let fake = Fake {
+        reply: "Ankh-Morpork on the Ankh",
+        seen: RefCell::new(Vec::new()),
+    };
+    let question = Message::user("Which city?");
+    let mut pieces = Vec::new();
+
+    let reply = pollster::block_on(fake.stream(std::slice::from_ref(&question), |delta| {
+        pieces.push(delta.to_owned())
+    }))
+    .unwrap();
+
+    assert_eq!(pieces, ["Ankh-Morpork ", "on ", "the ", "Ankh"]);
+    assert_eq!(pieces.concat(), reply.text, "the pieces add up to the reply");
+    assert_eq!(fake.seen.borrow().as_slice(), &[question]);
+}
+```
+
+Red: `error[E0599]: no method named 'stream' found for struct 'Fake'`.
+
+In `src/ai/gemini.rs`, three pure tests for the Gemini side. A streamed chunk has the same
+JSON shape as a whole response, so a payload's text comes from the same parse. The closing
+chunk carries `finishReason` and usage and an empty text. The endpoint asks for SSE:
+
+```rust
+#[test]
+fn a_streamed_chunk_yields_its_text() { /* {"candidates":[{"content":{"parts":[{"text":"Ankh-"}]}}]} → "Ankh-" */ }
+
+#[test]
+fn a_closing_chunk_with_no_text_yields_nothing() { /* text "" + finishReason + usageMetadata → "" */ }
+
+#[test]
+fn the_stream_endpoint_asks_for_server_sent_events() { /* …:streamGenerateContent?alt=sse */ }
+```
+
+plus `a_real_gemini_streams_through_the_trait`, `#[ignore]`d like its `complete` twin, which
+asks for "one to twenty in words" and checks that more than one piece arrived and that the
+pieces add up to the reply.
+
+**Then the eyeball — `dx serve`, then the iOS simulator.** Ask for something long:
+
+1. The first words appear sooner than before. They no longer wait for the whole answer.
+2. The text arrives in bursts of a few words (Gemini's chunk size), not one word at a time
+   every 40 ms.
+3. *Stop* partway keeps the partial, as in Step 2. Now it also closes the connection.
+4. With a bad key, the error shows as before (`the provider rejected the request (400)…`).
+
+**Minimal code.**
+
+The trait, in `src/ai/mod.rs`:
+
+```rust
+async fn stream(
+    &self,
+    messages: &[Message],
+    on_text: impl FnMut(&str),
+) -> Result<Reply, ChatError>;
+```
+
+The `Fake` calls `on_text` once per `split_inclusive(' ')` word, then returns
+`self.complete(messages).await`.
+
+In `src/ai/gemini.rs`, the first-candidate text extraction moves out of `reply_from` into
+`text_of(GenerateResponse) -> String`, and the empty check into
+`non_empty_reply(String) -> Result<Reply, ChatError>`. `reply_from` becomes those two in a
+row. Then:
+
+```rust
+async fn stream(&self, messages: &[Message], mut on_text: impl FnMut(&str)) -> Result<Reply, ChatError> {
+    let mut response = self.client.post(stream_endpoint(&self.model))
+        .header("x-goog-api-key", &self.key)
+        .json(&request_body(messages))
+        .send()
+        .await?;
+
+    let status = response.status();
+    if !status.is_success() {
+        return Err(ChatError::Api { status: status.as_u16(), body: response.text().await? });
+    }
+
+    let mut sse = SseBuffer::default();
+    let mut text = String::new();
+    while let Some(chunk) = response.chunk().await? {
+        for payload in sse.push(&chunk) {
+            let delta = text_of(serde_json::from_str(&payload)?);
+            on_text(&delta);
+            text.push_str(&delta);
+        }
+    }
+
+    non_empty_reply(text)
+}
+```
+
+`mod sse;` loses its `#[cfg(test)]`, because it has a caller now. In the other direction,
+`complete` (on the trait and on `Gemini`), `endpoint`, `check_status`, `reply_from` and the
+`StatusCode` import *gain* `#[cfg(test)]`, because `stream` took their last caller. Step 5
+decides whether they go.
+
+In `src/ui/chat.rs`, the fake loop and `use std::time::Duration` go:
+
+```rust
+let outcome = gemini
+    .stream(&history, |delta| chat.write().append(delta))
+    .await;
+chat.write().settle(outcome);
+```
+
+`tokio = { version = "1", features = ["time"] }` leaves `[dependencies]`. The dev-dependency
+stays for `#[tokio::test]`.
+
+**Why it works.**
+
+- **`chunk()` + `while let`.** `Response::chunk()` returns `Result<Option<Bytes>>`: `?`
+  takes care of the network error, and `Some` / `None` means another piece / end of body.
+  That is a stream read with no `Stream` trait. `&chunk` derefs from `Bytes` to `&[u8]`,
+  which is exactly what `SseBuffer::push` takes.
+- **The status is checked before the body is read.** A failed request answers with one JSON
+  error document, not an event stream. So on a non-2xx the whole body is read as text for
+  the error, the same as `complete`. `check_status` can't be reused here, because it takes
+  the body *first*, and on success that would read the whole stream before a single word
+  showed.
+- **Why the closure can write the signal.** `chat` is a `Signal`, a `Copy` handle, moved into
+  the `async move` block. The closure borrows it mutably for as long as the `stream` future
+  runs. That borrow ends at `.await`'s completion, so `chat.write().settle(outcome)` on the
+  next line compiles. Each `write()` guard is dropped at the end of the closure call, so no
+  guard lives across an `.await` inside `stream` (clippy's `await_holding_invalid_type` would
+  catch that).
+- **Why the full text is still returned.** `settle` pushes `reply.text` as the finished
+  turn, which is the same text `append` built up in `Status::Replying`. Keeping the return
+  value left `settle` unchanged, as the phase doc decided. The cost is that the text is
+  accumulated twice, once in `stream` and once in the conversation.
+- **Errors partway through.** A dropped connection (`chunk()` fails) or a malformed payload
+  (`from_str` fails) returns `Err` through `?`. `settle` turns that into `Status::Failed`, and
+  the partial is dropped, as decided up front. A reply whose every chunk carried no text
+  (a blocked prompt) is `ChatError::Empty` through `non_empty_reply`, as before.
+- **Cancel closes the connection now.** Stop's `Task::cancel` drops the future parked on
+  `chunk().await`. That future owns `response`, so dropping it closes the connection, and
+  Gemini stops generating.
+
+**Scope note.** Gemini sometimes sends an empty `text` on the final chunk, and `on_text("")`
+is harmless (`append` of nothing), so it isn't filtered out. Whether `complete` stays, the
+duplicated base URL between `endpoint` and `stream_endpoint`, and the two copies of the
+`Api` error are all Step 5. A candidate with no `content` at all (a mid-stream safety stop)
+would fail to parse as `Json`, not `Empty`. `complete` has the same gap, and it is also a
+Step 5 candidate.

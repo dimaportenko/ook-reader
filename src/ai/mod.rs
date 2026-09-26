@@ -1,6 +1,5 @@
 pub(crate) mod gemini;
 pub(crate) mod prompt;
-#[cfg(test)]
 mod sse;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,7 +56,14 @@ pub(crate) enum ChatError {
 }
 
 pub(crate) trait ChatProvider {
+    #[cfg(test)]
     async fn complete(&self, messages: &[Message]) -> Result<Reply, ChatError>;
+
+    async fn stream(
+        &self,
+        messages: &[Message],
+        on_text: impl FnMut(&str),
+    ) -> Result<Reply, ChatError>;
 }
 
 #[cfg(test)]
@@ -77,6 +83,17 @@ mod test {
                 text: self.reply.to_string(),
             })
         }
+
+        async fn stream(
+            &self,
+            messages: &[Message],
+            mut on_text: impl FnMut(&str),
+        ) -> Result<Reply, ChatError> {
+            for word in self.reply.split_inclusive(' ') {
+                on_text(word);
+            }
+            self.complete(messages).await
+        }
     }
 
     #[test]
@@ -90,6 +107,29 @@ mod test {
         let reply = pollster::block_on(fake.complete(std::slice::from_ref(&question))).unwrap();
 
         assert_eq!(reply.text, "Ankh-Morpork");
+        assert_eq!(fake.seen.borrow().as_slice(), &[question]);
+    }
+
+    #[test]
+    fn a_provider_streams_its_answer_in_pieces() {
+        let fake = Fake {
+            reply: "Ankh-Morpork on the Ankh",
+            seen: RefCell::new(Vec::new()),
+        };
+        let question = Message::user("Which city?");
+        let mut pieces = Vec::new();
+
+        let reply = pollster::block_on(fake.stream(std::slice::from_ref(&question), |delta| {
+            pieces.push(delta.to_owned())
+        }))
+        .unwrap();
+
+        assert_eq!(pieces, ["Ankh-Morpork ", "on ", "the ", "Ankh"]);
+        assert_eq!(
+            pieces.concat(),
+            reply.text,
+            "the pieces add up to the reply"
+        );
         assert_eq!(fake.seen.borrow().as_slice(), &[question]);
     }
 }

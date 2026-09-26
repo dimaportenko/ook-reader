@@ -1,7 +1,8 @@
+#[cfg(test)]
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 
-use super::{ChatError, ChatProvider, Message, Reply, Role};
+use super::{sse::SseBuffer, ChatError, ChatProvider, Message, Reply, Role};
 
 #[derive(Debug, Serialize)]
 struct GenerateRequest<'a> {
@@ -61,18 +62,28 @@ struct ResponsePart {
     text: Option<String>,
 }
 
-fn reply_from(response: GenerateResponse) -> Result<Reply, ChatError> {
-    let Some(candidate) = response.candidates.into_iter().next() else {
-        return Err(ChatError::Empty);
-    };
-
-    let text: String = candidate
-        .content
-        .parts
+fn text_of(response: GenerateResponse) -> String {
+    response
+        .candidates
         .into_iter()
-        .filter_map(|part| part.text)
-        .collect();
+        .next()
+        .map(|candidate| {
+            candidate
+                .content
+                .parts
+                .into_iter()
+                .filter_map(|part| part.text)
+                .collect()
+        })
+        .unwrap_or_default()
+}
 
+#[cfg(test)]
+fn reply_from(response: GenerateResponse) -> Result<Reply, ChatError> {
+    non_empty_reply(text_of(response))
+}
+
+fn non_empty_reply(text: String) -> Result<Reply, ChatError> {
     if text.is_empty() {
         Err(ChatError::Empty)
     } else {
@@ -97,10 +108,16 @@ impl Gemini {
     }
 }
 
+#[cfg(test)]
 fn endpoint(model: &str) -> String {
     format!("https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent")
 }
 
+fn stream_endpoint(model: &str) -> String {
+    format!("https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse")
+}
+
+#[cfg(test)]
 fn check_status(status: StatusCode, body: String) -> Result<String, ChatError> {
     if status.is_success() {
         Ok(body)
@@ -113,6 +130,7 @@ fn check_status(status: StatusCode, body: String) -> Result<String, ChatError> {
 }
 
 impl ChatProvider for Gemini {
+    #[cfg(test)]
     async fn complete(&self, messages: &[Message]) -> Result<Reply, ChatError> {
         let response = self
             .client
@@ -127,6 +145,40 @@ impl ChatProvider for Gemini {
 
         let parsed: GenerateResponse = serde_json::from_str(&body)?;
         reply_from(parsed)
+    }
+
+    async fn stream(
+        &self,
+        messages: &[Message],
+        mut on_text: impl FnMut(&str),
+    ) -> Result<Reply, ChatError> {
+        let mut response = self
+            .client
+            .post(stream_endpoint(&self.model))
+            .header("x-goog-api-key", &self.key)
+            .json(&request_body(messages))
+            .send()
+            .await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(ChatError::Api {
+                status: status.as_u16(),
+                body: response.text().await?,
+            });
+        }
+
+        let mut sse = SseBuffer::default();
+        let mut text = String::new();
+        while let Some(chunk) = response.chunk().await? {
+            for payload in sse.push(&chunk) {
+                let delta = text_of(serde_json::from_str(&payload)?);
+                on_text(&delta);
+                text.push_str(&delta);
+            }
+        }
+
+        non_empty_reply(text)
     }
 }
 
@@ -230,6 +282,32 @@ mod test {
     }
 
     #[test]
+    fn a_streamed_chunk_yields_its_text() {
+        let payload = r#"{ "candidates": [ { "content": { "role": "model", "parts": [
+            { "text": "Ankh-" }
+        ] } } ] }"#;
+
+        assert_eq!(text_of(serde_json::from_str(payload).unwrap()), "Ankh-");
+    }
+
+    #[test]
+    fn a_closing_chunk_with_no_text_yields_nothing() {
+        let payload = r#"{ "candidates": [ { "content": { "role": "model", "parts": [
+            { "text": "" }
+        ] }, "finishReason": "STOP" } ], "usageMetadata": { "promptTokenCount": 9 } }"#;
+
+        assert_eq!(text_of(serde_json::from_str(payload).unwrap()), "");
+    }
+
+    #[test]
+    fn the_stream_endpoint_asks_for_server_sent_events() {
+        assert_eq!(
+            stream_endpoint("gemini-3.5-flash-lite"),
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:streamGenerateContent?alt=sse"
+        );
+    }
+
+    #[test]
     fn a_non_success_status_becomes_an_api_error() {
         let result = check_status(StatusCode::BAD_REQUEST, r#"{"error":{"code":400}}"#.into());
 
@@ -237,6 +315,22 @@ mod test {
             matches!(&result, Err(ChatError::Api { status: 400, body }) if body.contains("400")),
             "{result:?}"
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs GEMINI_API_KEY and the network"]
+    async fn a_real_gemini_streams_through_the_trait() {
+        let key = std::env::var("GEMINI_API_KEY").expect("set GEMINI_API_KEY to run this");
+        let gemini = Gemini::new(key, "gemini-3.5-flash-lite");
+        let messages = [Message::user("Count from one to twenty in words")];
+        let mut pieces = Vec::new();
+
+        let reply = ChatProvider::stream(&gemini, &messages, |delta| pieces.push(delta.to_owned()))
+            .await
+            .unwrap();
+
+        assert!(pieces.len() > 1, "{pieces:?}");
+        assert_eq!(pieces.concat(), reply.text);
     }
 
     #[tokio::test]
