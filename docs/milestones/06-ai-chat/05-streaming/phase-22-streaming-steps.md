@@ -13,7 +13,7 @@ and that is the whole of *Stop*.
 
 ## Step plan
 
-1. The reply types itself in — `Replying(String)`, `append`, the real answer fed back word by word.
+1. ~~The reply types itself in~~ — `Replying(String)`, `append`, the real answer fed back word by word. **Done** — `a158b50`.
 2. Stop — `Conversation::stop`, a *Stop* button that cancels the task.
 3. The SSE line buffer — `src/ai/sse.rs`, pure, under `#[test]`.
 4. The real stream — `ChatProvider::stream` with `on_text`, Gemini `alt=sse`, the fake removed.
@@ -32,6 +32,8 @@ fake ones, and the fake goes away.
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `a158b50` (193 tests green, 2 ignored; clippy clean; `dx serve` checks confirmed by eye).
 
 **What it is.** The "..." placeholder in the drawer becomes the assistant's reply, growing
 word by word. There is no streaming from Gemini yet. The whole answer still arrives from

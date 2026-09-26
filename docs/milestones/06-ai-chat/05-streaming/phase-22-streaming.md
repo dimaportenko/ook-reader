@@ -61,7 +61,7 @@ that fake; then the parser; then the real stream swapped in**. Step 3 is the one
 to observability order: the SSE buffer is the phase's hard idea, and a parser is best built
 against tests before anything runs through it.
 
-- [ ] **1. The reply types itself in** — `Status::Waiting` → `Status::Replying(String)`,
+- [x] **1. The reply types itself in** — `Status::Waiting` → `Status::Replying(String)`,
       `Conversation::append`; the drawer renders the partial turn; the real `complete`
       answer is fed back word by word with a short sleep (faked at the edge); `#[test]` +
       `dx serve` eyeball.
