@@ -16,7 +16,7 @@ and that is the whole of *Stop*.
 1. ~~The reply types itself in~~ — `Replying(String)`, `append`, the real answer fed back word by word. **Done** — `a158b50`.
 2. ~~Stop~~ — `Conversation::stop`, a *Stop* button that cancels the task. **Done** — `8aecc9a`.
 3. ~~The SSE line buffer~~ — `src/ai/sse.rs`, pure, under `#[test]`. **Done** — `8f1bfa9`.
-4. The real stream — `ChatProvider::stream` with `on_text`, Gemini `alt=sse`, the fake removed.
+4. ~~The real stream~~ — `ChatProvider::stream` with `on_text`, Gemini `alt=sse`, the fake removed. **Done** — `6f03994`.
 5. Review and refactor.
 
 **Why this order.** Dependency order would start with the SSE parser and a trait change,
@@ -511,6 +511,8 @@ Step 4.
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `6f03994` (206 tests green, 3 ignored; clippy clean; `dx serve` and iOS simulator checks confirmed by eye).
 
 **What it is.** The fake goes away. `ChatProvider` gains `stream`, which takes an `on_text`
 callback. Gemini's `stream` calls `:streamGenerateContent?alt=sse`, reads the body with

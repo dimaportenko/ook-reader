@@ -69,7 +69,7 @@ against tests before anything runs through it.
       button while replying cancels the task; `#[test]` + `dx serve` eyeball.
 - [x] **3. The SSE line buffer** — `src/ai/sse.rs`: bytes in, complete `data:` payloads out,
       correct across split lines, CRLF and a split multi-byte character; `#[test]` only.
-- [ ] **4. The real stream** — `ChatProvider::stream` with an `on_text` callback; Gemini's
+- [x] **4. The real stream** — `ChatProvider::stream` with an `on_text` callback; Gemini's
       `:streamGenerateContent?alt=sse` read with `chunk()` through the buffer; the fake
       loop and its `tokio` dependency removed; `#[test]` against the `Fake` + `dx serve` and
       iOS simulator eyeball.
