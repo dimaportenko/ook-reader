@@ -352,3 +352,155 @@ if matches!(conversation.status(), Status::Replying(_)) {
 before Gemini has answered. The request is dropped, but the client can't tell Gemini to
 stop generating until Step 4's stream owns the connection. The
 Escape key and a keyboard shortcut for *Stop* are out of scope.
+
+## Step 3 — The SSE line buffer
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**What it is.** A small pure type, `SseBuffer`, in `src/ai/sse.rs`. You feed it the body
+of an HTTP response in whatever pieces the network hands over. It gives back the payload
+of every complete `data:` line it has seen so far and keeps the unfinished tail for next
+time. Nothing calls it yet. Step 4 feeds it `Response::chunk()`. This step is the exception
+to observability order that the phase doc planned: the only check is `#[test]`.
+
+**The crux, again.** Gemini's stream is text, `data: {json}\n\n` per event, but it arrives
+as TCP chunks, and a chunk boundary can fall anywhere: in the middle of the JSON, between
+`\r` and `\n`, or between the two bytes of an `é`. So the buffer must decide **nothing**
+until it holds a whole line. One fact makes that safe: in UTF-8 the byte `0x0A` (`\n`)
+never appears inside a multi-byte character. Every byte of a multi-byte sequence has its
+high bit set. So cutting the *bytes* at `\n` never cuts a character, and decoding each
+whole line as text can't fail on a split `é`.
+
+**Check first — `cargo test ai::sse`.** In a new `src/ai/sse.rs`:
+
+```rust
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn a_whole_event_yields_its_payload() {
+        let mut sse = SseBuffer::default();
+
+        assert_eq!(sse.push(b"data: {\"a\":1}\n\n"), ["{\"a\":1}"]);
+    }
+
+    #[test]
+    fn a_line_split_across_chunks_waits_for_the_rest() {
+        let mut sse = SseBuffer::default();
+
+        assert!(
+            sse.push(b"data: {\"a\"").is_empty(),
+            "no newline yet, no line"
+        );
+        assert_eq!(sse.push(b":1}\n\n"), ["{\"a\":1}"]);
+    }
+
+    #[test]
+    fn two_events_in_one_chunk_yield_both() {
+        let mut sse = SseBuffer::default();
+
+        assert_eq!(sse.push(b"data: one\n\ndata: two\n\n"), ["one", "two"]);
+    }
+
+    #[test]
+    fn crlf_line_endings_are_stripped() {
+        let mut sse = SseBuffer::default();
+
+        assert_eq!(sse.push(b"data: one\r\n\r\n"), ["one"]);
+    }
+
+    #[test]
+    fn a_character_split_across_chunks_survives() {
+        let mut sse = SseBuffer::default();
+
+        assert!(sse.push(b"data: caf\xC3").is_empty());
+        assert_eq!(
+            sse.push(b"\xA9\n\n"),
+            ["caf\u{e9}"],
+            "the two bytes of \u{e9} arrived in different chunks"
+        );
+    }
+
+    #[test]
+    fn lines_that_are_not_data_are_skipped() {
+        let mut sse = SseBuffer::default();
+
+        assert_eq!(
+            sse.push(b": keep-alive\nevent: message\n\ndata: one\n\n"),
+            ["one"]
+        );
+    }
+}
+```
+
+and register it in `src/ai/mod.rs` as `#[cfg(test)] mod sse;`. To see real red rather than
+a compile error, start with a stub `push` that returns `Vec::new()`: all six fail with
+`left: []`.
+
+**Minimal code.**
+
+```rust
+#[derive(Debug, Default)]
+pub(crate) struct SseBuffer {
+    pending: Vec<u8>,
+}
+
+impl SseBuffer {
+    pub(crate) fn push(&mut self, chunk: &[u8]) -> Vec<String> {
+        self.pending.extend_from_slice(chunk);
+
+        let mut payloads = Vec::new();
+        while let Some(end) = self.pending.iter().position(|&byte| byte == b'\n') {
+            let bytes: Vec<u8> = self.pending.drain(..=end).collect();
+            let text = String::from_utf8_lossy(&bytes);
+            let line = text.trim_end_matches(['\n', '\r']);
+
+            if let Some(data) = line.strip_prefix("data:") {
+                payloads.push(data.strip_prefix(' ').unwrap_or(data).to_owned());
+            }
+        }
+
+        payloads
+    }
+}
+```
+
+**Why it works.**
+
+- **The buffer holds bytes, not a `String`.** A `String` must always be valid UTF-8, and
+  half an `é` isn't. Keeping `Vec<u8>` means the tail can end anywhere, and text only
+  appears once a line is whole.
+- **`position` then `drain(..=end)`.** `position` finds the first `\n`. `drain(..=end)`
+  removes the line *including* its `\n` from the front of `pending` and hands those bytes
+  over. Whatever follows (the next line, or half of one) slides to the front and waits.
+  The `while let` repeats until no `\n` is left, which is how one chunk can yield two
+  events.
+- **Three names for three types.** `bytes` is the owned `Vec<u8>`, `text` the decoded
+  `Cow<str>`, and `line` a `&str` borrowed from `text` without its line ending. Shadowing
+  one name through all three would compile, but the type change is the point of those lines.
+- **`from_utf8_lossy` returns a `Cow<str>`.** When the bytes are valid, which the `\n` fact
+  guarantees for any line the server sent correctly, it borrows them with no copy. Only a
+  truly broken line gets `U+FFFD` replacement characters. `Cow` derefs to `&str`, so
+  `trim_end_matches` and `strip_prefix` work on it directly.
+- **`trim_end_matches(['\n', '\r'])`** accepts an array of `char`s as the pattern and
+  strips both ends of a CRLF line in one call.
+- **`strip_prefix("data:")` returns `Option<&str>`.** That one call both tests the prefix and
+  gives back the rest, so the `if let` is the whole filter. Blank lines (the `\n\n`
+  between events), comments (`: keep-alive`) and `event:` lines all return `None`, so they
+  drop out. The SSE spec removes exactly *one* optional space after the colon, which is
+  what `strip_prefix(' ').unwrap_or(data)` does. `trim_start` would also eat spaces that
+  belong to the payload.
+- **Why `#[cfg(test)] mod sse;`.** Until Step 4 calls it, a normal build would warn that
+  `SseBuffer` is never constructed. Gating the module to test builds keeps `cargo clippy`
+  clean and makes the gate itself the reminder: Step 4 deletes `#[cfg(test)]` when the
+  first caller arrives.
+
+**Scope note.** The buffer yields one payload per `data:` line. The SSE spec joins several
+`data:` lines of one event with `\n`, but Gemini sends one line per event, so joining them
+would be code for a case this app never sees. `id:`, `retry:` and reconnecting are out of
+scope for the same reason. There is no `flush()` for a last line that arrives without its
+`\n` (SSE ends every event with a blank line, so a well-formed stream leaves nothing
+behind), and no cap on how long `pending` may grow. Parsing the JSON payload into text is
+Step 4.

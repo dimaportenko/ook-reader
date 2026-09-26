@@ -1,5 +1,7 @@
 pub(crate) mod gemini;
 pub(crate) mod prompt;
+#[cfg(test)]
+mod sse;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Role {
