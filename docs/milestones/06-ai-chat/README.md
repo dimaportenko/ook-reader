@@ -7,7 +7,7 @@ a chat whose first message is already filled in — book title, author, the sele
 so the only thing left to type is the question. First provider: **Gemini Flash-Lite**.
 The provider and model must be swappable later without touching the reader.
 
-**Status:** 🚧 in progress — captured 2026-09-11; [Phase 17](01-provider/phase-17-provider-boundary.md) closed 2026-09-13; [Phase 18](02-key-storage/phase-18-key-storage.md) closed 2026-09-20; [Phase 19](03-chat-panel/phase-19-chat-panel.md) closed 2026-09-22; [Phase 20](04-selection/phase-20-selection-chat.md) closed 2026-09-24. No ADR yet. Sits behind
+**Status:** 🚧 in progress — captured 2026-09-11; [Phase 17](01-provider/phase-17-provider-boundary.md) closed 2026-09-13; [Phase 18](02-key-storage/phase-18-key-storage.md) closed 2026-09-20; [Phase 19](03-chat-panel/phase-19-chat-panel.md) closed 2026-09-22; [Phase 20](04-selection/phase-20-selection-chat.md) closed 2026-09-24; [Phase 22](05-streaming/phase-22-streaming.md) opened 2026-09-25, **ahead of Phase 21**. No ADR yet. Sits behind
 nothing: Milestones 3 and 5 both have no phase in progress.
 
 ## The idea in one paragraph
@@ -29,8 +29,8 @@ deliberately pushed to its own phase so the first end-to-end slice is request/re
 | 18 | [API key storage + settings row](02-key-storage/phase-18-key-storage.md) | Key entered in the settings panel, stored in the OS keychain (not SQLite), read back on launch; provider/model chosen from a list | ✅ |
 | 19 | [Chat panel](03-chat-panel/phase-19-chat-panel.md) | A drawer showing a message list and an input; sends through the provider; conversation held in memory | ✅ |
 | 20 | [Selection → prefilled chat (desktop)](04-selection/phase-20-selection-chat.md) | Read the selection out of the WebView via the existing eval bridge; a menu item opens the chat with the template filled in | ✅ |
+| 22 | [Streaming replies](05-streaming/phase-22-streaming.md) | Tokens appear as they arrive; cancel mid-reply | 🚧 |
 | 21 | Selection → prefilled chat (iOS) | *Ask AI* in the native edit menu via `buildMenuWithBuilder:` (objc2), reusing Phase 20's template | ⬜ |
-| 22 | Streaming replies | Tokens appear as they arrive; cancel mid-reply | ⬜ |
 
 > Phase files are written as each phase is picked up, per this repo's convention — the table
 > is the plan, not a substitute for the steps.
@@ -42,6 +42,11 @@ panel with nowhere to put the key is untestable by hand. Phases 20 and 21 are sp
 platform on purpose — the desktop path is pure Dioxus plus one `eval`, while the iOS path is
 FFI into UIKit's responder chain and deserves its own scope and its own risks. Streaming is
 last because a working non-streaming chat is already the feature; streaming is polish.
+
+> **Resequenced 2026-09-25:** Phase 22 goes before Phase 21, at the learner's call. The two
+> don't depend on each other. Streaming touches only the provider and the drawer, and the
+> iOS edit menu reuses Phase 20's hand-off whenever it lands. The numbers stay as they were,
+> so links and history still resolve.
 
 ## The design, in short
 
