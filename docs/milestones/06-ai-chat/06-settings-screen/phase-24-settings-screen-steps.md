@@ -191,3 +191,107 @@ was changed. Each finding was skipped or deferred:
 - **Early `return rsx! {}` versus wrapping the body in `if open() { … }`.** *Skipped.* Both
   are fine. The early return keeps the rendered markup unindented.
 
+
+## Step 2 — Sections in a sidebar
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**What it is.** The empty body of the settings screen becomes two columns. On the left, a
+sidebar lists *Reader theme* and *AI*. On the right, the chosen section's heading. Clicking a
+sidebar entry switches the heading and highlights the entry. The sections are still empty.
+Steps 3 and 4 fill them.
+
+### Runnable check first
+
+**Kind:** `#[test]` for the section list, plus a `dx serve` eyeball for the switching.
+
+In `src/ui/settings_screen.rs`:
+
+```rust
+#[test]
+fn the_sections_are_reader_theme_then_ai() {
+    assert_eq!(
+        SettingsSection::ALL.map(SettingsSection::label),
+        ["Reader theme", "AI"]
+    );
+}
+
+#[test]
+fn settings_open_on_the_reader_theme() {
+    assert_eq!(SettingsSection::default(), SettingsSection::ReaderTheme);
+}
+```
+
+Red first: `cannot find type SettingsSection in this scope` (4 errors).
+
+**The eyeball, under `dx serve`:**
+1. Open settings. The sidebar shows *Reader theme* (bold, highlighted) and *AI*, and the
+   right side is headed **Reader theme**.
+2. Click *AI*. The heading becomes **AI** and the highlight moves.
+3. Close and reopen settings. It is still on *AI*.
+4. Tab to a sidebar entry. It shows a focus ring.
+
+### Minimal implementation
+
+**`SettingsSection`** in `settings_screen.rs`, following the `AiModel` / `Theme` idiom
+(`Copy`, `ALL`, `label`):
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum SettingsSection {
+    #[default]
+    ReaderTheme,
+    Ai,
+}
+```
+
+**`SettingsScreen`:**
+- Add `let mut section = use_signal(SettingsSection::default);` as its first line, *above*
+  the early return.
+- After the early return, add `let current = section();`.
+- Under the header, add a body `div` holding two things:
+  - a `nav` with one `button` per `SettingsSection::ALL`, each with
+    `aria_current: if item == current { "page" }` and `onclick: move |_| section.set(item)`;
+  - a `section` with `h2 { {current.label()} }`.
+
+**CSS:**
+- `.settings_screen__body` is a flex row with `flex: 1; min-height: 0`.
+- `.settings_screen__sidebar` is a 14rem column.
+- `.settings_screen__section_button` has the same look as a table-of-contents entry, with
+  `[aria-current="page"]` bold and filled.
+- `.settings_screen__section` is `flex: 1; overflow-y: auto`.
+
+### Why it works
+
+- **The hook goes above the early return.** Dioxus identifies a component's hooks by *call
+  order*. If `use_signal` ran only when `open()` is true, the hook list would change length
+  between renders. Keeping every hook above any `return` makes the order the same on every
+  render.
+- **The section survives close and reopen.** Closing only makes `SettingsScreen` *render
+  nothing*. The component stays mounted in `LibraryBooks`, so its signal keeps its value.
+- **`let current = section();` reads once per render.** The sidebar comparisons and the
+  heading then can't disagree, and the component subscribes once. `toc.rs` does the same
+  with its `current`.
+- **`move |_| section.set(item)`** captures a *copy* of `item` for each button, because
+  `SettingsSection` is `Copy`. Each closure owns its own variant, with no borrow of the loop
+  variable.
+- **`aria_current: if … { "page" }`** leaves the attribute out entirely when the condition is
+  false. The highlight is keyed off that attribute, so screen readers and the CSS read the
+  same state.
+- **`min-height: 0` on the flex body** lets the section scroll inside the screen, instead of
+  stretching the fixed layer past the viewport once Steps 3–4 add long content.
+
+### Scope note
+
+- The sections have headings only. **Step 3** fills *Reader theme*, and **Step 4** fills
+  *AI*.
+- The layout is desktop-only, with no breakpoint. **Step 5** makes `section` an
+  `Option<SettingsSection>` and adds the phone list → section → back flow.
+
+### Review notes (from the `simplify` pass)
+
+- **Applied:** read `section()` once into `current` instead of three times per render.
+- **Deferred to Step 6:** the sidebar button CSS repeats `toc.css`'s `.contents-popover__entry`
+  (base, hover, focus ring, `aria-current`). Because CSS modules are scoped per file, sharing
+  it means moving the rule into `assets/main.css` or into a small shared component.
