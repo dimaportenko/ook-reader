@@ -15,7 +15,7 @@ between the two is CSS alone.
 
 1. ~~The gear and the empty screen~~ — an icon button in `LibraryBooks`, and a full-screen `SettingsScreen` with a header and a close button. **Done** — `7f44663`.
 2. ~~Sections in a sidebar~~ — `SettingsSection`, sidebar buttons, and the chosen section's heading on the right. **Done** — `85b50a4`.
-3. **Reader theme section.** The existing controls reused inside it.
+3. ~~Reader theme section~~ — the existing controls reused inside it. **Done** — `10e1751`.
 4. **AI section: Gemini.** The key row and model picker move out of the reader popover.
 5. **The phone layout.** List → section → back under a width breakpoint, checked on the iOS simulator.
 6. **Review and refactor.**
@@ -302,6 +302,8 @@ pub(crate) enum SettingsSection {
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `10e1751` (209 tests green, 2 ignored; clippy clean; `dx serve` checks confirmed by eye).
 
 **What it is.** The *Reader theme* section of the settings screen shows the same six
 controls as the reader's popover: line height, font size, page margins, line length, font
