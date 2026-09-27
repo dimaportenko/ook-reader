@@ -1,6 +1,9 @@
 use dioxus::prelude::*;
 
-use crate::ui::components::icon::{self, Icon};
+use crate::ui::{
+    components::icon::{self, Icon},
+    settings::ReaderThemeControls,
+};
 
 #[css_module("/src/ui/settings_screen.css")]
 struct Styles;
@@ -66,6 +69,13 @@ pub(crate) fn SettingsScreen(mut open: Signal<bool>) -> Element {
                 section {
                     class: "{Styles::settings_screen__section}",
                     h2 { {current.label()} }
+                    div {
+                        class: "{Styles::settings_screen__controls}",
+                        match current {
+                            SettingsSection::ReaderTheme => rsx! { ReaderThemeControls {} },
+                            SettingsSection::Ai => rsx! {},
+                        }
+                    }
                 }
             }
         }

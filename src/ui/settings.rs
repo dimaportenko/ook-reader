@@ -229,6 +229,18 @@ pub(crate) fn ApiKeyControl() -> Element {
     }
 }
 
+#[component]
+pub(crate) fn ReaderThemeControls() -> Element {
+    rsx! {
+        LineHeightControl {}
+        FontSizeControl {}
+        PageMarginsControl {}
+        MaxLineLengthControl {}
+        FontFamilyPicker {}
+        ThemePicker {}
+    }
+}
+
 pub(crate) fn SettingsPopover() -> Element {
     rsx! {
         PopoverRoot {
@@ -242,12 +254,7 @@ pub(crate) fn SettingsPopover() -> Element {
                 align: ContentAlign::End,
                 div {
                     style: "padding: 0.5rem; display: flex; gap: 0.5rem; flex-direction: column;",
-                    LineHeightControl {}
-                    FontSizeControl {}
-                    PageMarginsControl {}
-                    MaxLineLengthControl {}
-                    FontFamilyPicker {}
-                    ThemePicker {}
+                    ReaderThemeControls {}
                     AiModelPicker {}
                     ApiKeyControl {}
                 }

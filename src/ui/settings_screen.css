@@ -60,3 +60,10 @@
   padding: 0 1rem;
   overflow-y: auto;
 }
+
+.settings_screen__controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+}

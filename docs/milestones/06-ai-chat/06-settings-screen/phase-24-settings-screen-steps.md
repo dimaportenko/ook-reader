@@ -297,3 +297,119 @@ pub(crate) enum SettingsSection {
 - **Deferred to Step 6:** the sidebar button CSS repeats `toc.css`'s `.contents-popover__entry`
   (base, hover, focus ring, `aria-current`). Because CSS modules are scoped per file, sharing
   it means moving the rule into `assets/main.css` or into a small shared component.
+
+## Step 3 — Reader theme section
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**What it is.** The *Reader theme* section of the settings screen shows the same six
+controls as the reader's popover: line height, font size, page margins, line length, font
+and theme. They are the same components, not copies, so there is one set of controls in two
+places. Changing one in either place changes the setting everywhere.
+
+### Runnable check first
+
+**Kind:** `dx serve` eyeball. There's no `#[test]`, because the step adds no logic. It
+reuses components that already read and write `Signal<Settings>`. The existing suite stays
+green (209 passed, 2 ignored) and `cargo clippy` stays clean.
+
+1. Open settings from the library. The *Reader theme* section shows, below its heading and
+   stacked in a column: the ↕ line-height buttons, A-/A+, the ↔ margin buttons, the ≡ line
+   length buttons, a font `select` and a theme `select`.
+2. Set the theme to `dark`. The settings screen itself turns dark straight away, because it
+   paints `--USER__backgroundColor` and `App` pushes the new variables on every settings
+   change.
+3. Click A+ twice, then close settings and open a book. The reader's text is larger. Open
+   the reader popover: it shows the same percentage and the dark theme.
+4. Change something in the reader popover, go back to the library and reopen settings. The
+   section shows the new value.
+5. Click *AI* in the sidebar. The controls disappear and only the heading remains, because
+   Step 4 fills it.
+6. The reader popover looks exactly as it did before, with the AI rows still at the bottom.
+
+### Minimal implementation
+
+**`src/ui/settings.rs`.** Group the six controls in one component and use it in the
+popover:
+
+```rust
+#[component]
+pub(crate) fn ReaderThemeControls() -> Element {
+    rsx! {
+        LineHeightControl {}
+        FontSizeControl {}
+        PageMarginsControl {}
+        MaxLineLengthControl {}
+        FontFamilyPicker {}
+        ThemePicker {}
+    }
+}
+```
+
+In `SettingsPopover`, the six lines become `ReaderThemeControls {}`, followed by the
+`AiModelPicker {}` and `ApiKeyControl {}` it already had.
+
+**`src/ui/settings_screen.rs`.** Import `crate::ui::settings::ReaderThemeControls`. Under
+the section's `h2`:
+
+```rust
+div {
+    class: "{Styles::settings_screen__controls}",
+    match current {
+        SettingsSection::ReaderTheme => rsx! { ReaderThemeControls {} },
+        SettingsSection::Ai => rsx! {},
+    }
+}
+```
+
+**`src/ui/settings_screen.css`:**
+
+```css
+.settings_screen__controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+```
+
+### Why it works
+
+- **Context, not props.** Every control calls `use_context::<Signal<Settings>>()`, and
+  `App` provides that signal above both the reader and the library. A context lookup walks
+  *up* the tree from wherever the component is mounted. So the same component works inside
+  the popover and inside the settings screen with no new wiring, and both places write to
+  the same signal.
+- **One write, three effects.** A click calls `settings.write()`. That re-renders every
+  component that read the signal (both copies, if both were mounted), and it wakes `App`'s
+  effects, which save the settings to the database and push the CSS variables. That is why
+  the settings screen changes colour when you pick a theme.
+- **`ReaderThemeControls` returns a fragment.** It has no wrapper element, so each parent
+  keeps its own layout. The popover's inline flex column is unchanged, and the screen uses
+  its own class. Neither place has to put up with the other's box.
+- **`match` rather than `if`.** A `match` must cover every `SettingsSection`. The `Ai => rsx! {}`
+  arm is a visible placeholder today. If a third section is ever added, the compiler lists
+  this spot as unfinished.
+- **`align-items: flex-start`** keeps each control at its natural width. The default,
+  `stretch`, would widen the `select`s across the whole section.
+
+### Scope note
+
+- The *AI* section is still empty, and the popover still has the AI rows. **Step 4** moves
+  them.
+- The controls have no labels. The pickers show slugs (`dark`, `serif`), and the buttons
+  show only glyphs. That was fine in a popover next to the page, but in a titled settings
+  section it reads bare. Candidate for **Step 6** or a later polish pass.
+- There's no phone layout yet. That is **Step 5**.
+
+### Review notes (from the `simplify` pass)
+
+Four review angles ran (reuse, simplification, efficiency, altitude). Nothing was changed.
+
+- **Reuse:** `.settings_screen__controls` repeats the popover's inline
+  `display: flex; flex-direction: column; gap: 0.5rem`. *Deferred to Step 6.* Sharing it
+  means moving the column into `ReaderThemeControls` itself or into a shared class. Both
+  change the popover, which is outside this step, and the two differ by `align-items`.
+- **Simplification, efficiency, altitude:** no findings. The empty `Ai` arm was weighed and
+  kept, for the reason above.
