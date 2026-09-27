@@ -94,7 +94,7 @@ pub(crate) fn LibraryBooks() -> Element {
                         PopoverContent {
                             align: ContentAlign::End,
                             role: "status",
-                            "{message}"
+                            p { class: "library-books__status", "{message}" }
                         }
                     }
                 }

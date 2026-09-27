@@ -590,3 +590,144 @@ with a hairline border and shadow, rounded 44px entries, a `--tint-surface` hove
 narrow-screen sheet rule and `--toc-depth` indent are untouched, so the three `ui::toc`
 tests that read that file still pass. Checked on the iOS simulator: the sheet sits at
 x = 16, width 370; entries are 45pt tall; tapping a chapter closes it and jumps there.
+
+## Step 6 — Review and refactor
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**What it is.** The phase's closing pass. Behaviour stays the same. Three pieces of
+duplication that Steps 1–5 deferred get fixed at the level where they come from:
+
+1. **One `Choice` trait.** `Theme`, `FontFamily` and `AiModel` each had the same trio:
+   `slug`, `label` and a hand-written `from_slug` `match`. The screen also had four
+   wrappers around them (`SlugPicker`, `ThemePicker`, `FontFamilyPicker`, `AiModelPicker`).
+2. **The popover owns its own look.** `toc.css` and `settings.css` each copied the theme
+   surface and the phone bottom-sheet rule. They also stacked attribute selectors
+   (`[data-side][data-align][data-state]`) to beat the component's own styles.
+3. **`:where(.icon-button)`.** The shared round button drops to zero specificity, so a
+   single class can restyle it. The back button can then hide with
+   `.settings_screen__back`, not a two-class selector.
+
+### Runnable check first
+
+**Kind:** `cargo test` safety net plus two tests written first and watched fail, then an iOS
+simulator pass.
+
+- `settings::choice::test::every_choice_survives_a_slug_round_trip_and_the_slugs_are_distinct`.
+  It runs one generic helper, `assert_slugs_round_trip::<T: Choice>()`, for all three
+  types. It checks the round trip, the fallback to `Default` for an unknown slug, and that
+  the slugs are distinct. **Red first:** `error[E0405]: cannot find trait 'Choice' in this
+  scope`. It replaces four per-type tests that said the same thing: two in
+  `settings/mod.rs` and two in `ai_model.rs`.
+- `the_panel_becomes_a_sheet_below_the_width_the_popover_widens_at` was re-pointed at
+  `components/popover/style.css`. **Red first:** it panicked at `every popover has a
+  narrow-viewport rule`. The `simplify` pass then moved it and its sibling out of `toc.rs`
+  into `components/popover/mod.rs`, which is where the CSS they check lives. It also cut
+  the media block down to its own body before asserting on it.
+- Suite: 208 passed, 2 ignored. That is 211 − 4 superseded + 1 generic. `cargo clippy`
+  clean.
+
+### What changed
+
+**`src/settings/choice.rs` (new).**
+
+```rust
+pub(crate) trait Choice: Copy + PartialEq + Default + 'static {
+    fn all() -> &'static [Self];
+    fn slug(self) -> &'static str;
+    fn label(self) -> &'static str;
+
+    fn from_slug(slug: &str) -> Self {
+        Self::all().iter().copied().find(|choice| choice.slug() == slug).unwrap_or_default()
+    }
+}
+```
+
+- `slug` and `label` moved out of each type's inherent `impl` into `impl Choice for …`.
+  The three `from_slug` `match`es are gone, because the default method derives the reverse
+  mapping from `slug`. A new variant now only needs its slug written once.
+- The inherent `ALL` arrays stay, and `all()` returns `&Self::ALL`. Tests still use the
+  array for `ALL.map(Theme::label)`, and a trait `const ALL: &'static [Self]` would lose
+  that `.map`.
+- `db/settings.rs` and `db/mod.rs` gained `use …::choice::Choice`. Trait methods are
+  only callable where the trait is in scope. That is the one cost of moving inherent
+  methods into a trait.
+
+**`src/ui/settings.rs`.** A generic `ChoiceRow<T: Choice>` renders the row and the
+`select`, and calls `on_pick` with a `T`, not a `String`:
+
+```rust
+ChoiceRow {
+    label: "Theme",
+    selected: current.theme,
+    on_pick: move |theme| settings.write().theme = theme,
+}
+```
+
+- `ui/theme.rs`, `ui/font.rs` and `components/picker.{rs,css}` are deleted. The select's
+  shape now comes from `.pill_button`, and `.choice` adds only the chevron, the padding
+  and `appearance: none`.
+- `GeminiSettings` reads `settings()` for the model row itself. That is the subscription
+  `AiModelPicker` used to hold.
+
+**`components/popover/style.css`.**
+
+- The base rule now paints the theme surface: `--USER__*` colours, a 1.25rem radius, a
+  `--tint-divider` hairline and a shadow.
+- A `@media (width < 40rem)` block turns every popover into a bottom sheet.
+- Dead generated rules are gone: the `-title`, `-description`, `-actions`, `-cancel` and
+  `-action` classes, `::after` arrows with no `content`, and a base `transform` every side
+  rule overrode.
+- `toc.css` and `settings.css` keep only their own width.
+
+**`library.rs` / `main.css`.** The import-status popover's message is wrapped in a padded
+`p.library-books__status`. The base popover padding is sized for rows, not bare text.
+
+### Why it works
+
+- **A default trait method is written once against the other methods.** `from_slug` never
+  names a concrete type. It only needs `all()` and `slug()`, which every implementor must
+  provide, so each type gets the reverse lookup for free.
+- **Generic components.** `#[component] fn ChoiceRow<T: Choice>` compiles one component per
+  `T` it is used with. Dioxus props need `Clone + PartialEq + 'static`. The supertraits on
+  `Choice` (`Copy + PartialEq + 'static`) promise exactly that, so the bound is just
+  `T: Choice`.
+- **`selected: choice == selected` compares values, not strings.** The picker no longer
+  goes `enum → slug → String → enum` on every change. The slug appears only at the HTML
+  boundary (`value:`) and on the way back (`T::from_slug`).
+- **Specificity follows ownership.** The component now declares the look that every
+  popover wants. Callers only add what is theirs, such as width, so nobody has to
+  out-specify anybody. `:where()` is the same idea for the shared button: a primitive
+  that sits at specificity zero is a default, and any class may override it.
+
+### Review notes (from the `simplify` pass)
+
+- **Applied:**
+  - `.choice` reuses `.pill_button`, and its duplicate focus ring is gone.
+  - Stray blank lines were removed from the trimmed inherent `impl`s.
+  - Dead popover rules were removed.
+  - The popover tests moved into the popover module and scope their assertions to the
+    rule body.
+  - The status message is padded.
+- **For the learner:** `:where(.icon-button)` is zero-specificity **on purpose**. The
+  reviewer suggested a one-line comment so a later edit doesn't "fix" it back. Code
+  comments are yours to write.
+- **Skipped:**
+  - Dropping the inherent `ALL` arrays: tests use them as arrays.
+  - `settings.read().ai_model` instead of `settings().ai_model`: `Settings` is `Copy`
+    and tiny.
+  - Splitting the popover into "panel" and "plain" variants: the status message is the
+    only plain one, and wrapping it was smaller.
+
+### Scope note
+
+- **Still deferred:**
+  - A shared pill-button class that the library delete dialog could reuse.
+  - A shared "nav row" class for `.settings_screen__section_button` and
+    `.contents-popover__entry`.
+  - One enum for the library's `edit_mode` / `settings_open` booleans. It pays off only if
+    a third mode appears.
+  - Folding the drawer's and settings screen's safe-area padding. The drawer pads no left
+    inset, so the two differ.
+- **Not checked by eye yet:** the desktop layout under `dx serve`, and Sepia and Night.

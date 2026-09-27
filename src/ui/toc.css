@@ -1,13 +1,5 @@
-.contents-popover__content[data-state] {
+.contents-popover__content {
   min-width: 24rem;
-  padding: 0.25rem;
-  border-radius: 1.25rem;
-  background-color: var(--USER__backgroundColor);
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--USER__textColor) 12%, transparent),
-    0 16px 48px rgb(0 0 0 / 0.2);
-  color: var(--USER__textColor);
-  text-align: left;
 }
 
 .contents-popover__list {
@@ -53,15 +45,6 @@
 }
 
 @media (width < 40rem) {
-  .contents-popover__content[data-side][data-align][data-state] {
-    position: fixed;
-    top: auto;
-    right: calc(1rem + env(safe-area-inset-right));
-    bottom: calc(1rem + env(safe-area-inset-bottom));
-    left: calc(1rem + env(safe-area-inset-left));
-    min-width: 0;
-  }
-
   .contents-popover__list {
     max-height: 75dvh;
   }

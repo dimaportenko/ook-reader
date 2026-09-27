@@ -1,4 +1,5 @@
 pub mod ai_model;
+pub mod choice;
 pub mod font;
 pub mod theme;
 
@@ -726,34 +727,6 @@ mod test {
         // Not "sets it to empty" — emits no script at all. There is nothing to undo on a
         // document that was born without the property.
         assert!(Settings::default().bootstrap_js().is_empty());
-    }
-
-    #[test]
-    fn a_font_family_survives_a_slug_round_trip() {
-        // Step 6 stores the choice as this slug. A variant that does not come back is a
-        // setting that silently resets to the default on the next launch.
-        for family in FontFamily::ALL {
-            assert_eq!(FontFamily::from_slug(family.slug()), family);
-        }
-
-        assert_eq!(FontFamily::from_slug("comic-sans"), FontFamily::default());
-    }
-
-    #[test]
-    fn a_theme_survives_a_slug_round_trip_and_the_slugs_are_distinct() {
-        for theme in Theme::ALL {
-            assert_eq!(Theme::from_slug(theme.slug()), theme);
-        }
-
-        assert_eq!(Theme::from_slug("solarized"), Theme::default());
-
-        let slugs: std::collections::HashSet<&str> =
-            Theme::ALL.iter().map(|theme| theme.slug()).collect();
-        assert_eq!(
-            slugs.len(),
-            Theme::ALL.len(),
-            "the picker marks the selected option by slug, so a shared slug would tick the wrong row",
-        );
     }
 
     #[test]

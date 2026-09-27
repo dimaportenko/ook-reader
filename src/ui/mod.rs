@@ -1,12 +1,10 @@
 pub mod chat;
 pub mod components;
 pub mod drawer;
-pub mod font;
 pub mod library;
 pub mod reader;
 pub mod settings;
 pub mod settings_screen;
-pub mod theme;
 pub mod toc;
 
 pub(crate) const SWIPE_MIN_PX: u32 = 40;

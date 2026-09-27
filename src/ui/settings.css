@@ -1,24 +1,5 @@
-.settings-popover__content[data-state] {
+.settings-popover__content {
   width: min(22rem, calc(100dvw - 2rem));
-  padding: 0.25rem;
-  border-radius: 1.25rem;
-  background-color: var(--USER__backgroundColor);
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--USER__textColor) 12%, transparent),
-    0 16px 48px rgb(0 0 0 / 0.2);
-  color: var(--USER__textColor);
-  text-align: left;
-}
-
-@media (width < 40rem) {
-  .settings-popover__content[data-side][data-align][data-state] {
-    position: fixed;
-    top: auto;
-    right: calc(1rem + env(safe-area-inset-right));
-    bottom: calc(1rem + env(safe-area-inset-bottom));
-    left: calc(1rem + env(safe-area-inset-left));
-    width: auto;
-  }
 }
 
 .settings_group_title {
@@ -172,6 +153,21 @@
 
 .pill_button__danger {
   color: var(--primary-error-color);
+}
+
+.choice {
+  padding: 0 2.25rem 0 1rem;
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    right 1.1rem center,
+    right calc(1.1rem - 5px) center;
+  background-repeat: no-repeat;
+  background-size: 5px 5px;
+  font-weight: inherit;
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 .stepper__button:focus-visible,

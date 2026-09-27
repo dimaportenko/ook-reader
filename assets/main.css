@@ -121,6 +121,11 @@ body,
     var(--dark, var(--primary-color-4));
 }
 
+.library-books__status {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+}
+
 .library-books__list {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
@@ -340,7 +345,7 @@ body,
 }
 
 /* --- Primitives --- */
-.icon-button {
+:where(.icon-button) {
   border-radius: 100%;
   background-color: color-mix(
     in srgb,
@@ -364,14 +369,14 @@ body,
   height: 40px;
   border: none;
 }
-.icon-button:hover {
+:where(.icon-button):hover {
   background-color: color-mix(
     in srgb,
     var(--light, var(--primary-color-4)) var(--dark, var(--primary-color-4)) 90%,
     transparent
   );
 }
-.icon-button:active {
+:where(.icon-button):active {
   transform: scale(0.92);
 }
 

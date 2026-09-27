@@ -1,3 +1,5 @@
+use crate::settings::choice::Choice;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum FontFamily {
     #[default]
@@ -26,8 +28,14 @@ impl FontFamily {
             FontFamily::Humanist => "Frutiger, Calibri, 'Gill Sans', 'Lucida Grande', sans-serif",
         }
     }
+}
 
-    pub(crate) fn slug(self) -> &'static str {
+impl Choice for FontFamily {
+    fn all() -> &'static [Self] {
+        &Self::ALL
+    }
+
+    fn slug(self) -> &'static str {
         match self {
             FontFamily::Publisher => "publisher",
             FontFamily::OldStyle => "old-style",
@@ -37,24 +45,13 @@ impl FontFamily {
         }
     }
 
-    pub(crate) fn label(self) -> &'static str {
+    fn label(self) -> &'static str {
         match self {
             FontFamily::Publisher => "Publisher",
             FontFamily::OldStyle => "Old style",
             FontFamily::Modern => "Modern",
             FontFamily::Sans => "Sans",
             FontFamily::Humanist => "Humanist",
-        }
-    }
-
-    pub(crate) fn from_slug(slug: &str) -> FontFamily {
-        match slug {
-            "publisher" => FontFamily::Publisher,
-            "old-style" => FontFamily::OldStyle,
-            "modern" => FontFamily::Modern,
-            "sans" => FontFamily::Sans,
-            "humanist" => FontFamily::Humanist,
-            _ => FontFamily::default(),
         }
     }
 }

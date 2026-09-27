@@ -1,3 +1,5 @@
+use crate::settings::choice::Choice;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum Theme {
     #[default]
@@ -25,8 +27,14 @@ impl Theme {
             ("--USER__textColor", text),
         ]
     }
+}
 
-    pub(crate) fn slug(self) -> &'static str {
+impl Choice for Theme {
+    fn all() -> &'static [Self] {
+        &Self::ALL
+    }
+
+    fn slug(self) -> &'static str {
         match self {
             Theme::Day => "day",
             Theme::Sepia => "sepia",
@@ -34,20 +42,11 @@ impl Theme {
         }
     }
 
-    pub(crate) fn label(self) -> &'static str {
+    fn label(self) -> &'static str {
         match self {
             Theme::Day => "Day",
             Theme::Sepia => "Sepia",
             Theme::Night => "Night",
-        }
-    }
-
-    pub(crate) fn from_slug(slug: &str) -> Theme {
-        match slug {
-            "day" => Theme::Day,
-            "sepia" => Theme::Sepia,
-            "night" => Theme::Night,
-            _ => Theme::default(),
         }
     }
 }

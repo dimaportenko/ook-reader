@@ -8,18 +8,15 @@ use crate::{
     gemini_key,
     secrets::SecretStore,
     settings::{
-        ai_model::AiModel, Settings, FONT_SIZE_MAX, FONT_SIZE_MIN, LINE_HEIGHT_MAX,
+        choice::Choice, Settings, FONT_SIZE_MAX, FONT_SIZE_MIN, LINE_HEIGHT_MAX,
         LINE_HEIGHT_MIN, MAX_LINE_LENGTH_MAX, MAX_LINE_LENGTH_MIN, PAGE_MARGINS_MAX,
         PAGE_MARGINS_MIN,
     },
     ui::{
         components::{
             icon::{self, Icon},
-            picker::SlugPicker,
             popover::{PopoverContent, PopoverRoot, PopoverTrigger},
         },
-        font::FontFamilyPicker,
-        theme::ThemePicker,
         OrLog,
     },
 };
@@ -75,15 +72,23 @@ fn Stepper(
 }
 
 #[component]
-fn AiModelPicker() -> Element {
-    let mut settings = use_context::<Signal<Settings>>();
-
+fn ChoiceRow<T: Choice>(label: &'static str, selected: T, on_pick: EventHandler<T>) -> Element {
     rsx! {
-        SlugPicker {
-            label: "Gemini model",
-            options: AiModel::ALL.iter().map(|opt| (opt.slug(), opt.label())).collect::<Vec<_>>(),
-            selected: settings().ai_model.slug(),
-            on_pick: move |slug: String| settings.write().ai_model = AiModel::from_slug(&slug),
+        SettingRow {
+            label,
+            select {
+                class: "{Styles::pill_button} {Styles::choice}",
+                aria_label: label,
+                onchange: move |event| on_pick.call(T::from_slug(&event.value())),
+                for choice in T::all().iter().copied() {
+                    option {
+                        key: "{choice.slug()}",
+                        value: choice.slug(),
+                        selected: choice == selected,
+                        {choice.label()}
+                    }
+                }
+            }
         }
     }
 }
@@ -189,8 +194,16 @@ pub(crate) fn ReaderThemeControls() -> Element {
     rsx! {
         div {
             class: "{Styles::settings_group}",
-            SettingRow { label: "Theme", ThemePicker {} }
-            SettingRow { label: "Font", FontFamilyPicker {} }
+            ChoiceRow {
+                label: "Theme",
+                selected: current.theme,
+                on_pick: move |theme| settings.write().theme = theme,
+            }
+            ChoiceRow {
+                label: "Font",
+                selected: current.font_family,
+                on_pick: move |font_family| settings.write().font_family = font_family,
+            }
             Stepper {
                 label: "Font size",
                 value: format!("{}%", current.font_size),
@@ -229,12 +242,18 @@ pub(crate) fn ReaderThemeControls() -> Element {
 
 #[component]
 pub(crate) fn GeminiSettings() -> Element {
+    let mut settings = use_context::<Signal<Settings>>();
+
     rsx! {
         h3 { class: "{Styles::settings_group_title}", "Gemini" }
         div {
             class: "{Styles::settings_group}",
             ApiKeyControl {}
-            SettingRow { label: "Model", AiModelPicker {} }
+            ChoiceRow {
+                label: "Model",
+                selected: settings().ai_model,
+                on_pick: move |ai_model| settings.write().ai_model = ai_model,
+            }
         }
     }
 }

@@ -89,7 +89,7 @@ impl Db {
 mod test {
     use super::*;
 
-    use crate::settings::ai_model::AiModel;
+    use crate::settings::{ai_model::AiModel, choice::Choice};
 
     #[test]
     fn a_pre_model_settings_row_is_upgraded_once_with_the_default_slug() {
