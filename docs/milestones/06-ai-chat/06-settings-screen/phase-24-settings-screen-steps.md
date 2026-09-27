@@ -415,3 +415,92 @@ Four review angles ran (reuse, simplification, efficiency, altitude). Nothing wa
   change the popover, which is outside this step, and the two differ by `align-items`.
 - **Simplification, efficiency, altitude:** no findings. The empty `Ai` arm was weighed and
   kept, for the reason above.
+
+## Step 4 — AI section: Gemini
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**What it is.** The *AI* section gets its first provider block: a **Gemini** heading, the API
+key row, then the model picker. Both rows move out of the reader's popover. The popover now
+holds only the reading controls, and the AI settings live in one place.
+
+### Runnable check first
+
+**Kind:** `dx serve` eyeball. There's no `#[test]`, because the step moves two existing
+components and adds no logic. `KeyStatus` keeps its tests. The suite stays green
+(209 passed, 2 ignored) and `cargo clippy` stays clean.
+
+1. Open a book and open the reader popover. It shows the six reading controls and nothing
+   else: no *AI model* select and no *Gemini API key* row.
+2. Go back to the library, open settings and click *AI*. It shows a **Gemini** heading, then
+   the key row with its status (*Key set*, *Not set*, or *Secret store unavailable*), then
+   the *AI model* select.
+3. With a key saved, click *Forget*. The status turns *Not set*. Paste the key and click
+   *Save*. The status turns *Key set* and the field clears.
+4. Pick a different model, close settings, open a book and ask the chat something. The reply
+   comes back, from the model you picked.
+5. Reopen settings. It is still on *AI*, and the picker shows the model you chose.
+
+### Minimal implementation
+
+**`src/ui/settings.rs`.** One block per provider, in the order the phase doc sets out:
+heading, key row, models.
+
+```rust
+#[component]
+pub(crate) fn GeminiSettings() -> Element {
+    rsx! {
+        h3 { "Gemini" }
+        ApiKeyControl {}
+        AiModelPicker {}
+    }
+}
+```
+
+- Delete `AiModelPicker {}` and `ApiKeyControl {}` from `SettingsPopover`.
+- `AiModelPicker` and `ApiKeyControl` lose their `pub(crate)`. They are only called from
+  `GeminiSettings` now.
+
+**`src/ui/settings_screen.rs`.** Import `settings::{GeminiSettings, ReaderThemeControls}`,
+and fill the arm Step 3 left empty:
+
+```rust
+SettingsSection::Ai => rsx! { GeminiSettings {} },
+```
+
+### Why it works
+
+- **Context again.** `ApiKeyControl` reads three contexts: the `Option<Rc<dyn SecretStore>>`,
+  the `Signal<Option<Gemini>>` provider and `Signal<Settings>`. `App` provides all three
+  above the library as well as the reader. So the key row works in its new place unchanged,
+  and a key saved in settings is the same provider the reader's chat uses.
+- **The key row's local state goes with it.** `draft` is a `use_signal` inside
+  `ApiKeyControl`, so it belongs to that component instance. Switching sections unmounts it
+  and clears a half-typed key. That's the right default for a secret.
+- **The exhaustive `match` paid off.** Step 3's empty `Ai => rsx! {}` arm is where this step
+  plugs in, and it's the only place that had to change in the screen.
+- **Narrower visibility states the boundary.** With `pub(crate)` gone, the compiler enforces
+  that the rest of the crate reaches the Gemini rows only through `GeminiSettings`. That is
+  the seam Phase 23 copies with an OpenCode Zen block.
+
+### Scope note
+
+- The heading is only a label. There's no per-provider card, border or description yet.
+  Phase 23 adds the second block, which is when a shared "provider block" shape would pay
+  for itself.
+- *Gemini API key* repeats the heading's "Gemini". The row's own label could shrink to *API
+  key*. That is a candidate for **Step 6**.
+- There's no phone layout yet. That is **Step 5**.
+
+### Review notes (from the `simplify` pass)
+
+Two review agents ran, one for reuse and simplification, one for efficiency and altitude.
+
+- **Applied:** `AiModelPicker` and `ApiKeyControl` changed from `pub(crate)` to private,
+  because the move left them used only inside `settings.rs`.
+- **Deferred to Step 6:** the four reading controls from Step 3 (`LineHeightControl`,
+  `FontSizeControl`, `PageMarginsControl`, `MaxLineLengthControl`) are also used only
+  inside `settings.rs` now, behind `ReaderThemeControls`, but are still `pub(crate)`.
+- **No other findings.** `GeminiSettings` adds no state or re-renders of its own, and a
+  second provider is a sibling in the same `match` arm, not a special case.

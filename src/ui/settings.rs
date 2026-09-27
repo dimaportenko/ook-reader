@@ -125,7 +125,7 @@ pub(crate) fn MaxLineLengthControl() -> Element {
 }
 
 #[component]
-pub(crate) fn AiModelPicker() -> Element {
+fn AiModelPicker() -> Element {
     let mut settings = use_context::<Signal<Settings>>();
 
     rsx! {
@@ -174,7 +174,7 @@ impl KeyStatus {
 }
 
 #[component]
-pub(crate) fn ApiKeyControl() -> Element {
+fn ApiKeyControl() -> Element {
     let store = use_context::<Option<Rc<dyn SecretStore>>>();
     let mut provider = use_context::<Signal<Option<Gemini>>>();
     let settings = use_context::<Signal<Settings>>();
@@ -241,6 +241,15 @@ pub(crate) fn ReaderThemeControls() -> Element {
     }
 }
 
+#[component]
+pub(crate) fn GeminiSettings() -> Element {
+    rsx! {
+        h3 { "Gemini" }
+        ApiKeyControl {}
+        AiModelPicker {}
+    }
+}
+
 pub(crate) fn SettingsPopover() -> Element {
     rsx! {
         PopoverRoot {
@@ -255,8 +264,6 @@ pub(crate) fn SettingsPopover() -> Element {
                 div {
                     style: "padding: 0.5rem; display: flex; gap: 0.5rem; flex-direction: column;",
                     ReaderThemeControls {}
-                    AiModelPicker {}
-                    ApiKeyControl {}
                 }
             }
         }
