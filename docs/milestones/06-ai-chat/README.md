@@ -7,7 +7,7 @@ a chat whose first message is already filled in — book title, author, the sele
 so the only thing left to type is the question. First provider: **Gemini Flash-Lite**.
 The provider and model must be swappable later without touching the reader.
 
-**Status:** 🚧 in progress — captured 2026-09-11; [Phase 17](01-provider/phase-17-provider-boundary.md) closed 2026-09-13; [Phase 18](02-key-storage/phase-18-key-storage.md) closed 2026-09-20; [Phase 19](03-chat-panel/phase-19-chat-panel.md) closed 2026-09-22; [Phase 20](04-selection/phase-20-selection-chat.md) closed 2026-09-24; [Phase 22](05-streaming/phase-22-streaming.md) closed 2026-09-27, **ahead of Phase 21**. No ADR yet. Sits behind
+**Status:** 🚧 in progress — captured 2026-09-11; [Phase 17](01-provider/phase-17-provider-boundary.md) closed 2026-09-13; [Phase 18](02-key-storage/phase-18-key-storage.md) closed 2026-09-20; [Phase 19](03-chat-panel/phase-19-chat-panel.md) closed 2026-09-22; [Phase 20](04-selection/phase-20-selection-chat.md) closed 2026-09-24; [Phase 22](05-streaming/phase-22-streaming.md) closed 2026-09-27, **ahead of Phase 21**. [Phase 23](07-opencode/phase-23-opencode-zen.md) (OpenCode Zen) opened 2026-09-27 ahead of Phase 21, then paused the same day for [Phase 24](06-settings-screen/phase-24-settings-screen.md) (settings screen), which is in progress. No ADR yet. Sits behind
 nothing: Milestones 3 and 5 both have no phase in progress.
 
 ## The idea in one paragraph
@@ -30,6 +30,8 @@ deliberately pushed to its own phase so the first end-to-end slice is request/re
 | 19 | [Chat panel](03-chat-panel/phase-19-chat-panel.md) | A drawer showing a message list and an input; sends through the provider; conversation held in memory | ✅ |
 | 20 | [Selection → prefilled chat (desktop)](04-selection/phase-20-selection-chat.md) | Read the selection out of the WebView via the existing eval bridge; a menu item opens the chat with the template filled in | ✅ |
 | 22 | [Streaming replies](05-streaming/phase-22-streaming.md) | Tokens appear as they arrive; cancel mid-reply | ✅ |
+| 24 | [Settings screen](06-settings-screen/phase-24-settings-screen.md) | A gear in the library opens a full-screen settings view: sidebar on desktop, list → section on a phone; *Reader theme* and *AI* sections, with Gemini's key and model moved out of the reader popover | 🚧 |
+| 23 | [Second provider: OpenCode Zen](07-opencode/phase-23-opencode-zen.md) | An OpenCode Zen block in Settings → AI: key, live model list, ticks for which models the chat offers; a model picker in the drawer; replies stream over OpenAI-compatible `chat/completions` from whichever provider serves the model | ⏸ |
 | 21 | Selection → prefilled chat (iOS) | *Ask AI* in the native edit menu via `buildMenuWithBuilder:` (objc2), reusing Phase 20's template | ⬜ |
 
 > Phase files are written as each phase is picked up, per this repo's convention — the table
@@ -47,6 +49,17 @@ last because a working non-streaming chat is already the feature; streaming is p
 > don't depend on each other. Streaming touches only the provider and the drawer, and the
 > iOS edit menu reuses Phase 20's hand-off whenever it lands. The numbers stay as they were,
 > so links and history still resolve.
+
+> **Resequenced 2026-09-27:** Phase 23 (OpenCode Zen) goes before Phase 21 as well, at the
+> learner's call. It is the "real second provider" the risk list below said to wait for: the
+> learner has an OpenCode account and wants to use it. It doesn't depend on Phase 21 and
+> touches no reader or selection code — only `src/ai/`, the model setting, the secret store
+> and the drawer's context type.
+>
+> **Resequenced again 2026-09-27:** Phase 24 (settings screen) is inserted before Phase 23,
+> before any Phase 23 code was written. Phase 23 was replanned around a live Zen model list
+> you tick models from, with the model choice made in the drawer. Neither fits in the reader
+> popover, so a settings screen comes first. Order now: 24 → 23 → 21.
 
 ## The design, in short
 
@@ -98,9 +111,10 @@ last because a working non-streaming chat is already the feature; streaming is p
 - **Multiple providers later.** OpenAI-compatible and Anthropic APIs differ in message shape
   (system prompt placement, streaming framing). The trait stays minimal so a second
   implementation is a new file, not a trait change — but do not add a second provider until
-  a real one is wanted.
+  a real one is wanted. *(2026-09-27: one is wanted — OpenCode Zen, Phase 23.)*
 
 ## Deliberately out of scope
 
 Chat history persistence, tool use / function calling, RAG over the whole book, images in
-prompts, the web target, and any provider beyond Gemini in the first pass.
+prompts, the web target, and any provider beyond Gemini in the first pass (Phase 23 adds
+OpenCode Zen once the first pass is done).

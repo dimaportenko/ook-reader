@@ -1,0 +1,167 @@
+# Phase 24 — Settings screen — build log
+
+[← Phase 24](phase-24-settings-screen.md) · the phase doc holds the goal, decisions and the step
+index; this file holds the test → code → why for each step, newest at the bottom.
+
+## The crux
+
+Settings is an overlay owned by the library, not a new route: a `Signal<bool>` and a
+`position: fixed` layer, like the chat drawer, which means it pays for the safe area itself.
+The chosen section is one `Signal<Option<SettingsSection>>`. A phone reads `None` as "show
+the list", a wide window shows the sidebar next to the first section, and the difference
+between the two is CSS alone.
+
+## Step plan
+
+1. **The gear and the empty screen.** An icon button in `LibraryBooks`, and a full-screen `SettingsScreen` with a header and a close button.
+2. **Sections in a sidebar.** `SettingsSection`, sidebar buttons, and the chosen section's heading on the right.
+3. **Reader theme section.** The existing controls reused inside it.
+4. **AI section: Gemini.** The key row and model picker move out of the reader popover.
+5. **The phone layout.** List → section → back under a width breakpoint, checked on the iOS simulator.
+6. **Review and refactor.**
+
+**Why this order.** Each step ends with something to click:
+
+- **Steps 1–2** are the empty frame and its navigation. Their failures (the safe area, a
+  sidebar that doesn't switch) are cheapest to see while the screen has nothing in it.
+- **Steps 3–4** fill it by *moving* existing controls, so they add no new logic.
+- **Step 5** is last because it reshapes a layout that must already work wide. It's also
+  the step that has to be checked on a phone, so the simulator run lands once, on the
+  finished screen.
+
+## Step 1 — The gear and the empty screen
+
+**What it is.** A gear button sits in the library's action bar next to *Edit*. Tapping it
+covers the whole window with a *Settings* view: a header with the title and a close (✕)
+button, and an empty body. Closing it shows the library exactly as it was.
+
+### Runnable check first
+
+**Kind:** `dx serve` eyeball, plus the iOS simulator for the notch. No `#[test]`, because
+this step is pure markup and CSS with no logic to assert. `cargo clippy` stays clean.
+
+1. The library's action bar shows a gear button labelled *Settings* (accessible name
+   "Settings"), next to the edit (pencil) button.
+2. Click it. A full-window view with the theme's background covers the library: *Settings*
+   on the left of a header row and ✕ (accessible name "Close settings") on the right. No
+   book covers show through.
+3. Click ✕. The library is back and unchanged. If *Edit* mode was on before opening
+   settings, it's off now, the same way the import button turns it off.
+4. Switch the theme to dark in the reader popover, go back to the library and open
+   settings. The screen is dark too, because it paints `--USER__backgroundColor`, not a
+   hard-coded colour.
+5. **iOS simulator** (a haiku subagent drives it, per memory): open settings on a notched
+   iPhone. Using `agent-device snapshot -i --json`, the header's ✕ button `rect` sits
+   **below** the status bar / notch and is pressable; tapping it closes the screen.
+
+### Minimal implementation
+
+**A new module `src/ui/settings_screen.rs`**, registered with `pub mod settings_screen;` in `src/ui/mod.rs`:
+
+```rust
+use dioxus::prelude::*;
+
+use crate::ui::components::icon::{self, Icon};
+
+#[css_module("/src/ui/settings_screen.css")]
+struct Styles;
+
+#[component]
+pub(crate) fn SettingsScreen(mut open: Signal<bool>) -> Element {
+    if !open() {
+        return rsx! {};
+    }
+
+    rsx! {
+        div {
+            class: "{Styles::settings_screen}",
+            role: "dialog",
+            aria_label: "Settings",
+            header {
+                class: "{Styles::settings_screen__header}",
+                h1 { "Settings" }
+                button {
+                    class: "icon-button",
+                    aria_label: "Close settings",
+                    onclick: move |_| open.set(false),
+                    Icon { icon: icon::CLOSE }
+                }
+            }
+        }
+    }
+}
+```
+
+**`src/ui/settings_screen.css`:**
+
+The class names use underscores, as `chat.css` does, because `css_module` turns each class
+into a Rust identifier (`Styles::settings_screen`).
+
+```css
+.settings_screen {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+    env(safe-area-inset-bottom) env(safe-area-inset-left);
+  background-color: var(--USER__backgroundColor);
+  color: var(--USER__textColor);
+}
+
+.settings_screen__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem;
+}
+```
+
+**`LibraryBooks` in `src/ui/library.rs`:**
+- Add `let mut settings_open = use_signal(|| false);` next to `edit_mode`.
+- In `library-books__actions`, after the edit button:
+
+```rust
+button {
+    class: "icon-button",
+    aria_label: "Settings",
+    onclick: move |_| {
+        edit_mode.set(false);
+        settings_open.set(true);
+    },
+    Icon { icon: icon::SETTINGS }
+}
+```
+
+- Render `SettingsScreen { open: settings_open }` as the last child of the root `div`.
+
+### Why it works
+
+- **`mut open: Signal<bool>` as a prop** is the drawer's pattern. A `Signal` is `Copy`, so
+  the parent and the screen share one cell: the gear writes `true`, the ✕ writes `false`,
+  and both components re-render because each one read it. The `mut` is only there because
+  `.set()` takes `&mut self` on the local copy. It changes the shared value, not a copy of
+  it.
+- **The early `return rsx! {}`** means a closed screen renders nothing at all, so there's
+  no hidden DOM and nothing for screen readers to find. The drawer instead stays mounted
+  and slides, because it animates. Settings doesn't animate yet, so it has no reason to
+  stay mounted.
+- **`position: fixed; inset: 0`** sizes the layer to the viewport, not to its parent. That
+  is why it covers the library no matter where it sits in the tree. But it also means
+  `body`'s `env(safe-area-inset-*)` padding no longer applies to it, because the padding is
+  on an ancestor it has escaped. So the layer adds its own, exactly as `.drawer` does.
+  Leave that line out and the ✕ ends up under the notch. This is the Phase 9 bug again,
+  and the simulator `rect` check is there to catch it.
+- **`z-index: 3`** puts it above the drawer (`2`) and its backdrop. The library has no
+  drawer, but the number states the layering on purpose instead of by accident.
+- **Turning edit mode off on open** keeps one rule: any other library action ends
+  editing. The import button already follows it.
+
+### Scope note
+
+- The body is empty. **Step 2** adds the sections.
+- No Escape-to-close, no focus trap, no open/close animation. A dialog should get the first
+  two eventually. Note them for the review step rather than adding them now.
+- Settings opens only from the library. The reader keeps its popover (see the phase
+  decisions).
