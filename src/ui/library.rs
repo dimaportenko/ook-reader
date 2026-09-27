@@ -19,6 +19,7 @@ use crate::{
             icon::{self, Icon},
             popover::{PopoverContent, PopoverRoot},
         },
+        settings_screen::SettingsScreen,
         OrLog,
     },
 };
@@ -48,6 +49,7 @@ pub(crate) fn LibraryBooks() -> Element {
     let mut status = use_context::<Signal<Option<String>>>();
     let mut import_status = use_signal(|| None::<String>);
     let mut edit_mode = use_signal(|| false);
+    let mut settings_open = use_signal(|| false);
     let mut pending_delete = use_signal(|| None::<(i64, String)>);
 
     let import = use_callback({
@@ -104,6 +106,15 @@ pub(crate) fn LibraryBooks() -> Element {
                     Icon {
                         icon: if edit_mode() { icon::CLOSE } else { icon::EDIT },
                     }
+                }
+                button {
+                    class: "icon-button",
+                    aria_label: "Settings",
+                    onclick: move |_| {
+                        edit_mode.set(false);
+                        settings_open.set(true);
+                    },
+                    Icon { icon: icon::SETTINGS }
                 }
             }
             ul {
@@ -195,6 +206,7 @@ pub(crate) fn LibraryBooks() -> Element {
                 }
             },
         }
+        SettingsScreen { open: settings_open }
     }
 }
 

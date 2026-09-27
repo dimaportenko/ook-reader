@@ -31,6 +31,9 @@ between the two is CSS alone.
 
 ## Step 1 — The gear and the empty screen
 
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
 **What it is.** A gear button sits in the library's action bar next to *Edit*. Tapping it
 covers the whole window with a *Settings* view: a header with the title and a close (✕)
 button, and an empty body. Closing it shows the library exactly as it was.
@@ -165,3 +168,24 @@ button {
   two eventually. Note them for the review step rather than adding them now.
 - Settings opens only from the library. The reader keeps its popover (see the phase
   decisions).
+
+### Review notes (from the `simplify` pass)
+
+Four review angles ran over the diff (reuse, simplification, efficiency, altitude). Nothing
+was changed. Each finding was skipped or deferred:
+
+- **Reuse `Drawer` instead of a new overlay.** *Skipped.* `Drawer` is a side panel with
+  swipe-to-close, and this screen is meant to be full-screen. Adding a "full" variant to
+  `Drawer` is a possible later refactor, not this step.
+- **The safe-area padding is now copied three times** (`body`, `.drawer`, `.settings_screen`).
+  *Deferred to Step 6.* Pulling it into one shared class touches `drawer.css`, which is
+  outside this step.
+- **`settings_open` and `edit_mode` are two booleans that must not both be true.** *Deferred
+  to Step 6.* One `enum` for the library's mode would make that impossible by construction.
+  It becomes worth it if a third mode appears.
+- **`edit_mode.set(false)` re-renders the library list even when edit mode is already off.**
+  *Skipped.* It costs one diff per click, and it matches the import button, which does the
+  same.
+- **Early `return rsx! {}` versus wrapping the body in `if open() { … }`.** *Skipped.* Both
+  are fine. The early return keeps the rendered markup unindented.
+

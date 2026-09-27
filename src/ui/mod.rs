@@ -5,6 +5,7 @@ pub mod font;
 pub mod library;
 pub mod reader;
 pub mod settings;
+pub mod settings_screen;
 pub mod theme;
 pub mod toc;
 
