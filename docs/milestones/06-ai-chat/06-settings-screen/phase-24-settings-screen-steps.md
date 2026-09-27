@@ -14,7 +14,7 @@ between the two is CSS alone.
 ## Step plan
 
 1. ~~The gear and the empty screen~~ — an icon button in `LibraryBooks`, and a full-screen `SettingsScreen` with a header and a close button. **Done** — `7f44663`.
-2. **Sections in a sidebar.** `SettingsSection`, sidebar buttons, and the chosen section's heading on the right.
+2. ~~Sections in a sidebar~~ — `SettingsSection`, sidebar buttons, and the chosen section's heading on the right. **Done** — `85b50a4`.
 3. **Reader theme section.** The existing controls reused inside it.
 4. **AI section: Gemini.** The key row and model picker move out of the reader popover.
 5. **The phone layout.** List → section → back under a width breakpoint, checked on the iOS simulator.
@@ -196,6 +196,8 @@ was changed. Each finding was skipped or deferred:
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `85b50a4` (209 tests green, 2 ignored; clippy clean; `dx serve` checks confirmed by eye).
 
 **What it is.** The empty body of the settings screen becomes two columns. On the left, a
 sidebar lists *Reader theme* and *AI*. On the right, the chosen section's heading. Clicking a

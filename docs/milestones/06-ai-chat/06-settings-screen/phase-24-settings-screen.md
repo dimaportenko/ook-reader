@@ -54,7 +54,7 @@ window width anyway.
 ## Planned steps
 
 - [x] 1. The gear and the empty screen — icon button in `LibraryBooks`, full-screen `SettingsScreen` overlay with a header and close
-- [ ] 2. Sections in a sidebar — `SettingsSection`, sidebar buttons, the chosen section's heading on the right
+- [x] 2. Sections in a sidebar — `SettingsSection`, sidebar buttons, the chosen section's heading on the right
 - [ ] 3. Reader theme section — the existing controls reused inside it
 - [ ] 4. AI section: Gemini — key row and model picker moved out of the reader popover
 - [ ] 5. The phone layout — list → section → back, under a width breakpoint, checked on the iOS simulator
