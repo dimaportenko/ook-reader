@@ -34,6 +34,14 @@ impl Theme {
         }
     }
 
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Theme::Day => "Day",
+            Theme::Sepia => "Sepia",
+            Theme::Night => "Night",
+        }
+    }
+
     pub(crate) fn from_slug(slug: &str) -> Theme {
         match slug {
             "day" => Theme::Day,
@@ -41,5 +49,15 @@ impl Theme {
             "night" => Theme::Night,
             _ => Theme::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn each_theme_has_a_reader_facing_label() {
+        assert_eq!(Theme::ALL.map(Theme::label), ["Day", "Sepia", "Night"]);
     }
 }

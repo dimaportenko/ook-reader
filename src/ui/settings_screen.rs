@@ -29,22 +29,25 @@ impl SettingsSection {
 
 #[component]
 pub(crate) fn SettingsScreen(mut open: Signal<bool>) -> Element {
-    let mut section = use_signal(SettingsSection::default);
-
-    if !open() {
-        return rsx! {};
-    }
-
-    let current = section();
+    let mut chosen = use_signal(|| None::<SettingsSection>);
+    let chosen_now = chosen();
+    let current = chosen_now.unwrap_or_default();
 
     rsx! {
         div {
             class: "{Styles::settings_screen}",
             role: "dialog",
             aria_label: "Settings",
+            "data-section-chosen": if chosen_now.is_some() { "true" },
             header {
                 class: "{Styles::settings_screen__header}",
-                h1 { "Settings" }
+                button {
+                    class: "icon-button {Styles::settings_screen__back}",
+                    aria_label: "Back to settings",
+                    onclick: move |_| chosen.set(None),
+                    Icon { icon: icon::CHEVRON_LEFT }
+                }
+                h1 { class: "{Styles::settings_screen__title}", "Settings" }
                 button {
                     class: "icon-button",
                     aria_label: "Close settings",
@@ -61,16 +64,17 @@ pub(crate) fn SettingsScreen(mut open: Signal<bool>) -> Element {
                         button {
                             class: "{Styles::settings_screen__section_button}",
                             aria_current: if item == current { "page" },
-                            onclick: move |_| section.set(item),
-                            {item.label()}
+                            onclick: move |_| chosen.set(Some(item)),
+                            span { {item.label()} }
+                            Icon { icon: icon::CHEVRON_RIGHT }
                         }
                     }
                 }
                 section {
                     class: "{Styles::settings_screen__section}",
-                    h2 { {current.label()} }
                     div {
-                        class: "{Styles::settings_screen__controls}",
+                        class: "{Styles::settings_screen__content}",
+                        h2 { class: "{Styles::settings_screen__heading}", {current.label()} }
                         match current {
                             SettingsSection::ReaderTheme => rsx! { ReaderThemeControls {} },
                             SettingsSection::Ai => rsx! { GeminiSettings {} },

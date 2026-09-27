@@ -4,6 +4,7 @@
   z-index: 3;
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
   padding: env(safe-area-inset-top) env(safe-area-inset-right)
     env(safe-area-inset-bottom) env(safe-area-inset-left);
   background-color: var(--USER__backgroundColor);
@@ -13,28 +14,44 @@
 .settings_screen__header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 1rem;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+}
+
+.settings_screen__header .settings_screen__back {
+  display: none;
+}
+
+.settings_screen__title {
+  flex: 1;
+  margin: 0;
+  font-size: 1.75rem;
 }
 
 .settings_screen__body {
   flex: 1;
   display: flex;
+  gap: 1rem;
   min-height: 0;
+  padding: 0.5rem 1rem 0;
 }
 
 .settings_screen__sidebar {
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
   gap: 0.25rem;
   width: 14rem;
-  padding: 0 1rem;
 }
 
 .settings_screen__section_button {
-  padding: 0.5rem 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 2.75rem;
+  padding: 0.5rem 1rem;
   border: none;
-  border-radius: 0.25rem;
+  border-radius: 0.75rem;
   background: none;
   color: inherit;
   cursor: pointer;
@@ -42,28 +59,84 @@
   text-align: left;
 }
 
+.settings_screen__section_button svg {
+  display: none;
+  width: 18px;
+  height: 18px;
+  opacity: 0.5;
+}
+
 .settings_screen__section_button:hover {
-  background-color: var(--primary-color-4);
+  background-color: var(--tint-surface);
 }
 
 .settings_screen__section_button:focus-visible {
-  box-shadow: 0 0 0 2px var(--focused-border-color);
+  outline: 2px solid var(--focused-border-color);
+  outline-offset: -2px;
 }
 
 .settings_screen__section_button[aria-current="page"] {
-  font-weight: 700;
-  background-color: var(--primary-color-4);
+  background-color: var(--tint-fill);
+  font-weight: 600;
 }
 
 .settings_screen__section {
   flex: 1;
-  padding: 0 1rem;
+  min-width: 0;
   overflow-y: auto;
 }
 
-.settings_screen__controls {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.5rem;
+.settings_screen__content {
+  max-width: 36rem;
+  padding-bottom: 2rem;
+}
+
+.settings_screen__heading {
+  margin: 0.5rem 0 1rem;
+  font-size: 1.25rem;
+}
+
+@media (width < 40rem) {
+  .settings_screen__body {
+    padding-top: 0;
+  }
+
+  .settings_screen__sidebar {
+    flex: 1;
+    gap: 0;
+    width: auto;
+    align-self: flex-start;
+    padding: 0 1rem;
+    border-radius: 1rem;
+    background-color: var(--tint-surface);
+  }
+
+  .settings_screen__section_button {
+    min-height: 3rem;
+    padding: 0.5rem 0;
+    border-radius: 0;
+  }
+
+  .settings_screen__section_button + .settings_screen__section_button {
+    border-top: 1px solid var(--tint-divider);
+  }
+
+  .settings_screen__section_button:hover,
+  .settings_screen__section_button[aria-current="page"] {
+    background: none;
+    font-weight: inherit;
+  }
+
+  .settings_screen__section_button svg {
+    display: block;
+  }
+
+  .settings_screen:not([data-section-chosen]) .settings_screen__section,
+  .settings_screen[data-section-chosen] .settings_screen__sidebar {
+    display: none;
+  }
+
+  .settings_screen[data-section-chosen] .settings_screen__back {
+    display: flex;
+  }
 }

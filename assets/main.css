@@ -22,6 +22,14 @@ body,
   height: 100%;
 }
 
+:root {
+  --tint-surface: color-mix(in srgb, currentColor 6%, transparent);
+  --tint-fill: color-mix(in srgb, currentColor 10%, transparent);
+  --tint-divider: color-mix(in srgb, currentColor 12%, transparent);
+  --tint-fill-hover: color-mix(in srgb, currentColor 16%, transparent);
+  --tint-border: color-mix(in srgb, currentColor 20%, transparent);
+}
+
 /* ---- Utility ----- */
 .invisible {
   opacity: 0;

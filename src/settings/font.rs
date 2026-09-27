@@ -37,6 +37,16 @@ impl FontFamily {
         }
     }
 
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            FontFamily::Publisher => "Publisher",
+            FontFamily::OldStyle => "Old style",
+            FontFamily::Modern => "Modern",
+            FontFamily::Sans => "Sans",
+            FontFamily::Humanist => "Humanist",
+        }
+    }
+
     pub(crate) fn from_slug(slug: &str) -> FontFamily {
         match slug {
             "publisher" => FontFamily::Publisher,
@@ -46,5 +56,18 @@ impl FontFamily {
             "humanist" => FontFamily::Humanist,
             _ => FontFamily::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn each_font_family_has_a_reader_facing_label() {
+        assert_eq!(
+            FontFamily::ALL.map(FontFamily::label),
+            ["Publisher", "Old style", "Modern", "Sans", "Humanist"]
+        );
     }
 }

@@ -15,6 +15,7 @@ use crate::{
     ui::{
         components::{
             icon::{self, Icon},
+            picker::SlugPicker,
             popover::{PopoverContent, PopoverRoot, PopoverTrigger},
         },
         font::FontFamilyPicker,
@@ -27,98 +28,47 @@ use crate::{
 struct Styles;
 
 #[component]
-pub(crate) fn FontSizeControl() -> Element {
-    let mut settings = use_context::<Signal<Settings>>();
-
+fn SettingRow(label: &'static str, children: Element) -> Element {
     rsx! {
         div {
-            button {
-                disabled: settings().font_size <= FONT_SIZE_MIN,
-                onclick: move |_| settings.write().zoom_out(),
-                "A-"
-            }
-            span {
-                style: "padding: 0 0.5rem",
-                "{settings().font_size}%"
-            }
-            button {
-                disabled: settings().font_size >= FONT_SIZE_MAX,
-                onclick: move |_| settings.write().zoom_in(),
-                "A+"
-            }
+            class: "{Styles::settings_row}",
+            span { class: "{Styles::settings_row__label}", {label} }
+            div { class: "{Styles::settings_row__control}", {children} }
         }
     }
 }
 
 #[component]
-pub(crate) fn LineHeightControl() -> Element {
-    let mut settings = use_context::<Signal<Settings>>();
-    let leading = settings().line_height_css();
-
+fn Stepper(
+    label: &'static str,
+    value: String,
+    can_decrease: bool,
+    can_increase: bool,
+    on_decrease: EventHandler,
+    on_increase: EventHandler,
+) -> Element {
     rsx! {
-        div {
-            button {
-                disabled: settings().line_height <= LINE_HEIGHT_MIN,
-                onclick: move |_| settings.write().tighter(),
-                "\u{2195}-"
-            }
-            span {
-                style: "padding: 0 0.5rem",
-                "{leading}"
-            }
-            button {
-                disabled: settings().line_height >= LINE_HEIGHT_MAX,
-                onclick: move |_| settings.write().looser(),
-                "\u{2195}+"
-            }
-        }
-    }
-}
-
-#[component]
-pub(crate) fn PageMarginsControl() -> Element {
-    let mut settings = use_context::<Signal<Settings>>();
-    let margins = settings().page_margins_css();
-
-    rsx! {
-        div {
-            button {
-                disabled: settings().page_margins <= PAGE_MARGINS_MIN,
-                onclick: move |_| settings.write().narrower(),
-                "\u{2194}-"
-            }
-            span {
-                style: "padding: 0 0.5rem",
-                "{margins}"
-            }
-            button {
-                disabled: settings().page_margins >= PAGE_MARGINS_MAX,
-                onclick: move |_| settings.write().wider(),
-                "\u{2194}+"
-            }
-        }
-    }
-}
-
-#[component]
-pub(crate) fn MaxLineLengthControl() -> Element {
-    let mut settings = use_context::<Signal<Settings>>();
-
-    rsx! {
-        div {
-            button {
-                disabled: settings().max_line_length <= MAX_LINE_LENGTH_MIN,
-                onclick: move |_| settings.write().shorter(),
-                "\u{2261}-"
-            }
-            span {
-                style: "padding: 0 0.5rem",
-                "{settings().max_line_length}"
-            }
-            button {
-                disabled: settings().max_line_length >= MAX_LINE_LENGTH_MAX,
-                onclick: move |_| settings.write().longer(),
-                "\u{2261}+"
+        SettingRow {
+            label,
+            div {
+                class: "{Styles::stepper}",
+                role: "group",
+                aria_label: label,
+                button {
+                    class: "{Styles::stepper__button}",
+                    aria_label: "Decrease {label}",
+                    disabled: !can_decrease,
+                    onclick: move |_| on_decrease.call(()),
+                    Icon { icon: icon::MINUS }
+                }
+                output { class: "{Styles::stepper__value}", "{value}" }
+                button {
+                    class: "{Styles::stepper__button}",
+                    aria_label: "Increase {label}",
+                    disabled: !can_increase,
+                    onclick: move |_| on_increase.call(()),
+                    Icon { icon: icon::ADD }
+                }
             }
         }
     }
@@ -129,21 +79,11 @@ fn AiModelPicker() -> Element {
     let mut settings = use_context::<Signal<Settings>>();
 
     rsx! {
-        label {
-            "AI model"
-            select {
-                onchange: move |event| {
-                    settings.write().ai_model = AiModel::from_slug(&event.data.value());
-                },
-                for model in AiModel::ALL {
-                    option {
-                        key: "{model.slug()}",
-                        value: model.slug(),
-                        selected: model == settings().ai_model,
-                        {model.label()}
-                    }
-                }
-            }
+        SlugPicker {
+            label: "Gemini model",
+            options: AiModel::ALL.iter().map(|opt| (opt.slug(), opt.label())).collect::<Vec<_>>(),
+            selected: settings().ai_model.slug(),
+            on_pick: move |slug: String| settings.write().ai_model = AiModel::from_slug(&slug),
         }
     }
 }
@@ -180,21 +120,32 @@ fn ApiKeyControl() -> Element {
     let settings = use_context::<Signal<Settings>>();
     let mut draft = use_signal(String::new);
     let status = KeyStatus::of(store.is_some(), provider.read().is_some());
+    let key_set = status == KeyStatus::Set;
 
     rsx! {
-        div {
-            "Gemini API key"
+        SettingRow {
+            label: "API key",
             span {
-                style: "padding: 0 0.5rem",
+                class: "{Styles::key_status}",
+                "data-set": if key_set { "true" },
                 {status.label()}
             }
-            if let Some(store) = store {
+        }
+        if let Some(store) = store {
+            div {
+                class: "{Styles::key_form}",
                 input {
+                    class: "{Styles::key_form__input}",
                     r#type: "password",
+                    aria_label: "Gemini API key",
+                    placeholder: if key_set { "Replace key" } else { "Paste your key" },
+                    autocomplete: "off",
+                    spellcheck: "false",
                     value: "{draft}",
                     oninput: move |event| draft.set(event.data.value()),
                 }
                 button {
+                    class: "{Styles::pill_button}",
                     disabled: draft.read().trim().is_empty(),
                     onclick: {
                         let store = store.clone();
@@ -208,8 +159,9 @@ fn ApiKeyControl() -> Element {
                     },
                     "Save"
                 }
-                if status == KeyStatus::Set {
+                if key_set {
                     button {
+                        class: "{Styles::pill_button} {Styles::pill_button__danger}",
                         onclick: {
                             let store = store.clone();
                             move |_| {
@@ -231,22 +183,59 @@ fn ApiKeyControl() -> Element {
 
 #[component]
 pub(crate) fn ReaderThemeControls() -> Element {
+    let mut settings = use_context::<Signal<Settings>>();
+    let current = settings();
+
     rsx! {
-        LineHeightControl {}
-        FontSizeControl {}
-        PageMarginsControl {}
-        MaxLineLengthControl {}
-        FontFamilyPicker {}
-        ThemePicker {}
+        div {
+            class: "{Styles::settings_group}",
+            SettingRow { label: "Theme", ThemePicker {} }
+            SettingRow { label: "Font", FontFamilyPicker {} }
+            Stepper {
+                label: "Font size",
+                value: format!("{}%", current.font_size),
+                can_decrease: current.font_size > FONT_SIZE_MIN,
+                can_increase: current.font_size < FONT_SIZE_MAX,
+                on_decrease: move |_| settings.write().zoom_out(),
+                on_increase: move |_| settings.write().zoom_in(),
+            }
+            Stepper {
+                label: "Line height",
+                value: current.line_height_css(),
+                can_decrease: current.line_height > LINE_HEIGHT_MIN,
+                can_increase: current.line_height < LINE_HEIGHT_MAX,
+                on_decrease: move |_| settings.write().tighter(),
+                on_increase: move |_| settings.write().looser(),
+            }
+            Stepper {
+                label: "Margins",
+                value: current.page_margins_css(),
+                can_decrease: current.page_margins > PAGE_MARGINS_MIN,
+                can_increase: current.page_margins < PAGE_MARGINS_MAX,
+                on_decrease: move |_| settings.write().narrower(),
+                on_increase: move |_| settings.write().wider(),
+            }
+            Stepper {
+                label: "Line length",
+                value: current.max_line_length.to_string(),
+                can_decrease: current.max_line_length > MAX_LINE_LENGTH_MIN,
+                can_increase: current.max_line_length < MAX_LINE_LENGTH_MAX,
+                on_decrease: move |_| settings.write().shorter(),
+                on_increase: move |_| settings.write().longer(),
+            }
+        }
     }
 }
 
 #[component]
 pub(crate) fn GeminiSettings() -> Element {
     rsx! {
-        h3 { "Gemini" }
-        ApiKeyControl {}
-        AiModelPicker {}
+        h3 { class: "{Styles::settings_group_title}", "Gemini" }
+        div {
+            class: "{Styles::settings_group}",
+            ApiKeyControl {}
+            SettingRow { label: "Model", AiModelPicker {} }
+        }
     }
 }
 
@@ -261,10 +250,7 @@ pub(crate) fn SettingsPopover() -> Element {
                 class: Styles::settings_popover__content.to_string(),
                 gap: "0.25rem",
                 align: ContentAlign::End,
-                div {
-                    style: "padding: 0.5rem; display: flex; gap: 0.5rem; flex-direction: column;",
-                    ReaderThemeControls {}
-                }
+                ReaderThemeControls {}
             }
         }
     }

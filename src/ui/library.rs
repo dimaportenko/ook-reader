@@ -206,7 +206,9 @@ pub(crate) fn LibraryBooks() -> Element {
                 }
             },
         }
-        SettingsScreen { open: settings_open }
+        if settings_open() {
+            SettingsScreen { open: settings_open }
+        }
     }
 }
 

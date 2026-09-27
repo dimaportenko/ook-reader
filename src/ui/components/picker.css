@@ -1,0 +1,29 @@
+.slug_picker {
+  min-height: 2.5rem;
+  padding: 0 2.25rem 0 1rem;
+  border: 0;
+  border-radius: 1.25rem;
+  background-color: var(--tint-fill);
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    right 1.1rem center,
+    right calc(1.1rem - 5px) center;
+  background-repeat: no-repeat;
+  background-size: 5px 5px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.slug_picker:hover {
+  background-color: var(--tint-fill-hover);
+}
+
+.slug_picker:focus-visible {
+  outline: 2px solid var(--focused-border-color);
+  outline-offset: 2px;
+}

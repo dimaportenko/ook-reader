@@ -46,6 +46,11 @@ pub(crate) const ADD: TablerIcon = TablerIcon {
     paths: &["M12 5l0 14", "M5 12l14 0"],
 };
 
+pub(crate) const MINUS: TablerIcon = TablerIcon {
+    name: "minus",
+    paths: &["M5 12l14 0"],
+};
+
 pub(crate) const EDIT: TablerIcon = TablerIcon {
     name: "edit",
     paths: &[

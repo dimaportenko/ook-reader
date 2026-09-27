@@ -506,3 +506,73 @@ Two review agents ran, one for reuse and simplification, one for efficiency and 
   inside `settings.rs` now, behind `ReaderThemeControls`, but are still `pub(crate)`.
 - **No other findings.** `GeminiSettings` adds no state or re-renders of its own, and a
   second provider is a sibling in the same `match` arm, not a special case.
+
+## Step 5 — The phone layout, and a styling pass
+
+> **Written by:** the agent, at the learner's explicit "write it" after a UI review.
+> Implementation and tests written by the agent, reviewed by hand, then cleaned with a
+> `simplify` pass.
+
+**What it is.** Below `40rem` the settings screen is a list you tap into: the section list
+fills the screen, tapping a row pushes that section full width, and a back button returns
+to the list. Wider windows keep the sidebar. The step grew to include the styling review
+that asked for the screen to be "prettier, aligned with app styles and mobile friendly", so
+it also restyles every control on the screen and in the reader popover.
+
+### Runnable check first
+
+**Kind:** iOS simulator (driven by a haiku subagent with `agent-device`) plus `#[test]`s for
+the new labels. 211 passed, 2 ignored; `cargo clippy` clean.
+
+- `each_theme_has_a_reader_facing_label` and `each_font_family_has_a_reader_facing_label`
+  pin the text the pickers now show instead of slugs. The theme test was watched to fail
+  by mutating its expected value (`Night` → `Dusk`) and restored.
+- On a 402pt iPhone: the list shows full width with no back button; *Reader theme* opens the
+  section with a back button; stepper buttons are 40×40; the font-size stepper goes 100% →
+  125%; the AI section's field, *Save* and model picker end at x = 370; back returns to the
+  list; closing and reopening lands on the list again.
+- The reader popover below `40rem` is a bottom sheet (x = 16, width 370) instead of a panel
+  anchored to its trigger, which would have run off the left edge.
+
+Not checked by eye yet: the desktop layout under `dx serve`, and the Sepia and Night themes.
+
+### What changed
+
+- **One state, two layouts.** `SettingsScreen` holds `Signal<Option<SettingsSection>>`.
+  `None` shows the list on a phone and the first section on desktop. The root carries
+  `data-section-chosen` only when a section is picked, and a single media query decides
+  which pane to hide. Rust never learns the window width.
+- **Mounted only while open.** `library.rs` renders `SettingsScreen` inside
+  `if settings_open()`, so its local signal starts at `None` on every open. That replaced a
+  manual reset in the close handler.
+- **Grouped cards.** Rows sit in a rounded card with hairline dividers
+  (`.settings_group > * + *`), labels on the left and controls on the right, at least
+  48px tall.
+- **`Stepper`** replaces the four copy-pasted `…Control` components. It renders its own
+  `SettingRow`, so each setting's label is written once and also feeds the button names
+  (*Decrease Font size*).
+- **Labels, not slugs.** `Theme::label()` and `FontFamily::label()`; `SlugPicker` takes
+  `(slug, label)` pairs and an accessible name, owns its styling in `picker.css`, and now
+  also backs `AiModelPicker`.
+- **Colours from the theme.** Five `--tint-*` custom properties on `:root` in `main.css`
+  mix `currentColor` into transparency. An unregistered custom property substitutes its
+  tokens where it is used, so `currentColor` resolves per element and Day, Sepia and Night
+  all get matching tints without a dark-mode branch.
+- **Gemini block.** An uppercase group title, an *API key* row with a status badge, a
+  wrapping password field (16px font so iOS doesn't zoom) and pill *Save* / *Forget*.
+
+### Review notes (from the `simplify` pass)
+
+- **Applied:** `AiModelPicker` through `SlugPicker`; the stepper wrappers folded into
+  `ReaderThemeControls`; tint variables; one disabled opacity; breakpoint aligned to
+  `40rem`; mount-when-open; `key_set` and `chosen_now` read once; the popover's
+  narrow-screen sheet.
+- **Deferred:** a global pill-button class shared with the library delete dialog; moving
+  the narrow-screen sheet and theme colours into the popover component so `toc.css` and
+  `settings.css` stop out-specifying it with attribute selectors; `:where(.icon-button)` so
+  the back button can hide with a single class.
+- **Skipped:** formatting stepper values inside `Stepper` to save an allocation; hiding
+  *Reader theme*'s `aria-current` on the phone list, which would need Rust to know the
+  width.
+- **Step 6 items already covered here:** labels for the controls, *API key* instead of
+  *Gemini API key*, and the reading controls made private.

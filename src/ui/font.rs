@@ -11,7 +11,8 @@ pub(crate) fn FontFamilyPicker() -> Element {
 
     rsx! {
         SlugPicker {
-            options: FontFamily::ALL.iter().map(|opt| opt.slug()).collect::<Vec<_>>(),
+            label: "Font",
+            options: FontFamily::ALL.iter().map(|opt| (opt.slug(), opt.label())).collect::<Vec<_>>(),
             selected: settings().font_family.slug(),
             on_pick: move |slug: String| settings.write().font_family = FontFamily::from_slug(&slug),
         }

@@ -11,7 +11,8 @@ pub(crate) fn ThemePicker() -> Element {
 
     rsx! {
         SlugPicker {
-            options: Theme::ALL.iter().map(|opt| opt.slug()).collect::<Vec<_>>(),
+            label: "Theme",
+            options: Theme::ALL.iter().map(|opt| (opt.slug(), opt.label())).collect::<Vec<_>>(),
             selected: settings().theme.slug(),
             on_pick: move |slug: String| settings.write().theme = Theme::from_slug(&slug),
         }
