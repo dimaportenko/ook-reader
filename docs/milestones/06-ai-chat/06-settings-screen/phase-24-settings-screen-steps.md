@@ -16,7 +16,7 @@ between the two is CSS alone.
 1. ~~The gear and the empty screen~~ — an icon button in `LibraryBooks`, and a full-screen `SettingsScreen` with a header and a close button. **Done** — `7f44663`.
 2. ~~Sections in a sidebar~~ — `SettingsSection`, sidebar buttons, and the chosen section's heading on the right. **Done** — `85b50a4`.
 3. ~~Reader theme section~~ — the existing controls reused inside it. **Done** — `10e1751`.
-4. **AI section: Gemini.** The key row and model picker move out of the reader popover.
+4. ~~AI section: Gemini~~ — the key row and model picker move out of the reader popover. **Done** — `fcfe38b`.
 5. **The phone layout.** List → section → back under a width breakpoint, checked on the iOS simulator.
 6. **Review and refactor.**
 
@@ -420,6 +420,8 @@ Four review angles ran (reuse, simplification, efficiency, altitude). Nothing wa
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `fcfe38b` (209 tests green, 2 ignored; clippy clean; `dx serve` checks confirmed by eye).
 
 **What it is.** The *AI* section gets its first provider block: a **Gemini** heading, the API
 key row, then the model picker. Both rows move out of the reader's popover. The popover now
