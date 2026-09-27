@@ -57,5 +57,5 @@ window width anyway.
 - [x] 2. Sections in a sidebar — `SettingsSection`, sidebar buttons, the chosen section's heading on the right
 - [x] 3. Reader theme section — the existing controls reused inside it
 - [x] 4. AI section: Gemini — key row and model picker moved out of the reader popover
-- [ ] 5. The phone layout — list → section → back, under a width breakpoint, checked on the iOS simulator
+- [x] 5. The phone layout — list → section → back, under a width breakpoint, checked on the iOS simulator
 - [ ] 6. Review and refactor

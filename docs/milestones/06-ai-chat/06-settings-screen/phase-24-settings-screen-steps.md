@@ -17,7 +17,7 @@ between the two is CSS alone.
 2. ~~Sections in a sidebar~~ — `SettingsSection`, sidebar buttons, and the chosen section's heading on the right. **Done** — `85b50a4`.
 3. ~~Reader theme section~~ — the existing controls reused inside it. **Done** — `10e1751`.
 4. ~~AI section: Gemini~~ — the key row and model picker move out of the reader popover. **Done** — `fcfe38b`.
-5. **The phone layout.** List → section → back under a width breakpoint, checked on the iOS simulator.
+5. ~~The phone layout~~ — list → section → back under a width breakpoint, plus a styling pass. **Done** — `ae4f1ab`.
 6. **Review and refactor.**
 
 **Why this order.** Each step ends with something to click:
@@ -512,6 +512,8 @@ Two review agents ran, one for reuse and simplification, one for efficiency and 
 > **Written by:** the agent, at the learner's explicit "write it" after a UI review.
 > Implementation and tests written by the agent, reviewed by hand, then cleaned with a
 > `simplify` pass.
+
+> **Status:** done — committed in `ae4f1ab` (211 tests green, 2 ignored; clippy clean; iOS simulator checks passed; desktop `dx serve` not yet checked by eye).
 
 **What it is.** Below `40rem` the settings screen is a list you tap into: the section list
 fills the screen, tapping a row pushes that section full width, and a back button returns
