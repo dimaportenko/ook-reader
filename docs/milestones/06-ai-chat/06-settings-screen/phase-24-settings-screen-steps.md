@@ -13,7 +13,7 @@ between the two is CSS alone.
 
 ## Step plan
 
-1. **The gear and the empty screen.** An icon button in `LibraryBooks`, and a full-screen `SettingsScreen` with a header and a close button.
+1. ~~The gear and the empty screen~~ — an icon button in `LibraryBooks`, and a full-screen `SettingsScreen` with a header and a close button. **Done** — `7f44663`.
 2. **Sections in a sidebar.** `SettingsSection`, sidebar buttons, and the chosen section's heading on the right.
 3. **Reader theme section.** The existing controls reused inside it.
 4. **AI section: Gemini.** The key row and model picker move out of the reader popover.
@@ -33,6 +33,8 @@ between the two is CSS alone.
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `7f44663` (207 tests green, 2 ignored; clippy clean; `dx serve` and iOS simulator checks confirmed by eye).
 
 **What it is.** A gear button sits in the library's action bar next to *Edit*. Tapping it
 covers the whole window with a *Settings* view: a header with the title and a close (✕)
