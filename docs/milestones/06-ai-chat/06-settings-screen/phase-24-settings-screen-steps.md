@@ -581,6 +581,8 @@ Not checked by eye yet: the desktop layout under `dx serve`, and the Sepia and N
 
 ### Follow-on: the contents popover
 
+> **Status:** done — committed in `346ee3d` (211 tests green, 2 ignored; clippy clean; iOS simulator check passed).
+
 At the learner's request, the table-of-contents popover picked up the same look so the
 reader's two popovers match: the theme's background and text colour, a rounded panel
 with a hairline border and shadow, rounded 44px entries, a `--tint-surface` hover and a
