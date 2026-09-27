@@ -578,3 +578,13 @@ Not checked by eye yet: the desktop layout under `dx serve`, and the Sepia and N
   width.
 - **Step 6 items already covered here:** labels for the controls, *API key* instead of
   *Gemini API key*, and the reading controls made private.
+
+### Follow-on: the contents popover
+
+At the learner's request, the table-of-contents popover picked up the same look so the
+reader's two popovers match: the theme's background and text colour, a rounded panel
+with a hairline border and shadow, rounded 44px entries, a `--tint-surface` hover and a
+`--tint-fill` highlight on the current chapter. It is a `toc.css`-only change. The
+narrow-screen sheet rule and `--toc-depth` indent are untouched, so the three `ui::toc`
+tests that read that file still pass. Checked on the iOS simulator: the sheet sits at
+x = 16, width 370; entries are 45pt tall; tapping a chapter closes it and jumps there.
