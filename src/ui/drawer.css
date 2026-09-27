@@ -20,6 +20,10 @@
     visibility 0s linear 0.2s;
 }
 
+.drawer * {
+  touch-action: pan-y;
+}
+
 .drawer[data-state="open"] {
   transform: translateX(0);
   visibility: visible;
