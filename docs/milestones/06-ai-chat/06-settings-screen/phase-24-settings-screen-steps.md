@@ -18,7 +18,7 @@ between the two is CSS alone.
 3. ~~Reader theme section~~ — the existing controls reused inside it. **Done** — `10e1751`.
 4. ~~AI section: Gemini~~ — the key row and model picker move out of the reader popover. **Done** — `fcfe38b`.
 5. ~~The phone layout~~ — list → section → back under a width breakpoint, plus a styling pass. **Done** — `ae4f1ab`.
-6. **Review and refactor.**
+6. ~~Review and refactor~~ — one `Choice` trait, popovers that style themselves, `:where(.icon-button)`. **Done** — `a6170e1`.
 
 **Why this order.** Each step ends with something to click:
 
@@ -595,6 +595,8 @@ x = 16, width 370; entries are 45pt tall; tapping a chapter closes it and jumps 
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `a6170e1` (208 tests green, 2 ignored; clippy clean; iOS simulator checks passed; desktop `dx serve` and the Night theme not yet checked by eye).
 
 **What it is.** The phase's closing pass. Behaviour stays the same. Three pieces of
 duplication that Steps 1–5 deferred get fixed at the level where they come from:

@@ -9,7 +9,7 @@ key and model list land in [Phase 23](../07-opencode/phase-23-opencode-zen.md).
 
 | # | Phase | Status |
 |---|---|---|
-| 24 | [Settings screen](phase-24-settings-screen.md) | 🚧 in progress — opened 2026-09-27, ahead of Phase 23 |
+| 24 | [Settings screen](phase-24-settings-screen.md) | ✅ done — closed 2026-09-28 (`a6170e1`, 208 tests) |
 
 **Why it comes first.** The reader's settings popover already holds eight controls. Phase 23
 would add a second key row and a list of dozens of Zen models to choose from, and that
