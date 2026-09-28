@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use std::rc::Rc;
+use std::{collections::BTreeSet, rc::Rc};
 
 use dioxus::prelude::*;
 
@@ -31,7 +31,7 @@ pub(crate) use dioxus::mobile as renderer;
 use library::Library;
 
 use crate::{
-    ai::gemini::Gemini,
+    ai::{gemini::Gemini, ChatModel, Provider},
     config::Config,
     db::Db,
     ui::{
@@ -81,6 +81,16 @@ fn App() -> Element {
             Signal::new(Some(format!("Could not load your library: {error}"))),
         ),
     });
+    let zen_ticked = use_hook(|| {
+        Signal::new(
+            db.ticked_models(Provider::OpenCodeZen)
+                .or_log("read your chosen models")
+                .unwrap_or_default()
+                .into_iter()
+                .collect::<BTreeSet<String>>(),
+        )
+    });
+    let chat_model = use_signal(|| ChatModel::gemini(settings.peek().ai_model));
     let open_book = use_signal(|| None::<OpenBook>);
     let secret_store = use_hook(secrets::open_native);
     let mut ai_provider = use_signal(|| None::<Gemini>);
@@ -97,6 +107,8 @@ fn App() -> Element {
     use_context_provider(|| settings);
     use_context_provider(|| secret_store.clone());
     use_context_provider(|| ai_provider);
+    use_context_provider(|| zen_ticked);
+    use_context_provider(|| chat_model);
 
     use_effect({
         let secret_store = secret_store.clone();

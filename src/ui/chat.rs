@@ -1,9 +1,12 @@
+use std::collections::BTreeSet;
+
 use dioxus::{core::Task, prelude::*};
 
 use crate::{
-    ai::{gemini::Gemini, ChatProvider, Role},
+    ai::{chat_models, gemini::Gemini, ChatModel, ChatProvider, Provider, Role},
     chat::{Conversation, Status},
-    ui::drawer::Drawer,
+    settings::Settings,
+    ui::{drawer::Drawer, settings::Styles as SettingsStyles},
 };
 
 #[css_module("/src/ui/chat.css")]
@@ -42,7 +45,51 @@ pub(crate) fn ChatPanel(chat: ChatHandle) -> Element {
         Drawer {
             open: chat.open,
             label: "Chat",
+            ModelPicker {}
             ChatConversation { handle: chat }
+        }
+    }
+}
+
+#[component]
+fn ModelPicker() -> Element {
+    let mut chosen = use_context::<Signal<ChatModel>>();
+    let mut settings = use_context::<Signal<Settings>>();
+    let zen_ticked = use_context::<Signal<BTreeSet<String>>>();
+    let models = chat_models(&zen_ticked.read());
+
+    rsx! {
+        select {
+            class: "{SettingsStyles::pill_button} {SettingsStyles::choice} {Styles::chat_panel__model}",
+            aria_label: "Model",
+            onpointerdown: move |e| e.stop_propagation(),
+            onchange: move |event| {
+                let Some(model) = chat_models(&zen_ticked.read())
+                    .into_iter()
+                    .find(|model| model.key() == event.value())
+                else {
+                    return;
+                };
+                if let Some(ai_model) = model.gemini_model() {
+                    settings.write().ai_model = ai_model;
+                }
+                chosen.set(model);
+            },
+            for provider in [Provider::Gemini, Provider::OpenCodeZen] {
+                if models.iter().any(|model| model.provider == provider) {
+                    optgroup {
+                        label: provider.label(),
+                        for model in models.iter().filter(|model| model.provider == provider) {
+                            option {
+                                key: "{model.key()}",
+                                value: model.key(),
+                                selected: *model == *chosen.read(),
+                                "{model.id}"
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -55,10 +102,14 @@ fn ChatConversation(handle: ChatHandle) -> Element {
         mut autosend,
     } = handle;
     let provider = use_context::<Signal<Option<Gemini>>>();
+    let chosen = use_context::<Signal<ChatModel>>();
     let mut chat = use_signal(Conversation::default);
     let mut pending_task = use_signal(|| None::<Task>);
 
     let mut submit = move || {
+        if chosen.read().provider != Provider::Gemini {
+            return;
+        }
         let Some(gemini) = provider.read().clone() else {
             return;
         };
@@ -107,7 +158,12 @@ fn ChatConversation(handle: ChatHandle) -> Element {
     let conversation = chat.read();
 
     rsx! {
-        if provider.is_none() {
+        if chosen.read().provider == Provider::OpenCodeZen {
+            p {
+                class: "{Styles::chat_panel__note}",
+                "OpenCode Zen replies aren't available yet."
+            }
+        } else if provider.is_none() {
             p {
                 class: "{Styles::chat_panel__note}",
                 "Add a Gemini key in settings to chat."

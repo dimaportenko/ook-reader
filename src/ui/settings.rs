@@ -1,4 +1,4 @@
-use std::{collections::HashSet, rc::Rc};
+use std::{collections::BTreeSet, rc::Rc};
 
 use dioxus::prelude::*;
 use dioxus_primitives::ContentAlign;
@@ -22,7 +22,7 @@ use crate::{
 };
 
 #[css_module("/src/ui/settings.css")]
-struct Styles;
+pub(crate) struct Styles;
 
 #[component]
 fn SettingRow(label: &'static str, children: Element) -> Element {
@@ -244,7 +244,7 @@ pub(crate) fn ReaderThemeControls() -> Element {
 
 #[component]
 pub(crate) fn GeminiSettings() -> Element {
-    let mut settings = use_context::<Signal<Settings>>();
+    let settings = use_context::<Signal<Settings>>();
     let mut gemini = use_context::<Signal<Option<Gemini>>>();
 
     rsx! {
@@ -257,11 +257,6 @@ pub(crate) fn GeminiSettings() -> Element {
                 on_change: move |key: Option<String>| {
                     gemini.set(key.map(|key| Gemini::new(key, settings().ai_model.api_name())));
                 },
-            }
-            ChoiceRow {
-                label: "Model",
-                selected: settings().ai_model,
-                on_pick: move |ai_model| settings.write().ai_model = ai_model,
             }
         }
     }
@@ -300,13 +295,7 @@ pub(crate) fn OpenCodeZenSettings() -> Element {
 fn ZenCatalog() -> Element {
     let db = use_context::<Rc<Db>>();
     let catalog = use_resource(opencode::models);
-    let mut ticked = use_signal(|| {
-        db.ticked_models(Provider::OpenCodeZen)
-            .or_log("read your chosen models")
-            .unwrap_or_default()
-            .into_iter()
-            .collect::<HashSet<String>>()
-    });
+    let mut ticked = use_context::<Signal<BTreeSet<String>>>();
 
     rsx! {
         match &*catalog.read() {

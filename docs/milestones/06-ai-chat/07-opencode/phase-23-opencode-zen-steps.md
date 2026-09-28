@@ -16,7 +16,9 @@ format reuses the SSE buffer; only its JSON and the `[DONE]` marker are new.
 1. ~~**The Zen block and its key.**~~ `Provider`, a second key row in Settings → AI, and key status read from the store. **Done** — `73e2447`.
 2. ~~**The Zen catalog.**~~ Fetch `/zen/v1/models`, show the ids, and parse under `#[test]`. **Done** — `e32e7bf`.
 3. ~~**Choose models for chat.**~~ Ticks on the catalog, saved in an `ai_models` table. **Done** — `3487a65`.
-4. **The model picker moves into the chat.** Gemini plus the ticked Zen models, with `ChatModel` kept out of `Settings`.
+4. **The model picker moves into the chat.** Split on 2026-09-28, since one diff was too big to review:
+   - **4a.** The drawer's picker lists Gemini plus the ticked Zen models, as `ChatModel`s held outside `Settings`.
+   - **4b.** A `chat_model` table remembers any pick, and `ai_model` leaves `Settings`.
 5. **The drawer talks to either provider.** `AnyProvider`, plus an `OpenCode` that returns a canned reply.
 6. **The `chat/completions` wire format.** Request body, chunk text and `[DONE]`, under `#[test]`.
 7. **The real Zen stream.** POST with Bearer auth, checked end to end with a real key.
@@ -379,3 +381,160 @@ Clicking the model name toggles it too, because the row is a `<label>`. Tick
 - **Skipped:** reusing `SettingRow` for the catalog rows. It takes a `&'static str`
   label and renders a `div`. A catalog row needs a runtime `String` and a `<label>`, so the
   checkbox toggles on a click on the name. Widening it touches every caller.
+
+## Step 4a — The model picker moves into the chat
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**What it is.** The chat drawer now has a model select under its header. The options are
+grouped: *Gemini* (Flash-Lite, Flash), then *OpenCode Zen* (the models ticked in Settings).
+Picking a Gemini model chats with it. Picking a Zen model replaces the conversation with
+*OpenCode Zen replies aren't available yet.* Settings → AI → Gemini loses its *Model* row,
+because the choice now lives in the drawer.
+
+**The crux.** This is the phase's crux #1 made real. The chosen model is now
+`ChatModel { provider, id: String }`: a *value* with a runtime id, not a variant of a
+closed enum. `String` isn't `Copy`, so `ChatModel` can't go into `Settings`, which is.
+Adding it would break every `settings()` read in the app. So the chosen model gets its own
+app-level `Signal<ChatModel>`, provided next to `Signal<Settings>`, not inside it.
+
+**Why split.** The whole of Step 4 also meant persisting a Zen pick and removing
+`Settings.ai_model`, which touches the migration, the settings round-trip tests and the
+`Choice` tests. 4a is the picker and the type. 4b is where the choice is stored.
+
+### Runnable check first
+
+`src/ai/mod.rs`:
+
+```rust
+#[test]
+fn the_chat_offers_every_gemini_model_then_the_ticked_zen_ones() {
+    let ticked = BTreeSet::from(["kimi-k2.6".to_owned(), "deepseek-v4-flash".to_owned()]);
+    let zen = |id: &str| ChatModel {
+        provider: Provider::OpenCodeZen,
+        id: id.to_owned(),
+    };
+
+    assert_eq!(
+        chat_models(&ticked),
+        [
+            ChatModel::gemini(AiModel::FlashLite),
+            ChatModel::gemini(AiModel::Flash),
+            zen("deepseek-v4-flash"),
+            zen("kimi-k2.6"),
+        ]
+    );
+}
+
+#[test]
+fn a_gemini_chat_model_uses_the_api_name() { /* ChatModel::gemini(Flash) == { Gemini, "gemini-3.5-flash" } */ }
+
+#[test]
+fn a_chat_model_key_names_its_provider_and_id() { /* "opencode-zen/kimi-k2.6" */ }
+
+#[test]
+fn only_a_gemini_chat_model_maps_back_to_a_gemini_setting() {
+    /* Gemini Flash → Some(AiModel::Flash); a Zen model with a Gemini-looking id → None */
+}
+```
+
+Red against `todo!()` stubs: the first three failed with `not yet implemented`. The fourth
+came from the `simplify` pass, after the code it tests. To prove it can fail, its expected
+value was inverted: red, then restored. **Eyeball under `dx serve`:**
+
+1. Open the chat. A pill-styled select shows `gemini-3.5-flash-lite` (or whatever
+   Settings held).
+2. It lists a *Gemini* group, plus an *OpenCode Zen* group only if you ticked something.
+3. Pick `gemini-3.5-flash`, relaunch, and it's still picked.
+4. Pick a Zen model and the note appears. Pick Gemini again and the compose box returns.
+5. Tick or untick a model in Settings, and the drawer's list follows without a relaunch.
+6. Settings → AI → Gemini has no *Model* row.
+
+### Minimal implementation
+
+- **`src/ai/mod.rs`** — `ChatModel { provider, id }`, `Clone` but not `Copy`.
+  `ChatModel::gemini(AiModel)` builds one from the fixed API name. `gemini_model()` maps
+  back and gives `None` for anything not served by Gemini. `key()` is
+  `"{provider-slug}/{id}"`, the `<option>` value. `chat_models(&BTreeSet<String>)` chains
+  the Gemini models onto the ticked Zen ids.
+- **`src/main.rs`** — two app-level signals in context:
+  - `zen_ticked: Signal<BTreeSet<String>>`, read from `ai_models` once at startup.
+  - `chat_model: Signal<ChatModel>`, seeded from `settings.peek().ai_model`.
+- **`src/ui/settings.rs`** — `ZenCatalog` uses the `zen_ticked` context signal instead of
+  its own. The Gemini *Model* `ChoiceRow` is gone. `Styles` becomes `pub(crate)`, so the
+  drawer can reuse `pill_button` and `choice`.
+- **`src/ui/chat.rs`** — `ModelPicker` renders the select with one `optgroup` per
+  provider that has models. `onchange` finds the model by key and, if it's a Gemini one,
+  writes it to `settings.ai_model`. Then it sets `chat_model`. `ChatConversation` shows the
+  Zen note when a Zen model is chosen, and `submit` returns early for a non-Gemini model.
+- **`src/ui/chat.css`** — `.chat_panel__model` only positions the select, under the header.
+
+### Why it works
+
+- **`ChatModel` stays out of `Settings`.** `Settings` derives `Copy`, which needs every
+  field to be `Copy`, and `String` owns a heap buffer, so it can't be. A field of type
+  `ChatModel` would force `Settings` down to `Clone`, and every `settings()` read (a copy
+  today) would turn into a clone or an error. A separate signal is also more honest:
+  settings describe how the book looks, and the chat model is what the drawer talks to.
+- **`BTreeSet`, not `HashSet`.** It's a set, so ticking is `insert`/`remove`, but it iterates
+  in sorted order, and that's the picker's order. It's also the same order as the DB's
+  `ORDER BY model_id`, so the app-level signal and the table agree without sorting.
+- **The ticks moved up to `App`.** Settings writes them and the drawer reads them, so they
+  need an owner above both. `ZenCatalog` still writes the table through `Db` and then
+  updates the shared signal. That write is what re-renders the drawer's picker.
+- **`settings.peek()` in `App`.** Reading `settings()` in `App`'s body would subscribe the
+  whole app to every font-size tap. `peek` reads without subscribing. The seed only
+  matters once.
+- **Gemini picks still persist, through `Settings.ai_model`.** The Gemini client is still
+  built from `settings().ai_model` by the effect in `App`. Writing it on a Gemini pick
+  rebuilds the client *and* remembers the pick across a relaunch, with no new storage.
+  That's the bridge 4b removes.
+- **`onchange` rebuilds the list instead of capturing it.** The closure is `move` and
+  outlives this render, and `models` is still borrowed by the `for` loops below it. Calling
+  `chat_models` again inside the handler reads the ticks as they are *at click time*.
+- **`selected: *model == *chosen.read()`** compares the values directly. `ChatModel`
+  derives `PartialEq`, so no key string gets built.
+- **Borrowing another module's CSS.** A `#[css_module]` struct injects its stylesheet the
+  first time any class name is displayed, via a `OnceLock` in the generated `Deref`. So
+  the drawer can use `SettingsStyles::pill_button` even if the settings screen was never
+  opened.
+
+### Scope note
+
+- A Zen pick is forgotten on relaunch. The app comes back on the last *Gemini* model.
+  That's 4b.
+- `Settings.ai_model` still exists, and `chat_model` mirrors it for Gemini picks: two
+  signals for one fact, bridged in `onchange`. 4b collapses them.
+- A Zen model unticked in Settings while it's chosen stays chosen, but it's missing from
+  the list, so the select shows the first option. 4b's persistence is the place to decide
+  the fallback.
+- Zen still can't answer. Step 5 adds `AnyProvider` and a canned `OpenCode` reply.
+
+### Review notes (from the `simplify` pass)
+
+- **Applied:** `gemini_model()` on `ChatModel`. The reverse mapping used to live in the
+  picker's `onchange`, as a scan that built a `ChatModel` for each `AiModel`. Now it sits
+  next to `ChatModel::gemini`, compares `api_name()` strings without allocating, and has a
+  test.
+- **Applied:** `selected` compares `ChatModel`s instead of formatting a key per option.
+- **Applied:** the picker reuses the settings pill style (`pill_button` + `choice`)
+  instead of rendering a bare native select.
+- **Skipped, for 4b:** deriving `chat_model` from `settings.ai_model` plus a "chosen Zen id",
+  to avoid the double write. 4b replaces `settings.ai_model` with a table, and then
+  `chat_model` is the only source, so a memo now would be rewritten next step.
+- **Skipped:** reusing `ChoiceRow`. It needs a `Choice` (a `Copy` enum with a fixed
+  `all()`), and it has no `optgroup`s.
+- **Skipped:** cloning `models` into `onchange` instead of calling `chat_models` again.
+  Either works. The second call reads the ticks at click time, which is the more
+  accurate choice.
+
+### Found at commit (`lbb:commit` review)
+
+- **A stale pick blocks the first option.** Untick the chosen Zen model and the select
+  shows the first option, but `chat_model` still holds the Zen one. Picking that first
+  option then fires no `onchange`, because the value didn't change, so you have to pick
+  another model first. For 4b: when the chosen model leaves the list, reset `chat_model` to
+  the first entry.
+- **The toolbar's send is dropped while a Zen model is chosen.** `submit` returns early.
+  The passage stays in the draft, hidden behind the note. Step 5 makes it moot.
