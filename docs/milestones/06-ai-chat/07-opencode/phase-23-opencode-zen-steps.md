@@ -18,7 +18,7 @@ format reuses the SSE buffer; only its JSON and the `[DONE]` marker are new.
 3. ~~**Choose models for chat.**~~ Ticks on the catalog, saved in an `ai_models` table. **Done** — `3487a65`.
 4. **The model picker moves into the chat.** Split on 2026-09-28, since one diff was too big to review:
    - ~~**4a.**~~ The drawer's picker lists Gemini plus the ticked Zen models, as `ChatModel`s held outside `Settings`. **Done** — `4661b6a`.
-   - **4b.** A `chat_model` table remembers any pick, and `ai_model` leaves `Settings`.
+   - ~~**4b.**~~ A `chat_model` table remembers any pick, and `ai_model` leaves `Settings`. **Done** — `3613315`.
 5. **The drawer talks to either provider.** `AnyProvider`, plus an `OpenCode` that returns a canned reply.
 6. **The `chat/completions` wire format.** Request body, chunk text and `[DONE]`, under `#[test]`.
 7. **The real Zen stream.** POST with Bearer auth, checked end to end with a real key.
@@ -545,6 +545,8 @@ value was inverted: red, then restored. **Eyeball under `dx serve`:**
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `3613315` (219 tests green, 3 ignored; clippy clean; Zen and Gemini picks surviving a relaunch, the fallback after unticking, and re-saving the Gemini key confirmed by eye). The legacy-column test was watched fail by inverting its expected value.
 
 **What it is.** The drawer's pick survives a relaunch, whether it's a Gemini or a Zen
 model. It lives in its own one-row `chat_model` table, and `Settings.ai_model` is gone, so
