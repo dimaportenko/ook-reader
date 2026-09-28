@@ -14,7 +14,7 @@ format reuses the SSE buffer; only its JSON and the `[DONE]` marker are new.
 ## Step plan
 
 1. ~~**The Zen block and its key.**~~ `Provider`, a second key row in Settings → AI, and key status read from the store. **Done** — `73e2447`.
-2. **The Zen catalog.** Fetch `/zen/v1/models`, show the ids, and parse under `#[test]`.
+2. ~~**The Zen catalog.**~~ Fetch `/zen/v1/models`, show the ids, and parse under `#[test]`. **Done** — `e32e7bf`.
 3. **Choose models for chat.** Ticks on the catalog, saved in an `ai_models` table.
 4. **The model picker moves into the chat.** Gemini plus the ticked Zen models, with `ChatModel` kept out of `Settings`.
 5. **The drawer talks to either provider.** `AnyProvider`, plus an `OpenCode` that returns a canned reply.
@@ -160,6 +160,8 @@ is still *Key set*. *Forget* returns it to *Not set*.
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `e32e7bf` (210 tests green, 3 ignored; the ignored network test passes against the live endpoint; clippy clean; the list confirmed by eye).
 
 **What it is.** Once a Zen key is saved, the *OpenCode Zen* block lists every model id
 Zen offers, fetched live from `GET https://opencode.ai/zen/v1/models`. It shows *Loading…*
