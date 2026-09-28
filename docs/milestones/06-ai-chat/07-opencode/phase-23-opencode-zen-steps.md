@@ -41,3 +41,115 @@ drawer:
 > it room. Two ideas from the old Step 1 survive: `Provider` as a closed enum (now Step 1),
 > and "Gemini only serves Gemini models" (now enforced by `ChatModel.provider` in Step 4).
 > Step details are written by `lbb:next` when this phase resumes.
+
+## Step 1 — The Zen block and its key
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**What it is.** Settings → AI now shows two blocks: *Gemini* (key row and model select, as
+before) and *OpenCode Zen* (key row only). Each key goes to its own keychain entry, so
+saving or forgetting one never touches the other. Nothing uses the Zen key yet.
+
+### Runnable check first
+
+`src/ai/mod.rs` — the provider names shown in the UI:
+
+```rust
+#[test]
+fn each_provider_has_a_reader_facing_label() {
+    assert_eq!(
+        [Provider::Gemini, Provider::OpenCodeZen].map(Provider::label),
+        ["Gemini", "OpenCode Zen"]
+    );
+}
+```
+
+`src/secrets/api_key.rs` — one keychain entry per provider:
+
+```rust
+#[test]
+fn saving_a_key_stores_it_trimmed_and_hands_it_back() {
+    let store = Memory::default();
+    let saved = save(&store, Provider::OpenCodeZen, "  key\n").expect("save the key");
+    assert_eq!(saved, "key");
+    assert!(is_set(&store, Provider::OpenCodeZen).expect("read the key"));
+}
+
+#[test]
+fn each_provider_keeps_its_key_in_its_own_entry() {
+    let store = Memory::default();
+    save(&store, Provider::OpenCodeZen, "zen").expect("save the Zen key");
+    assert!(!is_set(&store, Provider::Gemini).expect("read the Gemini key"));
+
+    save(&store, Provider::Gemini, "gemini").expect("save the Gemini key");
+    forget(&store, Provider::OpenCodeZen).expect("forget the Zen key");
+
+    assert!(is_set(&store, Provider::Gemini).expect("read the Gemini key"));
+    assert!(!is_set(&store, Provider::OpenCodeZen).expect("read the Zen key"));
+}
+```
+
+Red against `todo!()` stubs: 3 failed, 208 passed. **Eyeball under `dx serve`:** gear →
+*AI* shows *Gemini* then *OpenCode Zen*, with a gap between them. Save a Zen key and the
+Zen status reads *Key set* while Gemini's doesn't change. Relaunch the app and the Zen status
+is still *Key set*. *Forget* returns it to *Not set*.
+
+### Minimal implementation
+
+- **`src/ai/mod.rs`** — `enum Provider { Gemini, OpenCodeZen }`, `Copy`, with `label()`.
+- **`src/secrets/api_key.rs`** (new submodule) — the keychain names `GEMINI_API_KEY` and
+  `OPENCODE_ZEN_API_KEY` move here from `secrets/mod.rs` as private constants. A private
+  `entry(provider)` maps a provider to its name. `get`, `is_set`, `save` (trims, stores,
+  returns the stored key) and `forget` go through it.
+- **`src/secrets/mod.rs`** — declares `pub(crate) mod api_key` and loses the constant. Its
+  own tests use a neutral `"a-secret"` name, since the generic store shouldn't borrow a
+  feature's entry.
+- **`src/gemini_key/mod.rs`** — `save` and `forget` are gone, replaced by `api_key`.
+  `gemini_from` reads through `api_key::get(store, Provider::Gemini)`, and its test sets
+  the key with `api_key::save` rather than naming the entry.
+- **`src/ui/settings.rs`** — `ApiKeyControl` takes `provider`, `key_set: bool` and
+  `on_change: EventHandler<Option<String>>`. It does the storing itself and reports
+  `Some(key)` after a save and `None` after a forget. `GeminiSettings` turns that into
+  `Signal<Option<Gemini>>`. The new `OpenCodeZenSettings` keeps a local
+  `use_signal(bool)`, read once from the store when it mounts.
+- **`src/ui/settings_screen.rs`** — the *AI* arm renders both blocks.
+- **`src/ui/settings.css`** — `.settings_group + .settings_group_title` adds space above a
+  second heading.
+
+### Why it works
+
+- **The row stopped owning Gemini.** Before this step, `ApiKeyControl` read the Gemini
+  signal and built a `Gemini`. Now it only stores and reports. Each caller decides what a
+  saved key *means*: Gemini builds a client, Zen only flips a bool. That is how one
+  component serves two providers without an `if provider == Gemini` inside it.
+- **`EventHandler<Option<String>>` is a single channel for both outcomes.** `Some` means
+  saved, `None` means forgotten, so there's one prop instead of two.
+- **`Provider` is `Copy`**, so the `move` closures in `ApiKeyControl` each take their own
+  copy with no `clone()`, the same way `SettingsSection` works in the sidebar.
+- **`entry` and the names are private.** Only `secrets::api_key` knows the keychain names,
+  so nothing can read a provider's key without going through `Provider`. A third provider
+  means one constant and one match arm, and the compiler flags every `match` missing it.
+- **Why a submodule of `secrets`.** The key helpers only talk to the secret store, so they
+  sit with it. The cost is that `secrets` now depends on `ai::Provider`. Keeping that
+  dependency in `api_key.rs` leaves `secrets/mod.rs` a generic store. Milestone 5's OAuth
+  token can add a sibling submodule the same way.
+- **`use_signal(|| …)` runs its closure once, on mount.** The keychain read doesn't repeat on
+  every render.
+
+### Scope note
+
+- The Zen key has no consumer yet, so its state is local to the settings block. Step 4 or 5
+  moves it into context, when the drawer needs it.
+- No catalog, no model list, no ticks. That's Steps 2–3.
+
+### Review notes (from the `simplify` pass)
+
+- **Applied:** `gemini_from` read `GEMINI_API_KEY` directly, which put the Gemini↔entry
+  mapping in two places. It now goes through `api_key::get`.
+- **Skipped:** Gemini and Zen hold "key set" in two shapes: a `Signal<Option<Gemini>>` in
+  context, and a local bool. That's deliberate. Gemini's shape exists because the drawer
+  needs a client, and Zen has no client until Step 5.
+- **Skipped:** `format!` for the `or_log` message allocates once per click. That's
+  negligible, and a lazy `or_log_with` would mean editing `ui/mod.rs`, which is outside
+  this step.

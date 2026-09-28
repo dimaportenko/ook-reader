@@ -12,6 +12,10 @@
   opacity: 0.6;
 }
 
+.settings_group + .settings_group_title {
+  margin-top: 1.5rem;
+}
+
 .settings_group {
   padding: 0 1rem;
   border-radius: 1rem;

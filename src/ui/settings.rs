@@ -4,9 +4,8 @@ use dioxus::prelude::*;
 use dioxus_primitives::ContentAlign;
 
 use crate::{
-    ai::gemini::Gemini,
-    gemini_key,
-    secrets::SecretStore,
+    ai::{gemini::Gemini, Provider},
+    secrets::{api_key, SecretStore},
     settings::{
         choice::Choice, Settings, FONT_SIZE_MAX, FONT_SIZE_MIN, LINE_HEIGHT_MAX,
         LINE_HEIGHT_MIN, MAX_LINE_LENGTH_MAX, MAX_LINE_LENGTH_MIN, PAGE_MARGINS_MAX,
@@ -119,13 +118,15 @@ impl KeyStatus {
 }
 
 #[component]
-fn ApiKeyControl() -> Element {
+fn ApiKeyControl(
+    provider: Provider,
+    key_set: bool,
+    on_change: EventHandler<Option<String>>,
+) -> Element {
     let store = use_context::<Option<Rc<dyn SecretStore>>>();
-    let mut provider = use_context::<Signal<Option<Gemini>>>();
-    let settings = use_context::<Signal<Settings>>();
     let mut draft = use_signal(String::new);
-    let status = KeyStatus::of(store.is_some(), provider.read().is_some());
-    let key_set = status == KeyStatus::Set;
+    let status = KeyStatus::of(store.is_some(), key_set);
+    let name = provider.label();
 
     rsx! {
         SettingRow {
@@ -142,7 +143,7 @@ fn ApiKeyControl() -> Element {
                 input {
                     class: "{Styles::key_form__input}",
                     r#type: "password",
-                    aria_label: "Gemini API key",
+                    aria_label: "{name} API key",
                     placeholder: if key_set { "Replace key" } else { "Paste your key" },
                     autocomplete: "off",
                     spellcheck: "false",
@@ -155,9 +156,9 @@ fn ApiKeyControl() -> Element {
                     onclick: {
                         let store = store.clone();
                         move |_| {
-                            let saved = gemini_key::save(store.as_ref(), &draft.read(), settings().ai_model);
-                            if let Some(gemini) = saved.or_log("save the Gemini API key") {
-                                provider.set(Some(gemini));
+                            let saved = api_key::save(store.as_ref(), provider, &draft.read());
+                            if let Some(key) = saved.or_log(&format!("save the {name} API key")) {
+                                on_change.call(Some(key));
                                 draft.set(String::new());
                             }
                         }
@@ -170,11 +171,11 @@ fn ApiKeyControl() -> Element {
                         onclick: {
                             let store = store.clone();
                             move |_| {
-                                if gemini_key::forget(store.as_ref())
-                                    .or_log("forget the Gemini API key")
+                                if api_key::forget(store.as_ref(), provider)
+                                    .or_log(&format!("forget the {name} API key"))
                                     .is_some()
                                 {
-                                    provider.set(None);
+                                    on_change.call(None);
                                 }
                             }
                         },
@@ -243,16 +244,49 @@ pub(crate) fn ReaderThemeControls() -> Element {
 #[component]
 pub(crate) fn GeminiSettings() -> Element {
     let mut settings = use_context::<Signal<Settings>>();
+    let mut gemini = use_context::<Signal<Option<Gemini>>>();
 
     rsx! {
         h3 { class: "{Styles::settings_group_title}", "Gemini" }
         div {
             class: "{Styles::settings_group}",
-            ApiKeyControl {}
+            ApiKeyControl {
+                provider: Provider::Gemini,
+                key_set: gemini.read().is_some(),
+                on_change: move |key: Option<String>| {
+                    gemini.set(key.map(|key| Gemini::new(key, settings().ai_model.api_name())));
+                },
+            }
             ChoiceRow {
                 label: "Model",
                 selected: settings().ai_model,
                 on_pick: move |ai_model| settings.write().ai_model = ai_model,
+            }
+        }
+    }
+}
+
+#[component]
+pub(crate) fn OpenCodeZenSettings() -> Element {
+    let store = use_context::<Option<Rc<dyn SecretStore>>>();
+    let mut key_set = use_signal(|| {
+        store
+            .as_deref()
+            .and_then(|store| {
+                api_key::is_set(store, Provider::OpenCodeZen)
+                    .or_log("read the OpenCode Zen API key")
+            })
+            .unwrap_or(false)
+    });
+
+    rsx! {
+        h3 { class: "{Styles::settings_group_title}", "OpenCode Zen" }
+        div {
+            class: "{Styles::settings_group}",
+            ApiKeyControl {
+                provider: Provider::OpenCodeZen,
+                key_set: key_set(),
+                on_change: move |key: Option<String>| key_set.set(key.is_some()),
             }
         }
     }

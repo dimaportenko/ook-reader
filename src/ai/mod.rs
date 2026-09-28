@@ -3,6 +3,21 @@ pub(crate) mod prompt;
 mod sse;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Provider {
+    Gemini,
+    OpenCodeZen,
+}
+
+impl Provider {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Provider::Gemini => "Gemini",
+            Provider::OpenCodeZen => "OpenCode Zen",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Role {
     User,
     Assistant,
@@ -87,6 +102,14 @@ mod test {
                 text: self.reply.to_string(),
             })
         }
+    }
+
+    #[test]
+    fn each_provider_has_a_reader_facing_label() {
+        assert_eq!(
+            [Provider::Gemini, Provider::OpenCodeZen].map(Provider::label),
+            ["Gemini", "OpenCode Zen"]
+        );
     }
 
     #[test]

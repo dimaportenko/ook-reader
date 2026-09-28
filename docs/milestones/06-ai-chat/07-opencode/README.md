@@ -13,7 +13,7 @@ trait change.
 
 | # | Phase | Status |
 |---|---|---|
-| 23 | [Second provider: OpenCode Zen](phase-23-opencode-zen.md) | ⏸ paused — waiting on Phase 24 |
+| 23 | [Second provider: OpenCode Zen](phase-23-opencode-zen.md) | 🚧 in progress — resumed 2026-09-28 |
 
 ## Why Zen, not Go or a ChatGPT subscription
 

@@ -4,10 +4,9 @@ use std::{cell::RefCell, collections::HashMap};
 
 use crate::ui::OrLog;
 
+pub(crate) mod api_key;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub(crate) mod keychain;
-
-pub(crate) const GEMINI_API_KEY: &str = "gemini-api-key";
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum SecretError {
@@ -67,22 +66,22 @@ mod test {
     fn a_missing_secret_reads_as_none() {
         let store = Memory::default();
 
-        assert_eq!(store.get(GEMINI_API_KEY).expect("read"), None);
+        assert_eq!(store.get("a-secret").expect("read"), None);
     }
 
     #[test]
     fn a_secret_round_trips_and_the_latest_set_wins() {
         let store = Memory::default();
 
-        store.set(GEMINI_API_KEY, "first").expect("first set");
+        store.set("a-secret", "first").expect("first set");
         assert_eq!(
-            store.get(GEMINI_API_KEY).expect("read").as_deref(),
+            store.get("a-secret").expect("read").as_deref(),
             Some("first")
         );
 
-        store.set(GEMINI_API_KEY, "second").expect("second set");
+        store.set("a-secret", "second").expect("second set");
         assert_eq!(
-            store.get(GEMINI_API_KEY).expect("read").as_deref(),
+            store.get("a-secret").expect("read").as_deref(),
             Some("second")
         );
     }
@@ -90,20 +89,20 @@ mod test {
     #[test]
     fn forgetting_removes_the_secret_and_is_idempotent() {
         let store = Memory::default();
-        store.set(GEMINI_API_KEY, "gone soon").expect("set");
+        store.set("a-secret", "gone soon").expect("set");
 
-        store.forget(GEMINI_API_KEY).expect("first forget");
-        assert_eq!(store.get(GEMINI_API_KEY).expect("read"), None);
+        store.forget("a-secret").expect("first forget");
+        assert_eq!(store.get("a-secret").expect("read"), None);
 
         store
-            .forget(GEMINI_API_KEY)
+            .forget("a-secret")
             .expect("a second forget is a no-op");
     }
 
     #[test]
     fn secrets_are_keyed_by_name() {
         let store = Memory::default();
-        store.set(GEMINI_API_KEY, "gemini").expect("set");
+        store.set("a-secret", "gemini").expect("set");
 
         assert_eq!(store.get("something-else").expect("read"), None);
     }

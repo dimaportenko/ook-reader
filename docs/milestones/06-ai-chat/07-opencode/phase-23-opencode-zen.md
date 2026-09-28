@@ -1,7 +1,8 @@
 # Phase 23 — Second provider: OpenCode Zen
 
-[← Feature: Second provider: OpenCode Zen](README.md) · **Status:** ⏸ paused — opened 2026-09-27,
-waiting on [Phase 24 — Settings screen](../06-settings-screen/phase-24-settings-screen.md) ·
+[← Feature: Second provider: OpenCode Zen](README.md) · **Status:** 🚧 in progress — opened 2026-09-27,
+paused for [Phase 24 — Settings screen](../06-settings-screen/phase-24-settings-screen.md),
+resumed 2026-09-28 ·
 build log: [`phase-23-opencode-zen-steps.md`](phase-23-opencode-zen-steps.md)
 
 ## Goal
