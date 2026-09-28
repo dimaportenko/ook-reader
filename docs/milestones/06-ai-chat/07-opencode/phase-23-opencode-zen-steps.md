@@ -13,7 +13,7 @@ format reuses the SSE buffer; only its JSON and the `[DONE]` marker are new.
 
 ## Step plan
 
-1. **The Zen block and its key.** `Provider`, a second key row in Settings → AI, and key status read from the store.
+1. ~~**The Zen block and its key.**~~ `Provider`, a second key row in Settings → AI, and key status read from the store. **Done** — `73e2447`.
 2. **The Zen catalog.** Fetch `/zen/v1/models`, show the ids, and parse under `#[test]`.
 3. **Choose models for chat.** Ticks on the catalog, saved in an `ai_models` table.
 4. **The model picker moves into the chat.** Gemini plus the ticked Zen models, with `ChatModel` kept out of `Settings`.
@@ -46,6 +46,8 @@ drawer:
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `73e2447` (209 tests green, 2 ignored; clippy clean; save, relaunch and forget confirmed by hand on a real iPhone). The iOS simulator build from `just install-ios` couldn't reach the keychain (`A required entitlement is not present`, Gemini included), so the check moved to the device.
 
 **What it is.** Settings → AI now shows two blocks: *Gemini* (key row and model select, as
 before) and *OpenCode Zen* (key row only). Each key goes to its own keychain entry, so

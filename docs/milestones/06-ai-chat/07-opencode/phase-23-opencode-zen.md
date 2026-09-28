@@ -60,7 +60,7 @@ Three consequences follow, and each is a lesson:
 
 ## Planned steps
 
-- [ ] 1. The Zen block and its key — `Provider`, a second key row in Settings → AI, key status read from the store
+- [x] 1. The Zen block and its key — `Provider`, a second key row in Settings → AI, key status read from the store
 - [ ] 2. The Zen catalog — fetch `/zen/v1/models`, show the ids, parse under `#[test]`
 - [ ] 3. Choose models for chat — ticks on the catalog, saved in an `ai_models` table
 - [ ] 4. The model picker moves into the chat — Gemini + ticked Zen models, `ChatModel` kept out of `Settings`
