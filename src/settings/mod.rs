@@ -3,7 +3,7 @@ pub mod choice;
 pub mod font;
 pub mod theme;
 
-use crate::settings::{ai_model::AiModel, font::FontFamily, theme::Theme};
+use crate::settings::{font::FontFamily, theme::Theme};
 
 use crate::web::assets::USER_LAYER_RULES;
 
@@ -38,7 +38,6 @@ pub(crate) struct Settings {
     pub(crate) line_height: u16,
     pub(crate) page_margins: u16,
     pub(crate) max_line_length: u16,
-    pub(crate) ai_model: AiModel,
 }
 
 impl Default for Settings {
@@ -50,7 +49,6 @@ impl Default for Settings {
             line_height: 140,
             page_margins: 100,
             max_line_length: 70,
-            ai_model: AiModel::default(),
         }
     }
 }

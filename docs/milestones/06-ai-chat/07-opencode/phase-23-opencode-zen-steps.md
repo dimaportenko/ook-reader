@@ -540,3 +540,141 @@ value was inverted: red, then restored. **Eyeball under `dx serve`:**
   the first entry.
 - **The toolbar's send is dropped while a Zen model is chosen.** `submit` returns early.
   The passage stays in the draft, hidden behind the note. Step 5 makes it moot.
+
+## Step 4b — The chosen model persists
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**What it is.** The drawer's pick survives a relaunch, whether it's a Gemini or a Zen
+model. It lives in its own one-row `chat_model` table, and `Settings.ai_model` is gone, so
+`Signal<ChatModel>` is the only place the choice is held. Untick the chosen Zen model in
+Settings and the pick falls back to the first model on offer.
+
+**The crux.** 4a left two signals for one fact: `settings.ai_model` for Gemini picks and
+`chat_model` for everything, bridged by a write in `onchange`. The fix isn't a better
+bridge. It's deleting one side. Once the pick is stored as `(provider, model_id)` strings,
+`ChatModel` round-trips on its own, and `AiModel` only matters at the edge where a Gemini
+client needs an API name.
+
+### Runnable check first
+
+`src/db/chat_model.rs`:
+
+```rust
+#[test]
+fn the_chosen_chat_model_round_trips_and_the_latest_pick_wins() {
+    /* None at first; save a Zen kimi-k2.6 → reads back; save Gemini Flash → reads back */
+}
+
+#[test]
+fn a_pick_from_an_unknown_provider_reads_as_no_pick() {
+    /* corrupt provider to 'openai' → chat_model() is None, so the app seeds the default */
+}
+```
+
+`src/ai/mod.rs`:
+
+```rust
+#[test]
+fn a_provider_slug_reads_back_and_an_unknown_one_does_not() {
+    /* every Provider::ALL slug parses back; "openai" → None */
+}
+```
+
+`src/db/mod.rs` swaps the old "add the `ai_model` column" migration test for
+`a_settings_table_that_still_has_the_ai_model_column_keeps_saving`: an existing database
+keeps its `ai_model NOT NULL DEFAULT` column, and `save_settings` must still work without
+naming it.
+
+Red against `todo!()` stubs: the three new tests failed with `not yet implemented`. The
+legacy-column test passes before and after. It's a regression guard for the column this
+step stops writing, so it was never watched fail. **Eyeball under `dx serve`:**
+
+1. Pick a Zen model in the drawer, relaunch, and it's still picked, with the Zen note.
+2. Pick `gemini-3.5-flash`, relaunch, and it's still picked. Chat answers with it.
+3. With a Zen model picked, untick it in Settings. The drawer switches to
+   `gemini-3.5-flash-lite` and the compose box returns. Picking Flash-Lite is no longer
+   needed to escape the stale pick.
+4. Settings → AI → Gemini: forget and re-save the key while Flash is picked. Chat still
+   uses Flash.
+
+### Minimal implementation
+
+- **`src/db/chat_model.rs`** (new) — `save_chat_model` upserts row `id = 1`, the same
+  `ON CONFLICT(id) DO UPDATE` shape as `save_settings`. `chat_model()` reads the two
+  strings and returns `None` when the provider slug is unknown.
+- **`src/db/mod.rs`** — `CREATE TABLE IF NOT EXISTS chat_model`. The `ai_model` column
+  leaves the `settings` `CREATE`, and the `ALTER TABLE … ADD COLUMN ai_model` migration is
+  deleted.
+- **`src/db/settings.rs`, `src/settings/mod.rs`** — `ai_model` leaves `Settings`, its
+  `Default`, the upsert, the select and the round-trip tests.
+- **`src/ai/mod.rs`** — `Provider::ALL` and `Provider::from_slug`. `impl Default for
+  ChatModel` is Gemini Flash-Lite.
+- **`src/main.rs`** — `chat_model` is seeded from `db.chat_model()`, falling back to
+  `ChatModel::default()`. A save effect writes it back. A fallback effect resets it to the
+  first offered model when the ticks no longer include it. The Gemini client's model memo
+  reads `chat_model` instead of `settings`.
+- **`src/ui/chat.rs`** — `onchange` only sets `chat_model`. The picker loops over
+  `Provider::ALL`.
+- **`src/ui/settings.rs`** — saving a Gemini key builds the client from the chosen model.
+- **`src/settings/ai_model.rs`, `src/settings/choice.rs`** — the `Choice` impl on
+  `AiModel` is deleted, with its label test and slug round-trip line. Nothing reads its
+  slug or label once it's out of `Settings`.
+
+### Why it works
+
+- **Strings in, strings out.** `ChatModel` is `{ provider, id: String }`, so the table is
+  two `TEXT` columns and the read is `(String, String) → ChatModel`. Only the provider
+  needs parsing. Returning `Option<Provider>` from `from_slug`, not a default, lets
+  `chat_model()` say "no usable pick" and leave the choice of default to `App`.
+- **The old column stays in old databases.** It's `NOT NULL DEFAULT 'flash-lite'`, so an
+  `INSERT` that doesn't name it still succeeds. Dropping it would need `ALTER TABLE … DROP
+  COLUMN` for no user-visible gain, so the regression test pins the cheaper choice.
+- **`peek` in the fallback effect.** The effect reads `zen_ticked` (subscribing) and
+  `chat_model.peek()` (not subscribing). It re-runs when the ticks change, not when you
+  pick, so a pick can't loop into a reset. On first run it also repairs a stale pick
+  loaded from the table.
+- **The fallback lives in `App`, not the picker.** The picker is only mounted while the
+  drawer exists. Ticks change on the settings screen, so the invariant "the chosen model
+  is on offer" has to be kept where both signals are owned.
+- **The save effect subscribes by `read()`.** Every `set` on `chat_model`, from a pick or
+  a fallback, writes the row. It also writes once at startup, the same trade the settings
+  save makes.
+- **`ai_model` is still a memo.** Switching between two Zen models maps to the same
+  `AiModel::default()`, so the memo's value doesn't change and the Gemini client isn't
+  rebuilt.
+
+### Scope note
+
+- A Gemini pick saved before this step isn't carried over. The first launch comes back on
+  Flash-Lite, once. Seeding `chat_model` from the old column is a few lines, but it adds a
+  migration branch for one pick on one machine.
+- `chat_model.read().gemini_model().unwrap_or_default()` appears twice: the memo in `App`
+  and the key handler in `GeminiSettings`. Step 5's `AnyProvider` gives the client one
+  owner and removes both.
+- With a Zen model chosen, the Gemini client quietly holds Flash-Lite. It's never used for
+  chat then, and Step 5 routes by provider.
+- `AiModel` still lives under `settings/` though it's no longer a setting. Moving it to
+  `ai/` is a Step 8 candidate.
+
+### Review notes (from the `simplify` pass)
+
+- **Applied:** `Provider::ALL`, matching `AiModel::ALL` and `Theme::ALL`. `from_slug`, the
+  picker and the new test read it, so a third provider is one edit.
+- **Applied:** `impl Default for ChatModel`, so `App` seeds with `unwrap_or_default()` and
+  doesn't import `AiModel`.
+- **Applied:** the fallback effect uses `let Some(first) = offered.first() else { return }`
+  instead of a nested `if let`.
+- **Applied:** the dead `Choice` impl on `AiModel` is deleted.
+- **Applied:** the key handler binds `model` before building the client, instead of one
+  long nested line.
+- **Skipped:** a `ChatModel::gemini_or_default()` helper for the duplicated expression.
+  Step 5 deletes both call sites.
+- **Skipped:** leaving the key handler to only save, and letting `App`'s effect rebuild
+  the client. That effect doesn't watch the keychain, so a newly saved key wouldn't show
+  up until the next pick.
+- **Skipped:** `use_signal` instead of `use_hook(|| Signal::new(…))` for the seed. The
+  latter is how `settings` and `zen_ticked` are seeded two lines above.
+- **Skipped:** dropping the legacy-column test as too much setup. It's the only thing
+  guarding saves on an existing database.

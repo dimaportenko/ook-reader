@@ -5,7 +5,6 @@ use dioxus::{core::Task, prelude::*};
 use crate::{
     ai::{chat_models, gemini::Gemini, ChatModel, ChatProvider, Provider, Role},
     chat::{Conversation, Status},
-    settings::Settings,
     ui::{drawer::Drawer, settings::Styles as SettingsStyles},
 };
 
@@ -54,7 +53,6 @@ pub(crate) fn ChatPanel(chat: ChatHandle) -> Element {
 #[component]
 fn ModelPicker() -> Element {
     let mut chosen = use_context::<Signal<ChatModel>>();
-    let mut settings = use_context::<Signal<Settings>>();
     let zen_ticked = use_context::<Signal<BTreeSet<String>>>();
     let models = chat_models(&zen_ticked.read());
 
@@ -70,12 +68,9 @@ fn ModelPicker() -> Element {
                 else {
                     return;
                 };
-                if let Some(ai_model) = model.gemini_model() {
-                    settings.write().ai_model = ai_model;
-                }
                 chosen.set(model);
             },
-            for provider in [Provider::Gemini, Provider::OpenCodeZen] {
+            for provider in Provider::ALL {
                 if models.iter().any(|model| model.provider == provider) {
                     optgroup {
                         label: provider.label(),

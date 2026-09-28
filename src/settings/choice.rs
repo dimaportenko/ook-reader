@@ -18,7 +18,7 @@ mod test {
     use std::fmt::Debug;
 
     use super::*;
-    use crate::settings::{ai_model::AiModel, font::FontFamily, theme::Theme};
+    use crate::settings::{font::FontFamily, theme::Theme};
 
     fn assert_slugs_round_trip<T: Choice + Debug>() {
         for &choice in T::all() {
@@ -39,6 +39,5 @@ mod test {
     fn every_choice_survives_a_slug_round_trip_and_the_slugs_are_distinct() {
         assert_slugs_round_trip::<Theme>();
         assert_slugs_round_trip::<FontFamily>();
-        assert_slugs_round_trip::<AiModel>();
     }
 }

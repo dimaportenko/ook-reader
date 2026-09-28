@@ -14,6 +14,8 @@ pub(crate) enum Provider {
 }
 
 impl Provider {
+    pub(crate) const ALL: [Provider; 2] = [Provider::Gemini, Provider::OpenCodeZen];
+
     pub(crate) fn label(self) -> &'static str {
         match self {
             Provider::Gemini => "Gemini",
@@ -27,12 +29,24 @@ impl Provider {
             Provider::OpenCodeZen => "opencode-zen",
         }
     }
+
+    pub(crate) fn from_slug(slug: &str) -> Option<Provider> {
+        Provider::ALL
+            .into_iter()
+            .find(|provider| provider.slug() == slug)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ChatModel {
     pub(crate) provider: Provider,
     pub(crate) id: String,
+}
+
+impl Default for ChatModel {
+    fn default() -> Self {
+        ChatModel::gemini(AiModel::default())
+    }
 }
 
 impl ChatModel {
@@ -222,6 +236,14 @@ mod test {
             [Provider::Gemini, Provider::OpenCodeZen].map(Provider::slug),
             ["gemini", "opencode-zen"]
         );
+    }
+
+    #[test]
+    fn a_provider_slug_reads_back_and_an_unknown_one_does_not() {
+        for provider in Provider::ALL {
+            assert_eq!(Provider::from_slug(provider.slug()), Some(provider));
+        }
+        assert_eq!(Provider::from_slug("openai"), None);
     }
 
     #[test]

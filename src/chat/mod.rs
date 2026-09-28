@@ -207,7 +207,10 @@ mod test {
             &[Message::user("Which city?"), Message::assistant("Ankh-")]
         );
         assert_eq!(chat.status(), &Status::Idle);
-        assert!(chat.ask("And the river?"), "a stopped chat accepts a new turn");
+        assert!(
+            chat.ask("And the river?"),
+            "a stopped chat accepts a new turn"
+        );
     }
 
     #[test]

@@ -31,7 +31,7 @@ pub(crate) use dioxus::mobile as renderer;
 use library::Library;
 
 use crate::{
-    ai::{gemini::Gemini, ChatModel, Provider},
+    ai::{chat_models, gemini::Gemini, Provider},
     config::Config,
     db::Db,
     ui::{
@@ -90,11 +90,18 @@ fn App() -> Element {
                 .collect::<BTreeSet<String>>(),
         )
     });
-    let chat_model = use_signal(|| ChatModel::gemini(settings.peek().ai_model));
+    let mut chat_model = use_hook(|| {
+        Signal::new(
+            db.chat_model()
+                .or_log("read your chat model")
+                .flatten()
+                .unwrap_or_default(),
+        )
+    });
     let open_book = use_signal(|| None::<OpenBook>);
     let secret_store = use_hook(secrets::open_native);
     let mut ai_provider = use_signal(|| None::<Gemini>);
-    let ai_model = use_memo(move || settings().ai_model);
+    let ai_model = use_memo(move || chat_model.read().gemini_model().unwrap_or_default());
 
     let desktop = crate::renderer::use_window();
     use_hook(move || window::remember_frame(&desktop.window));
@@ -125,6 +132,25 @@ fn App() -> Element {
         let db = db.clone();
         move || {
             _ = db.save_settings(&settings()).or_log("save your settings");
+        }
+    });
+
+    use_effect({
+        let db = db.clone();
+        move || {
+            _ = db
+                .save_chat_model(&chat_model.read())
+                .or_log("save your chat model");
+        }
+    });
+
+    use_effect(move || {
+        let offered = chat_models(&zen_ticked.read());
+        let Some(first) = offered.first() else {
+            return;
+        };
+        if !offered.contains(&chat_model.peek()) {
+            chat_model.set(first.clone());
         }
     });
 

@@ -4,6 +4,7 @@ use rusqlite::Connection;
 
 mod ai_models;
 mod books;
+mod chat_model;
 mod positions;
 mod settings;
 
@@ -58,8 +59,7 @@ impl Db {
                 font_size INTEGER NOT NULL,
                 line_height INTEGER NOT NULL,
                 page_margins INTEGER NOT NULL,
-                max_line_length INTEGER NOT NULL,
-                ai_model TEXT NOT NULL DEFAULT 'flash-lite'
+                max_line_length INTEGER NOT NULL
             )",
             [],
         )?;
@@ -73,23 +73,14 @@ impl Db {
             [],
         )?;
 
-        let ai_model_exists: bool = self.conn.query_row(
-            "SELECT EXISTS (
-                SELECT 1
-                FROM pragma_table_info('settings')
-                WHERE name = 'ai_model'
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS chat_model (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                provider TEXT NOT NULL,
+                model_id TEXT NOT NULL
             )",
             [],
-            |row| row.get::<_, bool>(0),
         )?;
-
-        if !ai_model_exists {
-            self.conn.execute(
-                "ALTER TABLE settings
-                ADD COLUMN ai_model TEXT NOT NULL DEFAULT 'flash-lite'",
-                [],
-            )?;
-        }
 
         Ok(())
     }
@@ -99,10 +90,10 @@ impl Db {
 mod test {
     use super::*;
 
-    use crate::settings::{ai_model::AiModel, choice::Choice};
+    use crate::settings::{theme::Theme, Settings};
 
     #[test]
-    fn a_pre_model_settings_row_is_upgraded_once_with_the_default_slug() {
+    fn a_settings_table_that_still_has_the_ai_model_column_keeps_saving() {
         let dir = tempfile::tempdir().expect("temp dir");
         let path = dir.path().join(DB_FILENAME);
         let legacy = Connection::open(&path).expect("open legacy database");
@@ -115,25 +106,23 @@ mod test {
                     font_size INTEGER NOT NULL,
                     line_height INTEGER NOT NULL,
                     page_margins INTEGER NOT NULL,
-                    max_line_length INTEGER NOT NULL
+                    max_line_length INTEGER NOT NULL,
+                    ai_model TEXT NOT NULL DEFAULT 'flash-lite'
                 );
                 INSERT INTO settings
-                    (id, theme, font_family, font_size, line_height, page_margins, max_line_length)
-                VALUES (1, 'night', 'humanist', 125, 170, 150, 55);",
+                    (id, theme, font_family, font_size, line_height, page_margins, max_line_length, ai_model)
+                VALUES (1, 'night', 'humanist', 125, 170, 150, 55, 'flash');",
             )
             .expect("seed legacy settings");
         drop(legacy);
 
-        let db = Db::open(dir.path()).expect("migrate");
-        drop(db);
-        let db = Db::open(dir.path()).expect("reopen migrated database");
-        let slug: String = db
-            .conn
-            .query_row("SELECT ai_model FROM settings WHERE id = 1", [], |row| {
-                row.get(0)
-            })
-            .expect("read migrated model");
+        let db = Db::open(dir.path()).expect("open the legacy database");
+        let saved = Settings {
+            theme: Theme::Sepia,
+            ..Settings::default()
+        };
+        db.save_settings(&saved).expect("save over the legacy row");
 
-        assert_eq!(slug, AiModel::default().slug());
+        assert_eq!(db.settings().expect("read"), Some(saved));
     }
 }

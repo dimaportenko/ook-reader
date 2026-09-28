@@ -4,13 +4,12 @@ use dioxus::prelude::*;
 use dioxus_primitives::ContentAlign;
 
 use crate::{
-    ai::{gemini::Gemini, opencode, Provider},
+    ai::{gemini::Gemini, opencode, ChatModel, Provider},
     db::Db,
     secrets::{api_key, SecretStore},
     settings::{
-        choice::Choice, Settings, FONT_SIZE_MAX, FONT_SIZE_MIN, LINE_HEIGHT_MAX,
-        LINE_HEIGHT_MIN, MAX_LINE_LENGTH_MAX, MAX_LINE_LENGTH_MIN, PAGE_MARGINS_MAX,
-        PAGE_MARGINS_MIN,
+        choice::Choice, Settings, FONT_SIZE_MAX, FONT_SIZE_MIN, LINE_HEIGHT_MAX, LINE_HEIGHT_MIN,
+        MAX_LINE_LENGTH_MAX, MAX_LINE_LENGTH_MIN, PAGE_MARGINS_MAX, PAGE_MARGINS_MIN,
     },
     ui::{
         components::{
@@ -244,7 +243,7 @@ pub(crate) fn ReaderThemeControls() -> Element {
 
 #[component]
 pub(crate) fn GeminiSettings() -> Element {
-    let settings = use_context::<Signal<Settings>>();
+    let chat_model = use_context::<Signal<ChatModel>>();
     let mut gemini = use_context::<Signal<Option<Gemini>>>();
 
     rsx! {
@@ -255,7 +254,8 @@ pub(crate) fn GeminiSettings() -> Element {
                 provider: Provider::Gemini,
                 key_set: gemini.read().is_some(),
                 on_change: move |key: Option<String>| {
-                    gemini.set(key.map(|key| Gemini::new(key, settings().ai_model.api_name())));
+                    let model = chat_model.read().gemini_model().unwrap_or_default();
+                    gemini.set(key.map(|key| Gemini::new(key, model.api_name())));
                 },
             }
         }
