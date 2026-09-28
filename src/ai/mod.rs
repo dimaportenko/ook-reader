@@ -5,6 +5,8 @@ mod sse;
 
 use std::collections::BTreeSet;
 
+use reqwest::StatusCode;
+
 use crate::settings::ai_model::AiModel;
 
 use gemini::Gemini;
@@ -128,6 +130,21 @@ pub(crate) enum ChatError {
     Json(#[from] serde_json::Error),
 }
 
+fn api_error(status: StatusCode, body: String) -> ChatError {
+    ChatError::Api {
+        status: status.as_u16(),
+        body,
+    }
+}
+
+fn non_empty_reply(text: String) -> Result<Reply, ChatError> {
+    if text.is_empty() {
+        Err(ChatError::Empty)
+    } else {
+        Ok(Reply { text })
+    }
+}
+
 pub(crate) trait ChatProvider {
     async fn stream(
         &self,
@@ -246,18 +263,20 @@ mod test {
     }
 
     #[test]
-    fn any_provider_streams_through_the_client_it_holds() {
-        let zen = AnyProvider::OpenCode(OpenCode::new("kimi-k2.6"));
-        let mut pieces = Vec::new();
+    fn a_stream_with_no_text_is_an_empty_reply() {
+        let result = non_empty_reply(String::new());
 
-        let reply = pollster::block_on(zen.stream(&[Message::user("Which city?")], |delta| {
-            pieces.push(delta.to_owned())
-        }))
-        .unwrap();
+        assert!(matches!(result, Err(ChatError::Empty)), "{result:?}");
+    }
 
-        assert!(pieces.len() > 1, "{pieces:?}");
-        assert_eq!(pieces.concat(), reply.text);
-        assert!(reply.text.contains("kimi-k2.6"), "{}", reply.text);
+    #[test]
+    fn a_non_success_status_becomes_an_api_error() {
+        let error = api_error(StatusCode::BAD_REQUEST, r#"{"error":{"code":400}}"#.into());
+
+        assert!(
+            matches!(&error, ChatError::Api { status: 400, body } if body.contains("400")),
+            "{error:?}"
+        );
     }
 
     #[test]

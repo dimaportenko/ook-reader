@@ -10,7 +10,7 @@ pub(crate) fn provider_for(
     Ok(
         api_key::get(store, model.provider)?.map(|key| match model.provider {
             Provider::Gemini => AnyProvider::Gemini(Gemini::new(key, &model.id)),
-            Provider::OpenCodeZen => AnyProvider::OpenCode(OpenCode::new(&model.id)),
+            Provider::OpenCodeZen => AnyProvider::OpenCode(OpenCode::new(key, &model.id)),
         }),
     )
 }

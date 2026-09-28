@@ -883,3 +883,109 @@ All four angles came back clean, so nothing was changed.
   matches `gemini.rs` and names each case.
 - **Noted for Step 7:** reuse `non_empty_reply` and `api_error` from `gemini.rs`. Lift them
   into `ai/mod.rs` rather than copying them.
+
+## Step 7 — The real Zen stream
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**What it is.** Pick a Zen model in the drawer, send, and a real reply from Zen streams in.
+`OpenCode` now holds the key and a `reqwest::Client`. It POSTs to
+`https://opencode.ai/zen/v1/chat/completions` with `Authorization: Bearer <key>` and feeds
+the response through the same `SseBuffer` Gemini uses. It stops on `[DONE]`. The canned
+reply is gone.
+
+**The crux.** Almost nothing is new. Step 6 did the parsing and Phase 22 did the buffering,
+so this step is the loop that joins them, plus one control-flow detail. `[DONE]` shows up
+*inside* the `for payload in sse.push(..)` loop, and the loop that has to stop is the *outer*
+`while let Some(chunk)`. A labelled `break 'stream` leaves both at once. A plain `break`
+would only leave the `for`, and the code would go back to waiting for chunks the server has
+already stopped sending.
+
+### Runnable check first
+
+`src/ai/opencode.rs`. This test runs offline, because it builds the request without sending
+it:
+
+```rust
+#[test]
+fn a_request_posts_the_conversation_to_zen_with_a_bearer_key() {
+    /* OpenCode::new("zen-key", "kimi-k2.6").request(&[user]).build():
+       POST, url == COMPLETIONS_URL, authorization == "Bearer zen-key",
+       body.model == "kimi-k2.6", body.stream == true, messages[0].content */
+}
+
+#[tokio::test]
+#[ignore = "needs OPENCODE_API_KEY and the network"]
+async fn a_real_zen_streams_through_the_trait() {
+    /* deepseek-v4-flash, "Count from one to twenty in words": >1 piece, pieces concat to reply */
+}
+```
+
+Red against a `todo!()` `request`: `not yet implemented` (0 passed, 1 failed). Signature
+changes are also a compile-time red: `OpenCode::new` now takes the key, and
+`ai_client::provider_for` passes it along.
+
+**The real check is the learner's.** The agent has no Zen key, so neither of the following
+was run while writing:
+
+1. `OPENCODE_API_KEY=… cargo test a_real_zen -- --ignored`
+2. `dx serve`: with a Zen key saved, tick `deepseek-v4-flash` (or `glm-5.3-flash`,
+   `kimi-k2.6`), pick it in the drawer and send. A real answer streams in. *Stop* midway
+   keeps what arrived.
+3. Pick a ticked Claude or GPT Zen model and send. The drawer shows an API error, as the
+   phase's design decisions predicted.
+
+### Minimal implementation
+
+- **`src/ai/mod.rs`:** `api_error` and `non_empty_reply` (and their tests) move here from
+  `gemini.rs`. They stay private, because child modules can see their parent's private items.
+  The canned-reply test `any_provider_streams_through_the_client_it_holds` is deleted,
+  because `OpenCode` can no longer answer offline.
+- **`src/ai/opencode.rs`:** `OpenCode { key, model, client }`, with `new(key, model)`.
+  `request()` builds the POST: `.bearer_auth(&self.key).json(&request_body(..))`. `stream`
+  sends it, turns a non-2xx status into `api_error`, then runs the `SseBuffer` → `event` loop
+  with `break 'stream` on `Done`, and ends in `non_empty_reply`. `models()` uses `api_error`
+  instead of building `ChatError::Api` inline (the item Step 2 left for this step).
+- **`src/ai/gemini.rs`:** imports the two helpers from `super`.
+- **`src/ai_client/mod.rs`:** `OpenCode::new(key, &model.id)`. The key that Step 5 read and
+  dropped is now used.
+
+### Why it works
+
+- **`request()` returns an unsent `RequestBuilder`.** `stream` calls `.send()` on it, and the
+  test calls `.build()` and inspects the result. That split is what lets the URL, the auth
+  header and the body be checked without the network.
+- **`bearer_auth`** writes `Authorization: Bearer <key>`, which is what Zen's
+  OpenAI-compatible endpoint expects. Gemini's `x-goog-api-key` header is its own scheme.
+- **`'stream:` labels the `while`.** `break 'stream` jumps past both loops to
+  `non_empty_reply(text)`. When `response` is dropped, the connection is closed without
+  reading anything after `[DONE]`.
+- **`OpenCode` no longer derives `Debug`.** It holds the key now, and `Gemini` doesn't derive
+  it either, so the key can't end up in a `{:?}` log line.
+
+### Scope note
+
+- There is no per-model format table. A Claude or GPT id ticked in the catalog gets an API
+  error from `chat/completions`. The phase accepts this, and it is a later refinement if it
+  bites.
+- `AnyProvider`'s delegation no longer has an offline test. Its two arms each bind a
+  different concrete type, so swapping them wouldn't compile. A `#[cfg(test)]` fake variant
+  would put test scaffolding into the production enum.
+- `reasoning_content`, and error events inside the stream, still yield `""`. If the real
+  check shows either one, it becomes an `Event` variant.
+- Each pick still builds a fresh `reqwest::Client`. That is a Step 8 candidate, now for both
+  providers.
+
+### Review notes (from the `simplify` pass)
+
+All four angles came back clean, so nothing was changed.
+
+- **Skipped:** a shared stream loop for Gemini and Zen. It would need a per-provider decode
+  closure that returns `Text`/`Done`, and that would hide the loop behind indirection to save
+  about ten lines.
+- **Skipped:** a `#[cfg(test)]` `AnyProvider::Fake` to test delegation offline (see scope
+  note).
+- **Kept:** `cargo fmt` rewrapped two Step 6 test payloads that had been committed over the
+  line width.
+- **Agreed, deferred:** one shared `reqwest::Client` instead of one per pick (Step 8).

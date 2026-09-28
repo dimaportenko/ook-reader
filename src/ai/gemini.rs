@@ -1,7 +1,8 @@
-use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 
-use super::{sse::SseBuffer, ChatError, ChatProvider, Message, Reply, Role};
+use super::{
+    api_error, non_empty_reply, sse::SseBuffer, ChatError, ChatProvider, Message, Reply, Role,
+};
 
 #[derive(Debug, Serialize)]
 struct GenerateRequest<'a> {
@@ -78,14 +79,6 @@ fn text_of(response: GenerateResponse) -> String {
         .unwrap_or_default()
 }
 
-fn non_empty_reply(text: String) -> Result<Reply, ChatError> {
-    if text.is_empty() {
-        Err(ChatError::Empty)
-    } else {
-        Ok(Reply { text })
-    }
-}
-
 #[derive(Clone)]
 pub(crate) struct Gemini {
     key: String,
@@ -105,13 +98,6 @@ impl Gemini {
 
 fn endpoint(model: &str) -> String {
     format!("https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse")
-}
-
-fn api_error(status: StatusCode, body: String) -> ChatError {
-    ChatError::Api {
-        status: status.as_u16(),
-        body,
-    }
 }
 
 impl ChatProvider for Gemini {
@@ -241,13 +227,6 @@ mod test {
     }
 
     #[test]
-    fn a_stream_with_no_text_is_an_empty_reply() {
-        let result = non_empty_reply(String::new());
-
-        assert!(matches!(result, Err(ChatError::Empty)), "{result:?}");
-    }
-
-    #[test]
     fn the_endpoint_asks_for_server_sent_events() {
         assert_eq!(
             endpoint("gemini-3.5-flash-lite"),
@@ -262,16 +241,6 @@ mod test {
         assert_eq!(
             endpoint(&gemini.model),
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:streamGenerateContent?alt=sse"
-        );
-    }
-
-    #[test]
-    fn a_non_success_status_becomes_an_api_error() {
-        let error = api_error(StatusCode::BAD_REQUEST, r#"{"error":{"code":400}}"#.into());
-
-        assert!(
-            matches!(&error, ChatError::Api { status: 400, body } if body.contains("400")),
-            "{error:?}"
         );
     }
 
