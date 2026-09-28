@@ -1,4 +1,5 @@
 pub(crate) mod gemini;
+pub(crate) mod opencode;
 pub(crate) mod prompt;
 mod sse;
 

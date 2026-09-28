@@ -155,3 +155,98 @@ is still *Key set*. *Forget* returns it to *Not set*.
 - **Skipped:** `format!` for the `or_log` message allocates once per click. That's
   negligible, and a lazy `or_log_with` would mean editing `ui/mod.rs`, which is outside
   this step.
+
+## Step 2 — The Zen catalog
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**What it is.** Once a Zen key is saved, the *OpenCode Zen* block lists every model id
+Zen offers, fetched live from `GET https://opencode.ai/zen/v1/models`. It shows *Loading…*
+while the request is in flight and a red message if it fails. There are no ticks yet.
+
+**The crux.** Until now, every network call went through a `spawn` started by a click in
+the drawer. This is the first request whose job is to fill a view. `use_resource` owns that
+job: it starts the future when the component mounts, gives you `Option<T>` (`None` while
+loading), and re-renders the component when the value lands. Because the resource lives in
+the component, mounting it is what fetches. So the list sits behind `if key_set()`, and
+nothing hits the network until a key exists.
+
+### Runnable check first
+
+`src/ai/opencode.rs` — the parser, against a trimmed copy of a real response:
+
+```rust
+#[test]
+fn a_captured_model_list_yields_its_ids_in_order() {
+    let payload = r#"{
+        "object": "list",
+        "data": [
+            { "id": "deepseek-v4-flash", "object": "model", "created": 1790582083, "owned_by": "opencode" },
+            { "id": "glm-5.3-flash", "object": "model", "created": 1790582083, "owned_by": "opencode" },
+            { "id": "kimi-k2.6", "object": "model", "created": 1790582083, "owned_by": "opencode" }
+        ]
+    }"#;
+
+    assert_eq!(
+        model_ids(serde_json::from_str(payload).unwrap()),
+        ["deepseek-v4-flash", "glm-5.3-flash", "kimi-k2.6"]
+    );
+}
+```
+
+Also a `#[tokio::test] #[ignore = "needs the network"]` test that fetches the real list and
+expects `deepseek-v4-flash` in it. Run it with `cargo test opencode -- --ignored`.
+
+Red against a `todo!()` stub: the test panicked at `model_ids`. **Eyeball under `dx serve`:**
+with a Zen key saved, Settings → AI shows *Models: Loading…* for a moment, then one row per
+id under the key row. Forget the key and the list goes away.
+
+### Minimal implementation
+
+- **`src/ai/opencode.rs`** (new) — `ModelList { data: Vec<ModelEntry> }` and
+  `ModelEntry { id }` deserialize only the fields we read, since serde ignores unknown
+  keys. `model_ids` maps entries to ids. `models()` is `reqwest::get(MODELS_URL)`. A
+  non-2xx status becomes `ChatError::Api { status, body }`, and a 2xx body goes through
+  `response.json()` into `model_ids`.
+- **`src/ui/settings.rs`** — `ZenCatalog` holds `use_resource(opencode::models)` and
+  matches on it: `None` → a *Models / Loading…* row, `Some(Err)` → a
+  `.catalog_error` paragraph, `Some(Ok(ids))` → one `settings_row` per id, keyed by id.
+  `OpenCodeZenSettings` renders it only when `key_set()`.
+- **`src/ui/settings.css`** — `.catalog_error` in `--primary-error-color`, the colour
+  *Forget* already uses.
+
+### Why it works
+
+- **`use_resource(opencode::models)` takes the function by name.** `models` is an
+  `async fn` with no arguments, so it already has the closure-returning-a-future shape
+  `use_resource` wants. The future reads no signals, so it runs once per mount.
+- **`match` goes *inside* `rsx!`.** The first draft returned `match &*catalog.read() { … }`
+  as the function's tail expression. That didn't compile: `E0597: catalog does not live
+  long enough`. The read guard is a temporary in the tail expression, and Rust drops those
+  *after* the function's locals, so the guard would outlive `catalog`. Inside `rsx!`, the
+  match is evaluated and its guard dropped before the function returns.
+  `settings_screen.rs` already does it this way.
+- **The error type is `ChatError`.** It already has `Http`, `Api` and `Json`, which is
+  every way this call can fail. The name says "chat", but a new `CatalogError` with the
+  same three variants would be duplication.
+- **No key on the request.** Zen's `/models` endpoint is public. The key only decides
+  whether the list is worth showing.
+
+### Scope note
+
+- No ticks and no saving. Step 3 turns each row into a checkbox backed by an `ai_models`
+  table.
+- The list refetches every time the block mounts: switching sections, or saving the key
+  again. It's one small GET, and caching it can wait until it's a problem.
+- There's no retry button on the error. Leaving the section and coming back retries.
+
+### Review notes (from the `simplify` pass)
+
+- **Skipped:** hoisting `use_resource` into `OpenCodeZenSettings` so a key toggle
+  doesn't refetch. Toggles are rare, and switching sections unmounts the whole block
+  anyway.
+- **Skipped, for later:** `gemini.rs` has a private `api_error(status, body)`, and
+  `models()` builds the same `ChatError::Api` inline. Moving it into `ai/mod.rs` touches
+  `gemini.rs`, which is outside this step. It's worth doing in Step 7, when the Zen stream
+  becomes the third caller.

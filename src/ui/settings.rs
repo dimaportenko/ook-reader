@@ -4,7 +4,7 @@ use dioxus::prelude::*;
 use dioxus_primitives::ContentAlign;
 
 use crate::{
-    ai::{gemini::Gemini, Provider},
+    ai::{gemini::Gemini, opencode, Provider},
     secrets::{api_key, SecretStore},
     settings::{
         choice::Choice, Settings, FONT_SIZE_MAX, FONT_SIZE_MIN, LINE_HEIGHT_MAX,
@@ -288,6 +288,33 @@ pub(crate) fn OpenCodeZenSettings() -> Element {
                 key_set: key_set(),
                 on_change: move |key: Option<String>| key_set.set(key.is_some()),
             }
+            if key_set() {
+                ZenCatalog {}
+            }
+        }
+    }
+}
+
+#[component]
+fn ZenCatalog() -> Element {
+    let catalog = use_resource(opencode::models);
+
+    rsx! {
+        match &*catalog.read() {
+            None => rsx! {
+                SettingRow {
+                    label: "Models",
+                    span { class: "{Styles::key_status}", "Loading…" }
+                }
+            },
+            Some(Err(error)) => rsx! {
+                p { class: "{Styles::catalog_error}", "Could not load the model list: {error}" }
+            },
+            Some(Ok(ids)) => rsx! {
+                for id in ids {
+                    div { key: "{id}", class: "{Styles::settings_row}", {id.as_str()} }
+                }
+            },
         }
     }
 }
