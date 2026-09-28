@@ -17,7 +17,7 @@ format reuses the SSE buffer; only its JSON and the `[DONE]` marker are new.
 2. ~~**The Zen catalog.**~~ Fetch `/zen/v1/models`, show the ids, and parse under `#[test]`. **Done** — `e32e7bf`.
 3. ~~**Choose models for chat.**~~ Ticks on the catalog, saved in an `ai_models` table. **Done** — `3487a65`.
 4. **The model picker moves into the chat.** Split on 2026-09-28, since one diff was too big to review:
-   - **4a.** The drawer's picker lists Gemini plus the ticked Zen models, as `ChatModel`s held outside `Settings`.
+   - ~~**4a.**~~ The drawer's picker lists Gemini plus the ticked Zen models, as `ChatModel`s held outside `Settings`. **Done** — `4661b6a`.
    - **4b.** A `chat_model` table remembers any pick, and `ai_model` leaves `Settings`.
 5. **The drawer talks to either provider.** `AnyProvider`, plus an `OpenCode` that returns a canned reply.
 6. **The `chat/completions` wire format.** Request body, chunk text and `[DONE]`, under `#[test]`.
@@ -386,6 +386,8 @@ Clicking the model name toggles it too, because the row is a `<label>`. Tick
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `4661b6a` (217 tests green, 3 ignored; clippy clean; grouped pill picker, Gemini pick surviving a relaunch, the Zen note, live tick updates and the removed Settings row confirmed by eye).
 
 **What it is.** The chat drawer now has a model select under its header. The options are
 grouped: *Gemini* (Flash-Lite, Flash), then *OpenCode Zen* (the models ticked in Settings).
