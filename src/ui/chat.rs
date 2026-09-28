@@ -218,20 +218,20 @@ fn ChatConversation(handle: ChatHandle) -> Element {
                 div {
                     class: "{Styles::chat_panel__compose_actions}",
                     button {
-                        class: "{Styles::chat_panel__compose_action}",
+                        class: "{SettingsStyles::pill_button}",
                         disabled: conversation.messages().is_empty() || *conversation.status() != Status::Idle,
                         onclick: move |_| reset(),
                         "Reset"
                     }
                     if matches!(conversation.status(), Status::Replying(_)) {
                         button {
-                            class: "{Styles::chat_panel__compose_action}",
+                            class: "{SettingsStyles::pill_button}",
                             onclick: move |_| stop(),
                             "Stop"
                         }
                     } else {
                         button {
-                            class: "{Styles::chat_panel__compose_action}",
+                            class: "{SettingsStyles::pill_button}",
                             disabled: draft.read().trim().is_empty(),
                             onclick: move |_| submit(),
                             "Send"

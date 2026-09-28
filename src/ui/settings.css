@@ -233,6 +233,6 @@
 .checkbox:focus-visible,
 .stepper__button:focus-visible,
 .pill_button:focus-visible {
-  outline: 2px solid var(--focused-border-color);
+  outline: 2px solid var(--tint-focus);
   outline-offset: 2px;
 }

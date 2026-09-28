@@ -28,6 +28,7 @@ body,
   --tint-divider: color-mix(in srgb, currentColor 12%, transparent);
   --tint-fill-hover: color-mix(in srgb, currentColor 16%, transparent);
   --tint-border: color-mix(in srgb, currentColor 20%, transparent);
+  --tint-focus: color-mix(in srgb, currentColor 45%, transparent);
 }
 
 /* ---- Utility ----- */
