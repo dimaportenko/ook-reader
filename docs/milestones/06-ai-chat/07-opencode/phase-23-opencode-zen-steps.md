@@ -15,7 +15,7 @@ format reuses the SSE buffer; only its JSON and the `[DONE]` marker are new.
 
 1. ~~**The Zen block and its key.**~~ `Provider`, a second key row in Settings → AI, and key status read from the store. **Done** — `73e2447`.
 2. ~~**The Zen catalog.**~~ Fetch `/zen/v1/models`, show the ids, and parse under `#[test]`. **Done** — `e32e7bf`.
-3. **Choose models for chat.** Ticks on the catalog, saved in an `ai_models` table.
+3. ~~**Choose models for chat.**~~ Ticks on the catalog, saved in an `ai_models` table. **Done** — `3487a65`.
 4. **The model picker moves into the chat.** Gemini plus the ticked Zen models, with `ChatModel` kept out of `Settings`.
 5. **The drawer talks to either provider.** `AnyProvider`, plus an `OpenCode` that returns a canned reply.
 6. **The `chat/completions` wire format.** Request body, chunk text and `[DONE]`, under `#[test]`.
@@ -257,6 +257,8 @@ id under the key row. Forget the key and the list goes away.
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `3487a65` (213 tests green, 3 ignored; clippy clean; ticking, the themed checkbox in Day/Sepia/Night, and ticks surviving a relaunch confirmed by eye).
 
 **What it is.** Each row of the Zen catalog is now a checkbox. Ticking a model saves it to
 a new `ai_models` table, and unticking removes it. After a relaunch, the ticks are still
