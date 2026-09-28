@@ -19,7 +19,7 @@ format reuses the SSE buffer; only its JSON and the `[DONE]` marker are new.
 4. **The model picker moves into the chat.** Split on 2026-09-28, since one diff was too big to review:
    - ~~**4a.**~~ The drawer's picker lists Gemini plus the ticked Zen models, as `ChatModel`s held outside `Settings`. **Done** — `4661b6a`.
    - ~~**4b.**~~ A `chat_model` table remembers any pick, and `ai_model` leaves `Settings`. **Done** — `3613315`.
-5. **The drawer talks to either provider.** `AnyProvider`, plus an `OpenCode` that returns a canned reply.
+5. ~~**The drawer talks to either provider.**~~ `AnyProvider`, plus an `OpenCode` that returns a canned reply. **Done** — `5474e3b`.
 6. **The `chat/completions` wire format.** Request body, chunk text and `[DONE]`, under `#[test]`.
 7. **The real Zen stream.** POST with Bearer auth, checked end to end with a real key.
 8. **Review and refactor.**
@@ -685,6 +685,8 @@ step stops writing, so it was never watched fail. **Eyeball under `dx serve`:**
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `5474e3b` (219 tests green, 3 ignored; clippy clean; the canned Zen reply, the per-provider key note, Gemini replies and the toolbar send with a Zen pick confirmed by eye).
 
 **What it is.** Pick a Zen model in the drawer, send, and a reply streams back. For now it's
 a canned sentence naming the model, from an `OpenCode` stand-in. Gemini picks answer as

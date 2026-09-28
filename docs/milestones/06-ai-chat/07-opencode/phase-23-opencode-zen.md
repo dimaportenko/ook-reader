@@ -65,7 +65,7 @@ Three consequences follow, and each is a lesson:
 - [x] 3. Choose models for chat — ticks on the catalog, saved in an `ai_models` table
 - [x] 4a. The model picker moves into the chat — Gemini + ticked Zen models, `ChatModel` kept out of `Settings`
 - [x] 4b. The chosen model persists — a `chat_model` table, and `ai_model` leaves `Settings`
-- [ ] 5. The drawer talks to either provider — `AnyProvider`, an `OpenCode` that returns a canned reply
+- [x] 5. The drawer talks to either provider — `AnyProvider`, an `OpenCode` that returns a canned reply
 - [ ] 6. The `chat/completions` wire format — request body, chunk text, `[DONE]`, under `#[test]`
 - [ ] 7. The real Zen stream — POST, Bearer auth, end to end with a real key
 - [ ] 8. Review and refactor
