@@ -22,7 +22,10 @@ format reuses the SSE buffer; only its JSON and the `[DONE]` marker are new.
 5. ~~**The drawer talks to either provider.**~~ `AnyProvider`, plus an `OpenCode` that returns a canned reply. **Done** — `5474e3b`.
 6. ~~**The `chat/completions` wire format.**~~ Request body, chunk text and `[DONE]`, under `#[test]`. **Done** — `adf6670`.
 7. ~~**The real Zen stream.**~~ POST with Bearer auth, checked end to end with a real key. **Done** — `36f95b4`.
-8. **Review and refactor.**
+8. **The deferred punch list.** `GeminiModel` moves to `ai::gemini`, one shared `reqwest::Client`, and the bubble font size is restored. *(Was "Review and refactor". It became a mid-phase step on 2026-09-29, when Steps 9–10 were added.)*
+9. **Gemini thinks minimally.** Add `generationConfig.thinkingConfig.thinkingLevel: "minimal"` to the request body.
+10. **Zen thinks less.** First find, with `curl`, a flag the ticked models honor, then send it in the `chat/completions` body.
+11. **Review and refactor.**
 
 **Why this order.** Each step ends with something to see in the settings screen or the
 drawer:
@@ -991,3 +994,214 @@ All four angles came back clean, so nothing was changed.
 - **Kept:** `cargo fmt` rewrapped two Step 6 test payloads that had been committed over the
   line width.
 - **Agreed, deferred:** one shared `reqwest::Client` instead of one per pick (Step 8).
+
+## Step 8 — The deferred punch list
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**What it is.** No new behavior. This step works through the punch list the earlier steps
+deferred, plus one regression found while the chat was in use:
+
+1. **`AiModel` moves to `ai::gemini` and becomes `GeminiModel`.** Step 4b took it out of
+   `Settings`, but it stayed in `settings/`. It only lists Gemini's two fixed models, so the
+   generic name now read like the app-wide model type. Zen models are plain `String` ids
+   inside `ChatModel`.
+2. **One shared `reqwest::Client`.** Steps 5 and 7 left this. Before this step, every model
+   pick built a new `Gemini` or `OpenCode` with its own `Client::new()`, which meant a new
+   connection pool and TLS setup each time. `opencode::models()` used `reqwest::get`, which
+   builds a throwaway client on every call.
+3. **Chat bubbles follow the reader's font size again.** `d45123c` (the drawer restyle,
+   between Steps 4a and 4b) pinned `.chat_panel__turn` to `0.9375rem`. That undid the older
+   `calc(var(--USER__fontSize) * 0.85)`, so the bubbles stopped following the font-size
+   control.
+
+### Runnable check first
+
+This is a refactor, so a compile error is the red. The test imports in
+`ai_client/mod.rs` and `db/chat_model.rs` were pointed at `crate::ai::gemini::AiModel`
+before the type moved:
+
+```
+error[E0432]: unresolved import `crate::ai::gemini::AiModel`
+```
+
+The rename to `GeminiModel` came later, from the review pass. After that, the existing
+suite is the check:
+`each_choice_names_its_stable_gemini_model` (moved with the type),
+`the_chosen_model_needs_its_own_provider_s_key`,
+`the_chosen_chat_model_round_trips_and_the_latest_pick_wins`, and
+`a_request_posts_the_conversation_to_zen_with_a_bearer_key`. The last one builds its request
+through the shared client.
+
+The shared client has no test of its own. Asserting that a `static` is the same object on
+every call would only prove what the type already guarantees.
+
+The font size is a `dx serve` eyeball check. Move the reader's font-size control, and the
+chat bubble text grows and shrinks with it.
+
+### Minimal implementation
+
+- **`src/ai/gemini.rs`:** `GeminiModel` (the old `AiModel`: `FlashLite`, `Flash`, `ALL`,
+  `api_name`) and its test move here unchanged. `Gemini` loses its `client` field and posts
+  through `http()`.
+- **`src/settings/ai_model.rs`:** deleted. `settings/mod.rs` no longer declares it.
+- **`src/ai/mod.rs`:** `fn http() -> &'static reqwest::Client` backed by a
+  `static CLIENT: LazyLock<reqwest::Client>`. It's private and imported by the child modules,
+  the same way as `api_error` and `non_empty_reply`.
+- **`src/ai/opencode.rs`:** `OpenCode` loses its `client` field. `request()` and `models()`
+  both go through `http()`.
+- **`src/ai_client/mod.rs`, `src/db/chat_model.rs`:** test imports now point at
+  `ai::gemini::GeminiModel`.
+- **`src/ui/chat.css`:** `.chat_panel__turn` gets
+  `font-size: calc(var(--USER__fontSize) * 0.85)` back.
+
+### Why it works
+
+- **`reqwest::Client` is already an `Arc` around a connection pool.** Every clone shares the
+  same pool, so one process-wide client is the intended pattern. `LazyLock` builds it on the
+  first request, not at startup, and returns `&'static` after that.
+- **The providers no longer hold anything costly.** `Gemini` and `OpenCode` are a key and a
+  model id. The `use_effect` that rebuilds the provider on each pick now only copies two
+  strings.
+- **`--USER__fontSize` reaches the chat.** `main.rs` pushes the settings variables into the
+  app's `:root`, not only into the chapter iframe. The value is a percentage (`"125%"`), so
+  `calc(… * 0.85)` resolves against the parent's font size. That is how the rule behaved
+  before `d45123c`.
+
+### Forks taken
+
+- **A `static` over injecting the client through context.** Passing a `Client` through
+  `use_context` into `provider_for` would let a test swap it. Nothing tests at the HTTP level
+  today, and the offline request test works against the real client. If HTTP-level tests
+  arrive, a base-URL parameter is the lighter change.
+- **`ai::gemini::GeminiModel` over a provider-neutral `ai::AiModel`.** A neutral enum would
+  need an `api_name` per provider, and Zen's models aren't an enum. The type is Gemini's
+  fixed list, so it lives with Gemini.
+
+### Scope note
+
+- A test run that uses more than one tokio runtime shares one pool across them. Only the
+  ignored network tests send real requests, and they hit different hosts, so it doesn't come
+  up. If it ever does, the fix is to give each test its own client.
+- The Phase 24 steps doc still says `settings/ai_model.rs`. It's a historical log, so it
+  stays as it was.
+
+### Review notes (from the `simplify` pass)
+
+- **Applied:** `AiModel` → `GeminiModel`. The altitude pass pointed out that a generic name
+  inside a provider module reads as the app-wide model type.
+- **Clean:** reuse (the only `LazyLock` or `Client` construction in `src/`), efficiency
+  (connection reuse and nothing added to startup), and simplification (no dead imports, and
+  the `Clone` derives are still needed by `AnyProvider`).
+- **Skipped:** borrowing `key` and `model` instead of owning them. That was already the case
+  before this step, and the strings are small.
+
+## Steps 9–10 — Thinking less, so replies start sooner
+
+> **Added 2026-09-29.** Two things came out of using the real stream. The drawer shows `...`
+> for a long time. Then the whole answer streams in quickly.
+
+**The crux.** The stream isn't buffered. The model is **thinking** before it writes.
+`deepseek-v4-flash`, `kimi-k2.6` and `glm-5.3-flash` are reasoning models, and Gemini 3.x
+Flash thinks by default too. Zen sends the thinking as `delta.reasoning_content`, which
+`event()` reads as `Text("")`. Gemini doesn't send its thoughts at all unless asked. Either
+way, bytes arrive, but the bubble has nothing to show. The fix is on the *request* side:
+ask for less thinking. The request knob is different for each provider:
+
+- **Gemini** documents it. `generationConfig.thinkingConfig.thinkingLevel` takes levels that
+  depend on the model, and the lowest is `"minimal"`. The older `thinkingBudget: 0` belongs
+  to the 2.5 series.
+- **Zen** doesn't document one. It passes the body through to each model's host, so the
+  flag differs by model family. Candidates are `"thinking": {"type": "disabled"}` (the
+  DeepSeek/GLM style) and `"reasoning_effort": "none"` (the OpenAI style). That's why
+  Step 10 starts with a `curl`.
+
+**Why this order.** Gemini comes first because its knob is documented and its check is a
+plain request-body test. Zen needs a measurement before any code gets written.
+
+**The trade-off.** Less thinking gives a faster first word but a shallower answer to a hard
+question about a passage. The alternatives are streaming the reasoning into the bubble, or
+a "Thinking…" label. Both keep full quality, but the reasoning option needs a second
+callback on `ChatProvider::stream`. They're held for later, in case minimal thinking makes
+the answers too thin.
+
+## Step 9 — Gemini thinks minimally
+
+**What it is.** Every Gemini request asks for `thinkingLevel: "minimal"`, so Flash-Lite
+and Flash start answering almost immediately.
+
+### Runnable check first
+
+`src/ai/gemini.rs`, next to `the_conversation_becomes_gemini_contents`:
+
+```rust
+#[test]
+fn gemini_is_asked_to_think_minimally() {
+    let body = serde_json::to_value(request_body(&[Message::user("Which city?")])).unwrap();
+
+    assert_eq!(
+        body["generationConfig"],
+        json!({ "thinkingConfig": { "thinkingLevel": "minimal" } })
+    );
+}
+```
+
+Red: `body["generationConfig"]` is `Null`. Indexing a `serde_json::Value` with a missing key
+gives `Null` rather than panicking, so the failure shows `left: Null`.
+
+**Tripwire.** `the_conversation_becomes_gemini_contents` compares the whole body with
+`assert_eq!`, so it goes red too once the field exists. Add the same `"generationConfig"`
+object to its expected `json!`. That test is the spec for the full request.
+
+**Then the eyeball check.** Under `dx serve` with a Gemini key, ask a question. The
+`...` bubble should give way to text in about a second, not after a long pause. If the API
+answers `400` and says the level isn't supported, that model doesn't offer `"minimal"`. Try
+`"low"`.
+
+### Minimal implementation
+
+In `src/ai/gemini.rs`, extend the request structs. Serde names Rust fields `snake_case`, and
+Gemini expects `camelCase`, so each struct gets `#[serde(rename_all = "camelCase")]`:
+
+```rust
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GenerateRequest<'a> {
+    contents: Vec<Content<'a>>,
+    generation_config: GenerationConfig,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GenerationConfig {
+    thinking_config: ThinkingConfig,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ThinkingConfig {
+    thinking_level: &'static str,
+}
+```
+
+`request_body` fills in `generation_config` with `thinking_level: "minimal"`.
+
+### Why it works
+
+- **`rename_all = "camelCase"` works on the field names at compile time.** `generation_config`
+  serializes as `generationConfig`, so the Rust side stays idiomatic and the JSON matches
+  Google's. It applies to one struct only, which is why each nested struct needs it too.
+  Leave one off and you get `thinking_config`, which Gemini ignores without an error. That
+  silent failure is exactly why the test checks the key names.
+- **`&'static str` for the level.** It's a fixed literal, so there's nothing to own or
+  borrow from the caller.
+- **`contents` is unchanged by the rename.** A lowercase single word is already camelCase.
+
+### Scope note
+
+- One level for both Gemini models. A per-model level (`GeminiModel::thinking_level()`)
+  only earns its place if one model rejects `"minimal"`.
+- The level isn't a setting yet. A "Think harder" option in Settings → AI is a later
+  refinement, and only if answers come back too thin.
+- Zen is Step 10.

@@ -18,12 +18,12 @@ pub(crate) fn provider_for(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{secrets::Memory, settings::ai_model::AiModel};
+    use crate::{ai::gemini::GeminiModel, secrets::Memory};
 
     #[test]
     fn the_chosen_model_needs_its_own_provider_s_key() {
         let store = Memory::default();
-        let gemini = ChatModel::gemini(AiModel::Flash);
+        let gemini = ChatModel::gemini(GeminiModel::Flash);
         let zen = ChatModel {
             provider: Provider::OpenCodeZen,
             id: "kimi-k2.6".to_owned(),

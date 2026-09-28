@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    api_error, non_empty_reply, sse::SseBuffer, ChatError, ChatProvider, Message, Reply, Role,
+    api_error, http, non_empty_reply, sse::SseBuffer, ChatError, ChatProvider, Message, Reply, Role,
 };
 
 const MODELS_URL: &str = "https://opencode.ai/zen/v1/models";
@@ -22,7 +22,7 @@ fn model_ids(list: ModelList) -> Vec<String> {
 }
 
 pub(crate) async fn models() -> Result<Vec<String>, ChatError> {
-    let response = reqwest::get(MODELS_URL).await?;
+    let response = http().get(MODELS_URL).send().await?;
 
     let status = response.status();
     if !status.is_success() {
@@ -108,7 +108,6 @@ fn event(payload: &str) -> Result<Event, serde_json::Error> {
 pub(crate) struct OpenCode {
     key: String,
     model: String,
-    client: reqwest::Client,
 }
 
 impl OpenCode {
@@ -116,12 +115,11 @@ impl OpenCode {
         OpenCode {
             key,
             model: model.into(),
-            client: reqwest::Client::new(),
         }
     }
 
     fn request(&self, messages: &[Message]) -> reqwest::RequestBuilder {
-        self.client
+        http()
             .post(COMPLETIONS_URL)
             .bearer_auth(&self.key)
             .json(&request_body(&self.model, messages))

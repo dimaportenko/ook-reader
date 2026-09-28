@@ -17,7 +17,7 @@
   padding: 0.625rem 0.875rem;
   border-radius: 1rem 1rem 1rem 0.25rem;
   background-color: var(--tint-surface);
-  font-size: 0.9375rem;
+  font-size: calc(var(--USER__fontSize) * 0.85);
   line-height: 1.45;
   overflow-wrap: anywhere;
   white-space: pre-wrap;

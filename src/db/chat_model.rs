@@ -38,7 +38,7 @@ impl Db {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::settings::ai_model::AiModel;
+    use crate::ai::gemini::GeminiModel;
 
     #[test]
     fn the_chosen_chat_model_round_trips_and_the_latest_pick_wins() {
@@ -54,7 +54,7 @@ mod test {
         db.save_chat_model(&zen).expect("pick a Zen model");
         assert_eq!(db.chat_model().expect("read the Zen pick"), Some(zen));
 
-        let gemini = ChatModel::gemini(AiModel::Flash);
+        let gemini = ChatModel::gemini(GeminiModel::Flash);
         db.save_chat_model(&gemini).expect("pick a Gemini model");
         assert_eq!(db.chat_model().expect("read the Gemini pick"), Some(gemini));
     }
@@ -64,7 +64,7 @@ mod test {
         let dir = tempfile::tempdir().expect("temp dir");
         let db = Db::open(dir.path()).expect("open");
 
-        db.save_chat_model(&ChatModel::gemini(AiModel::Flash))
+        db.save_chat_model(&ChatModel::gemini(GeminiModel::Flash))
             .expect("seed the row");
         db.conn
             .execute("UPDATE chat_model SET provider = 'openai' WHERE id = 1", [])

@@ -1,4 +1,3 @@
-pub mod ai_model;
 pub mod choice;
 pub mod font;
 pub mod theme;

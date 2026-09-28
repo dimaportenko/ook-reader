@@ -1,8 +1,26 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    api_error, non_empty_reply, sse::SseBuffer, ChatError, ChatProvider, Message, Reply, Role,
+    api_error, http, non_empty_reply, sse::SseBuffer, ChatError, ChatProvider, Message, Reply, Role,
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum GeminiModel {
+    #[default]
+    FlashLite,
+    Flash,
+}
+
+impl GeminiModel {
+    pub(crate) const ALL: [GeminiModel; 2] = [GeminiModel::FlashLite, GeminiModel::Flash];
+
+    pub(crate) fn api_name(self) -> &'static str {
+        match self {
+            GeminiModel::FlashLite => "gemini-3.5-flash-lite",
+            GeminiModel::Flash => "gemini-3.5-flash",
+        }
+    }
+}
 
 #[derive(Debug, Serialize)]
 struct GenerateRequest<'a> {
@@ -83,7 +101,6 @@ fn text_of(response: GenerateResponse) -> String {
 pub(crate) struct Gemini {
     key: String,
     model: String,
-    client: reqwest::Client,
 }
 
 impl Gemini {
@@ -91,7 +108,6 @@ impl Gemini {
         Gemini {
             key,
             model: model.into(),
-            client: reqwest::Client::new(),
         }
     }
 }
@@ -106,8 +122,7 @@ impl ChatProvider for Gemini {
         messages: &[Message],
         mut on_text: impl FnMut(&str),
     ) -> Result<Reply, ChatError> {
-        let mut response = self
-            .client
+        let mut response = http()
             .post(endpoint(&self.model))
             .header("x-goog-api-key", &self.key)
             .json(&request_body(messages))
@@ -137,6 +152,12 @@ impl ChatProvider for Gemini {
 mod test {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn each_choice_names_its_stable_gemini_model() {
+        assert_eq!(GeminiModel::FlashLite.api_name(), "gemini-3.5-flash-lite");
+        assert_eq!(GeminiModel::Flash.api_name(), "gemini-3.5-flash");
+    }
 
     #[test]
     fn the_conversation_becomes_gemini_contents() {

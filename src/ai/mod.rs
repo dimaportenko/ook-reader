@@ -3,13 +3,11 @@ pub(crate) mod opencode;
 pub(crate) mod prompt;
 mod sse;
 
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, sync::LazyLock};
 
 use reqwest::StatusCode;
 
-use crate::settings::ai_model::AiModel;
-
-use gemini::Gemini;
+use gemini::{Gemini, GeminiModel};
 use opencode::OpenCode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,12 +48,12 @@ pub(crate) struct ChatModel {
 
 impl Default for ChatModel {
     fn default() -> Self {
-        ChatModel::gemini(AiModel::default())
+        ChatModel::gemini(GeminiModel::default())
     }
 }
 
 impl ChatModel {
-    pub(crate) fn gemini(model: AiModel) -> Self {
+    pub(crate) fn gemini(model: GeminiModel) -> Self {
         ChatModel {
             provider: Provider::Gemini,
             id: model.api_name().to_owned(),
@@ -68,7 +66,7 @@ impl ChatModel {
 }
 
 pub(crate) fn chat_models(zen_ticked: &BTreeSet<String>) -> Vec<ChatModel> {
-    let gemini = AiModel::ALL.into_iter().map(ChatModel::gemini);
+    let gemini = GeminiModel::ALL.into_iter().map(ChatModel::gemini);
     let zen = zen_ticked.iter().map(|id| ChatModel {
         provider: Provider::OpenCodeZen,
         id: id.clone(),
@@ -128,6 +126,11 @@ pub(crate) enum ChatError {
     Api { status: u16, body: String },
     #[error("could not read the provider's answer: {0}")]
     Json(#[from] serde_json::Error),
+}
+
+fn http() -> &'static reqwest::Client {
+    static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
+    &CLIENT
 }
 
 fn api_error(status: StatusCode, body: String) -> ChatError {
@@ -217,8 +220,8 @@ mod test {
         assert_eq!(
             chat_models(&ticked),
             [
-                ChatModel::gemini(AiModel::FlashLite),
-                ChatModel::gemini(AiModel::Flash),
+                ChatModel::gemini(GeminiModel::FlashLite),
+                ChatModel::gemini(GeminiModel::Flash),
                 zen("deepseek-v4-flash"),
                 zen("kimi-k2.6"),
             ]
@@ -228,7 +231,7 @@ mod test {
     #[test]
     fn a_gemini_chat_model_uses_the_api_name() {
         assert_eq!(
-            ChatModel::gemini(AiModel::Flash),
+            ChatModel::gemini(GeminiModel::Flash),
             ChatModel {
                 provider: Provider::Gemini,
                 id: "gemini-3.5-flash".to_owned(),
