@@ -5,6 +5,7 @@ use std::{collections::BTreeSet, rc::Rc};
 use dioxus::prelude::*;
 
 mod ai;
+mod ai_client;
 mod chat;
 mod clock;
 mod config;
@@ -12,7 +13,6 @@ mod db;
 #[cfg(target_os = "ios")]
 mod document_picker;
 mod epub;
-mod gemini_key;
 mod library;
 mod nav;
 mod secrets;
@@ -31,7 +31,7 @@ pub(crate) use dioxus::mobile as renderer;
 use library::Library;
 
 use crate::{
-    ai::{chat_models, gemini::Gemini, Provider},
+    ai::{chat_models, Provider},
     config::Config,
     db::Db,
     ui::{
@@ -100,8 +100,6 @@ fn App() -> Element {
     });
     let open_book = use_signal(|| None::<OpenBook>);
     let secret_store = use_hook(secrets::open_native);
-    let mut ai_provider = use_signal(|| None::<Gemini>);
-    let ai_model = use_memo(move || chat_model.read().gemini_model().unwrap_or_default());
 
     let desktop = crate::renderer::use_window();
     use_hook(move || window::remember_frame(&desktop.window));
@@ -113,20 +111,8 @@ fn App() -> Element {
     use_context_provider(|| open_book);
     use_context_provider(|| settings);
     use_context_provider(|| secret_store.clone());
-    use_context_provider(|| ai_provider);
     use_context_provider(|| zen_ticked);
     use_context_provider(|| chat_model);
-
-    use_effect({
-        let secret_store = secret_store.clone();
-        move || {
-            ai_provider.set(secret_store.as_deref().and_then(|store| {
-                gemini_key::gemini_from(store, ai_model())
-                    .or_log("read the Gemini API key")
-                    .flatten()
-            }));
-        }
-    });
 
     use_effect({
         let db = db.clone();

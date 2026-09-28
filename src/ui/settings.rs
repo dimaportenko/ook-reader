@@ -4,7 +4,7 @@ use dioxus::prelude::*;
 use dioxus_primitives::ContentAlign;
 
 use crate::{
-    ai::{gemini::Gemini, opencode, ChatModel, Provider},
+    ai::{opencode, Provider},
     db::Db,
     secrets::{api_key, SecretStore},
     settings::{
@@ -241,10 +241,22 @@ pub(crate) fn ReaderThemeControls() -> Element {
     }
 }
 
+fn use_key_set(provider: Provider) -> Signal<bool> {
+    let store = use_context::<Option<Rc<dyn SecretStore>>>();
+    use_signal(|| {
+        store
+            .as_deref()
+            .and_then(|store| {
+                api_key::is_set(store, provider)
+                    .or_log(&format!("read the {} API key", provider.label()))
+            })
+            .unwrap_or(false)
+    })
+}
+
 #[component]
 pub(crate) fn GeminiSettings() -> Element {
-    let chat_model = use_context::<Signal<ChatModel>>();
-    let mut gemini = use_context::<Signal<Option<Gemini>>>();
+    let mut key_set = use_key_set(Provider::Gemini);
 
     rsx! {
         h3 { class: "{Styles::settings_group_title}", "Gemini" }
@@ -252,11 +264,8 @@ pub(crate) fn GeminiSettings() -> Element {
             class: "{Styles::settings_group}",
             ApiKeyControl {
                 provider: Provider::Gemini,
-                key_set: gemini.read().is_some(),
-                on_change: move |key: Option<String>| {
-                    let model = chat_model.read().gemini_model().unwrap_or_default();
-                    gemini.set(key.map(|key| Gemini::new(key, model.api_name())));
-                },
+                key_set: key_set(),
+                on_change: move |key: Option<String>| key_set.set(key.is_some()),
             }
         }
     }
@@ -264,16 +273,7 @@ pub(crate) fn GeminiSettings() -> Element {
 
 #[component]
 pub(crate) fn OpenCodeZenSettings() -> Element {
-    let store = use_context::<Option<Rc<dyn SecretStore>>>();
-    let mut key_set = use_signal(|| {
-        store
-            .as_deref()
-            .and_then(|store| {
-                api_key::is_set(store, Provider::OpenCodeZen)
-                    .or_log("read the OpenCode Zen API key")
-            })
-            .unwrap_or(false)
-    });
+    let mut key_set = use_key_set(Provider::OpenCodeZen);
 
     rsx! {
         h3 { class: "{Styles::settings_group_title}", "OpenCode Zen" }

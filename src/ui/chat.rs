@@ -1,11 +1,13 @@
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, rc::Rc};
 
 use dioxus::{core::Task, prelude::*};
 
 use crate::{
-    ai::{chat_models, gemini::Gemini, ChatModel, ChatProvider, Provider, Role},
+    ai::{chat_models, AnyProvider, ChatModel, ChatProvider, Provider, Role},
+    ai_client::provider_for,
     chat::{Conversation, Status},
-    ui::{drawer::Drawer, settings::Styles as SettingsStyles},
+    secrets::SecretStore,
+    ui::{drawer::Drawer, settings::Styles as SettingsStyles, OrLog},
 };
 
 #[css_module("/src/ui/chat.css")]
@@ -96,16 +98,23 @@ fn ChatConversation(handle: ChatHandle) -> Element {
         mut draft,
         mut autosend,
     } = handle;
-    let provider = use_context::<Signal<Option<Gemini>>>();
+    let store = use_context::<Option<Rc<dyn SecretStore>>>();
     let chosen = use_context::<Signal<ChatModel>>();
+    let mut provider = use_signal(|| None::<AnyProvider>);
     let mut chat = use_signal(Conversation::default);
     let mut pending_task = use_signal(|| None::<Task>);
 
+    use_effect(move || {
+        let model = chosen.read();
+        provider.set(store.as_deref().and_then(|store| {
+            provider_for(store, &model)
+                .or_log(&format!("read the {} API key", model.provider.label()))
+                .flatten()
+        }));
+    });
+
     let mut submit = move || {
-        if chosen.read().provider != Provider::Gemini {
-            return;
-        }
-        let Some(gemini) = provider.read().clone() else {
+        let Some(client) = provider.read().clone() else {
             return;
         };
 
@@ -116,7 +125,7 @@ fn ChatConversation(handle: ChatHandle) -> Element {
 
         let history = chat.read().messages().to_vec();
         pending_task.set(Some(spawn(async move {
-            let outcome = gemini
+            let outcome = client
                 .stream(&history, |delta| chat.write().append(delta))
                 .await;
             chat.write().settle(outcome);
@@ -149,19 +158,13 @@ fn ChatConversation(handle: ChatHandle) -> Element {
         }
     });
 
-    let provider = provider.read();
     let conversation = chat.read();
 
     rsx! {
-        if chosen.read().provider == Provider::OpenCodeZen {
+        if provider.read().is_none() {
             p {
                 class: "{Styles::chat_panel__note}",
-                "OpenCode Zen replies aren't available yet."
-            }
-        } else if provider.is_none() {
-            p {
-                class: "{Styles::chat_panel__note}",
-                "Add a Gemini key in settings to chat."
+                "Add your {chosen.read().provider.label()} key in settings to chat."
             }
         } else {
             if conversation.messages().is_empty() {

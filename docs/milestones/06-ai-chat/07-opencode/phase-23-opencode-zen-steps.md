@@ -680,3 +680,101 @@ step stops writing, so it was never watched fail. **Eyeball under `dx serve`:**
   latter is how `settings` and `zen_ticked` are seeded two lines above.
 - **Skipped:** dropping the legacy-column test as too much setup. It's the only thing
   guarding saves on an existing database.
+
+## Step 5 — The drawer talks to either provider
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**What it is.** Pick a Zen model in the drawer, send, and a reply streams back. For now it's
+a canned sentence naming the model, from an `OpenCode` stand-in. Gemini picks answer as
+before. With no key for the chosen model's provider, the drawer says *Add your Gemini key* or
+*Add your OpenCode Zen key*. The "Zen replies aren't available yet" note and the
+Gemini-only guard in `submit` are gone.
+
+**The crux.** `ChatProvider` has an `async fn`, so it isn't object-safe and
+`Box<dyn ChatProvider>` doesn't compile. The runtime choice between two clients becomes an
+enum, `AnyProvider { Gemini(Gemini), OpenCode(OpenCode) }`, and it implements the trait by
+matching and delegating. The set of providers is closed, so a closed enum costs nothing a
+trait object would have bought.
+
+### Runnable check first
+
+`src/ai/mod.rs`:
+
+```rust
+#[test]
+fn any_provider_streams_through_the_client_it_holds() {
+    /* AnyProvider::OpenCode(OpenCode::new("kimi-k2.6")) streams >1 piece,
+       the pieces concat to reply.text, and the text names kimi-k2.6 */
+}
+```
+
+`src/ai_client/mod.rs` (was `src/gemini_key/mod.rs`):
+
+```rust
+#[test]
+fn the_chosen_model_needs_its_own_provider_s_key() {
+    /* no keys → None for both; Zen key → Zen gets AnyProvider::OpenCode, Gemini still None;
+       Gemini key → AnyProvider::Gemini; forget Zen → Zen None again */
+}
+```
+
+Red against `todo!()` stubs: both failed with `not yet implemented` (218 passed, 2 failed).
+**Eyeball under `dx serve`:**
+
+1. With a Zen key saved, pick a Zen model in the drawer and send. The canned reply streams
+   in and names the model.
+2. Forget the Zen key, reopen the book. The drawer says *Add your OpenCode Zen key in
+   settings to chat.*
+3. Pick a Gemini model. Chat answers from Gemini with that model, as before.
+4. Select a passage and tap the toolbar chat icon while a Zen model is picked. It sends
+   and gets the canned reply, where 4a dropped it.
+
+### Minimal implementation
+
+- **`src/ai/opencode.rs`** — `OpenCode { model }` with `new`, and a `ChatProvider` impl
+  that splits a canned sentence into words and feeds them to `on_text`.
+- **`src/ai/mod.rs`** — `AnyProvider` and its delegating `ChatProvider` impl.
+  `ChatModel::gemini_model()` and its test are deleted, since both callers are gone.
+- **`src/ai_client/mod.rs`** — `gemini_key` renamed. `provider_for(store, &ChatModel)`
+  reads the chosen provider's key and builds the matching client with `model.id`.
+- **`src/main.rs`** — the `Signal<Option<Gemini>>` context, the `ai_model` memo and the
+  effect that rebuilt the client are gone.
+- **`src/ui/chat.rs`** — `ChatConversation` owns a `Signal<Option<AnyProvider>>`, filled by
+  an effect that watches `chosen`. `submit` sends through whichever client it holds.
+- **`src/ui/settings.rs`** — `use_key_set(provider)` reads "is a key saved" once. The Gemini
+  and Zen blocks both use it, so saving a key only flips that flag.
+
+### Why it works
+
+- **The enum is the dispatch.** `match self` picks the arm, and each arm awaits the inner
+  client's own `stream`. `on_text` moves into whichever arm runs, and only one does.
+- **The client is built from the whole `ChatModel`.** Gemini gets `model.id` directly, so
+  the `AiModel` round trip that 4b left in two places isn't needed anymore.
+- **The drawer owns its client.** The settings screen opens from the library, so leaving
+  it always remounts the reader and re-runs the effect with the fresh key. Settings no
+  longer has to push a client into App, and App no longer holds one it can't name.
+- **An effect and a signal, not `use_memo`.** `use_memo` needs `PartialEq` on its value, and
+  `Gemini` holds a `reqwest::Client`, which has none.
+
+### Scope note
+
+- `OpenCode` holds no key yet, so `provider_for` checks the Zen key exists but drops it. Step
+  7 adds the key with the Bearer header.
+- Ticking a Claude or GPT Zen model still "works" here, because the reply is canned. The
+  endpoint mismatch shows up in Step 7.
+- Each pick builds a fresh `reqwest::Client`, as the App effect did before. Sharing one is
+  a Step 8 candidate.
+
+### Review notes (from the `simplify` pass)
+
+- **Skipped:** `use_memo` for the drawer's provider. `AnyProvider` can't be `PartialEq`.
+- **Skipped:** merging `GeminiSettings` and `OpenCodeZenSettings`. Only the Zen block has
+  the catalog.
+- **Skipped:** moving `provider_for` into `ai` as `AnyProvider::from_secrets`. That would
+  make `ai` depend on `secrets`, and the bridge module already exists.
+- **Skipped:** a shared keys signal between settings and the drawer. The drawer can't be
+  mounted while settings is open, so the two reads can't disagree today.
+- **Skipped:** a lazy `or_log_with` for the formatted log message. It runs on mount and on
+  pick, not per delta.

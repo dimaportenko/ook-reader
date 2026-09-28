@@ -7,6 +7,9 @@ use std::collections::BTreeSet;
 
 use crate::settings::ai_model::AiModel;
 
+use gemini::Gemini;
+use opencode::OpenCode;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Provider {
     Gemini,
@@ -55,15 +58,6 @@ impl ChatModel {
             provider: Provider::Gemini,
             id: model.api_name().to_owned(),
         }
-    }
-
-    pub(crate) fn gemini_model(&self) -> Option<AiModel> {
-        if self.provider != Provider::Gemini {
-            return None;
-        }
-        AiModel::ALL
-            .into_iter()
-            .find(|model| model.api_name() == self.id)
     }
 
     pub(crate) fn key(&self) -> String {
@@ -142,6 +136,25 @@ pub(crate) trait ChatProvider {
     ) -> Result<Reply, ChatError>;
 }
 
+#[derive(Clone)]
+pub(crate) enum AnyProvider {
+    Gemini(Gemini),
+    OpenCode(OpenCode),
+}
+
+impl ChatProvider for AnyProvider {
+    async fn stream(
+        &self,
+        messages: &[Message],
+        on_text: impl FnMut(&str),
+    ) -> Result<Reply, ChatError> {
+        match self {
+            AnyProvider::Gemini(gemini) => gemini.stream(messages, on_text).await,
+            AnyProvider::OpenCode(zen) => zen.stream(messages, on_text).await,
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -207,20 +220,6 @@ mod test {
     }
 
     #[test]
-    fn only_a_gemini_chat_model_maps_back_to_a_gemini_setting() {
-        assert_eq!(
-            ChatModel::gemini(AiModel::Flash).gemini_model(),
-            Some(AiModel::Flash)
-        );
-
-        let zen_with_a_gemini_id = ChatModel {
-            provider: Provider::OpenCodeZen,
-            id: AiModel::Flash.api_name().to_owned(),
-        };
-        assert_eq!(zen_with_a_gemini_id.gemini_model(), None);
-    }
-
-    #[test]
     fn a_chat_model_key_names_its_provider_and_id() {
         let model = ChatModel {
             provider: Provider::OpenCodeZen,
@@ -244,6 +243,21 @@ mod test {
             assert_eq!(Provider::from_slug(provider.slug()), Some(provider));
         }
         assert_eq!(Provider::from_slug("openai"), None);
+    }
+
+    #[test]
+    fn any_provider_streams_through_the_client_it_holds() {
+        let zen = AnyProvider::OpenCode(OpenCode::new("kimi-k2.6"));
+        let mut pieces = Vec::new();
+
+        let reply = pollster::block_on(zen.stream(&[Message::user("Which city?")], |delta| {
+            pieces.push(delta.to_owned())
+        }))
+        .unwrap();
+
+        assert!(pieces.len() > 1, "{pieces:?}");
+        assert_eq!(pieces.concat(), reply.text);
+        assert!(reply.text.contains("kimi-k2.6"), "{}", reply.text);
     }
 
     #[test]

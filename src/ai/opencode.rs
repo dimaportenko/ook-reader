@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use super::ChatError;
+use super::{ChatError, ChatProvider, Message, Reply};
 
 const MODELS_URL: &str = "https://opencode.ai/zen/v1/models";
 
@@ -30,6 +30,36 @@ pub(crate) async fn models() -> Result<Vec<String>, ChatError> {
     }
 
     Ok(model_ids(response.json().await?))
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct OpenCode {
+    model: String,
+}
+
+impl OpenCode {
+    pub(crate) fn new(model: impl Into<String>) -> Self {
+        OpenCode {
+            model: model.into(),
+        }
+    }
+}
+
+impl ChatProvider for OpenCode {
+    async fn stream(
+        &self,
+        _messages: &[Message],
+        mut on_text: impl FnMut(&str),
+    ) -> Result<Reply, ChatError> {
+        let text = format!(
+            "A canned reply from {}, until Zen replies are wired up.",
+            self.model
+        );
+        for word in text.split_inclusive(' ') {
+            on_text(word);
+        }
+        Ok(Reply { text })
+    }
 }
 
 #[cfg(test)]
