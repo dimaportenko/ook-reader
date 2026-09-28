@@ -20,7 +20,7 @@ format reuses the SSE buffer; only its JSON and the `[DONE]` marker are new.
    - ~~**4a.**~~ The drawer's picker lists Gemini plus the ticked Zen models, as `ChatModel`s held outside `Settings`. **Done** — `4661b6a`.
    - ~~**4b.**~~ A `chat_model` table remembers any pick, and `ai_model` leaves `Settings`. **Done** — `3613315`.
 5. ~~**The drawer talks to either provider.**~~ `AnyProvider`, plus an `OpenCode` that returns a canned reply. **Done** — `5474e3b`.
-6. **The `chat/completions` wire format.** Request body, chunk text and `[DONE]`, under `#[test]`.
+6. ~~**The `chat/completions` wire format.**~~ Request body, chunk text and `[DONE]`, under `#[test]`. **Done** — `adf6670`.
 7. **The real Zen stream.** POST with Bearer auth, checked end to end with a real key.
 8. **Review and refactor.**
 
@@ -785,6 +785,8 @@ Red against `todo!()` stubs: both failed with `not yet implemented` (218 passed,
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `adf6670` (227 tests green, 3 ignored; clippy: only the expected `dead_code` warnings for the new items, until Step 7 calls them).
 
 **What it is.** The pure half of talking to Zen, in `src/ai/opencode.rs`. `request_body`
 turns the conversation into an OpenAI-style `chat/completions` body. `event` turns one SSE
