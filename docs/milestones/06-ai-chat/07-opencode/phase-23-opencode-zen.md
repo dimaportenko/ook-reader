@@ -67,5 +67,5 @@ Three consequences follow, and each is a lesson:
 - [x] 4b. The chosen model persists — a `chat_model` table, and `ai_model` leaves `Settings`
 - [x] 5. The drawer talks to either provider — `AnyProvider`, an `OpenCode` that returns a canned reply
 - [x] 6. The `chat/completions` wire format — request body, chunk text, `[DONE]`, under `#[test]`
-- [ ] 7. The real Zen stream — POST, Bearer auth, end to end with a real key
+- [x] 7. The real Zen stream — POST, Bearer auth, end to end with a real key
 - [ ] 8. Review and refactor

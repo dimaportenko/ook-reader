@@ -21,7 +21,7 @@ format reuses the SSE buffer; only its JSON and the `[DONE]` marker are new.
    - ~~**4b.**~~ A `chat_model` table remembers any pick, and `ai_model` leaves `Settings`. **Done** — `3613315`.
 5. ~~**The drawer talks to either provider.**~~ `AnyProvider`, plus an `OpenCode` that returns a canned reply. **Done** — `5474e3b`.
 6. ~~**The `chat/completions` wire format.**~~ Request body, chunk text and `[DONE]`, under `#[test]`. **Done** — `adf6670`.
-7. **The real Zen stream.** POST with Bearer auth, checked end to end with a real key.
+7. ~~**The real Zen stream.**~~ POST with Bearer auth, checked end to end with a real key. **Done** — `36f95b4`.
 8. **Review and refactor.**
 
 **Why this order.** Each step ends with something to see in the settings screen or the
@@ -888,6 +888,8 @@ All four angles came back clean, so nothing was changed.
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `36f95b4` (227 tests green, 4 ignored; clippy clean; a real Zen reply confirmed by hand in the drawer, and `gpt-6-luna` returned the expected `ModelProtocolUnsupported` 400).
 
 **What it is.** Pick a Zen model in the drawer, send, and a real reply from Zen streams in.
 `OpenCode` now holds the key and a `reqwest::Client`. It POSTs to
