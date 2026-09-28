@@ -780,3 +780,104 @@ Red against `todo!()` stubs: both failed with `not yet implemented` (218 passed,
   mounted while settings is open, so the two reads can't disagree today.
 - **Skipped:** a lazy `or_log_with` for the formatted log message. It runs on mount and on
   pick, not per delta.
+
+## Step 6 — The `chat/completions` wire format
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**What it is.** The pure half of talking to Zen, in `src/ai/opencode.rs`. `request_body`
+turns the conversation into an OpenAI-style `chat/completions` body. `event` turns one SSE
+payload into either the text it carries or the end of the stream. Nothing calls them yet;
+Step 7 does. Like Phase 22's Step 3, this step breaks observability order on purpose: the
+only check is `#[test]`.
+
+**The crux.** Two differences from Gemini, and both are about where the end is.
+
+- **The stream ends with a sentinel, not a closed connection.** The last event is
+  `data: [DONE]`. That isn't JSON, so handing it to `serde_json` would fail on every
+  successful reply. `event` checks for it *before* parsing and returns `Event::Done`. The
+  check stays here, not in `SseBuffer`: `[DONE]` is an OpenAI convention, not part of SSE,
+  and Gemini has no such marker.
+- **Many chunks carry no text.** The first chunk names the role (`"content": ""`), the last
+  has an empty `delta` and a `finish_reason`, a usage chunk has `"choices": []`, and some
+  servers send `"content": null`. `#[serde(default)]` and `Option` turn every one of those
+  into `Text("")` instead of an error, as Gemini's `text_of` does.
+
+### Runnable check first
+
+`cargo test ai::opencode`, in `src/ai/opencode.rs`:
+
+```rust
+#[test]
+fn the_conversation_becomes_chat_completions_messages() {
+    /* request_body("kimi-k2.6", [user, assistant]) serializes to
+       { model, messages: [{role: "user", content}, {role: "assistant", content}], stream: true } */
+}
+
+#[test]
+fn a_captured_chunk_yields_its_delta_text() { /* → Event::Text("Ankh-Morpork") */ }
+#[test]
+fn the_opening_chunk_names_the_role_and_yields_nothing() { /* → Text("") */ }
+#[test]
+fn a_null_content_yields_nothing() { /* → Text("") */ }
+#[test]
+fn the_closing_chunk_has_an_empty_delta_and_yields_nothing() { /* → Text("") */ }
+#[test]
+fn a_usage_chunk_has_no_choices_and_yields_nothing() { /* → Text("") */ }
+#[test]
+fn the_done_marker_ends_the_stream() { /* event("[DONE]") → Event::Done */ }
+#[test]
+fn a_payload_that_is_not_json_is_an_error() { /* event("[DONE") → Err */ }
+```
+
+Red against `todo!()` stubs: all 8 failed with `not yet implemented` (1 passed, 8 failed, 1
+ignored in the module).
+
+### Minimal implementation
+
+- **Request:** `CompletionRequest { model, messages, stream: true }` and
+  `CompletionMessage { role, content }`, both borrowing from the caller. A
+  `From<&Message>` impl maps `Role::Assistant` to `"assistant"`, where Gemini's says
+  `"model"`.
+- **Response:** `CompletionChunk { choices }` → `Choice { delta }` → `Delta { content:
+  Option<String> }`, with `#[serde(default)]` on the parts that can be missing.
+- **`enum Event { Text(String), Done }`** and `event(payload)`. It returns `Done` for
+  `[DONE]`. Otherwise it parses the payload and takes the first choice's `delta.content`,
+  or `""`.
+
+### Why it works
+
+- **Borrowing request structs.** `CompletionRequest<'a>` holds `&'a str`s into the model id
+  and the messages, so building the body copies no text. The lifetime ties the body to the
+  slice it was built from. It only lives until `.json(&body)` serializes it.
+- **`?` on `from_str`.** A payload that is neither `[DONE]` nor valid JSON is a real error.
+  It flows out as `serde_json::Error`, and `ChatError: From<serde_json::Error>` lets Step 7's
+  loop use `?` on it.
+- **`.into_iter().next()`** takes the first choice by value, so the `String` moves out and
+  isn't cloned. The request never asks for `n > 1`, so there is only ever one choice.
+
+### Scope note
+
+- No HTTP yet. The POST, the `Authorization: Bearer` header, and the loop that feeds
+  `SseBuffer` output to `event` and stops on `Done` are Step 7. `OpenCode` still returns the
+  canned reply.
+- Until Step 7 calls them, `cargo clippy` reports `dead_code` warnings for the new items.
+  They are left visible instead of silenced with `#[allow(dead_code)]`, since the next step
+  clears them.
+- The chunk shapes follow the OpenAI streaming format, not a capture from Zen. Step 7's
+  real stream is where a Zen-specific field (for example DeepSeek's `reasoning_content`)
+  would show up.
+- Error events inside the stream (`data: {"error": …}`) parse as a chunk with no choices,
+  so they yield `""`. If Step 7 sees them in practice, they become an `Event` variant.
+
+### Review notes (from the `simplify` pass)
+
+All four angles came back clean, so nothing was changed.
+
+- **Skipped:** an `Option<String>` or `Skip` variant for empty chunks. Gemini's `text_of`
+  also yields `""`, and the two providers stay consistent.
+- **Skipped:** folding the four "yields nothing" tests into one loop. One test per shape
+  matches `gemini.rs` and names each case.
+- **Noted for Step 7:** reuse `non_empty_reply` and `api_error` from `gemini.rs`. Lift them
+  into `ai/mod.rs` rather than copying them.
