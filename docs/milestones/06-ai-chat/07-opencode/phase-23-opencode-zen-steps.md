@@ -252,3 +252,128 @@ id under the key row. Forget the key and the list goes away.
   `models()` builds the same `ChatError::Api` inline. Moving it into `ai/mod.rs` touches
   `gemini.rs`, which is outside this step. It's worth doing in Step 7, when the Zen stream
   becomes the third caller.
+
+## Step 3 — Choose models for chat
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**What it is.** Each row of the Zen catalog is now a checkbox. Ticking a model saves it to
+a new `ai_models` table, and unticking removes it. After a relaunch, the ticks are still
+there. Nothing reads them yet: Step 4's chat picker is their first consumer.
+
+**The crux.** This is the first user-owned data that isn't in `Settings`. The phase's crux
+explains why: a model id is a `String`, and `Settings` is `Copy`. So the ticks get their own
+table, keyed by `(provider, model_id)`, instead of a column. A set of rows is also the
+natural shape for "which of these n things did you pick". A column would have to pack a
+list into text.
+
+### Runnable check first
+
+`src/db/ai_models.rs` — ticks round-trip, ticking twice is harmless, unticking removes one:
+
+```rust
+#[test]
+fn ticked_models_round_trip_and_untick_removes_one() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let db = Db::open(dir.path()).expect("open");
+
+    assert!(db.ticked_models(Provider::OpenCodeZen).expect("empty").is_empty());
+
+    db.set_ticked(Provider::OpenCodeZen, "kimi-k2.6", true).expect("tick kimi");
+    db.set_ticked(Provider::OpenCodeZen, "deepseek-v4-flash", true).expect("tick deepseek");
+    db.set_ticked(Provider::OpenCodeZen, "deepseek-v4-flash", true).expect("tick deepseek again");
+    assert_eq!(
+        db.ticked_models(Provider::OpenCodeZen).expect("read ticks"),
+        ["deepseek-v4-flash", "kimi-k2.6"]
+    );
+
+    db.set_ticked(Provider::OpenCodeZen, "kimi-k2.6", false).expect("untick kimi");
+    assert_eq!(
+        db.ticked_models(Provider::OpenCodeZen).expect("read after untick"),
+        ["deepseek-v4-flash"]
+    );
+}
+
+#[test]
+fn each_provider_keeps_its_own_ticks() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let db = Db::open(dir.path()).expect("open");
+
+    db.set_ticked(Provider::OpenCodeZen, "shared-id", true).expect("tick for Zen");
+
+    assert!(db.ticked_models(Provider::Gemini).expect("read Gemini").is_empty());
+}
+```
+
+Plus `each_provider_has_a_stable_storage_slug` in `src/ai/mod.rs`, which pins
+`"gemini"` and `"opencode-zen"`. Those strings are now stored data, and renaming one would
+orphan every tick saved under it.
+
+Red against `todo!()` stubs: both `ai_models` tests panicked with `not yet implemented`.
+**Eyeball under `dx serve`:** with a Zen key saved, every catalog row shows a checkbox.
+Clicking the model name toggles it too, because the row is a `<label>`. Tick
+`deepseek-v4-flash` and `kimi-k2.6`, relaunch, and both are still ticked.
+
+### Minimal implementation
+
+- **`src/ai/mod.rs`** — `Provider::slug()`: `"gemini"`, `"opencode-zen"`.
+- **`src/db/mod.rs`** — `CREATE TABLE IF NOT EXISTS ai_models (provider, model_id,
+  PRIMARY KEY (provider, model_id))` in `migrate`, plus `mod ai_models`.
+- **`src/db/ai_models.rs`** (new) — `ticked_models(provider)` selects ids ordered by
+  `model_id`. `set_ticked(provider, id, ticked)` runs `INSERT OR IGNORE` or `DELETE`.
+- **`src/main.rs`** — `use_context_provider(|| db.clone())`.
+- **`src/ui/settings.rs`** — `ZenCatalog` reads the ticks once, on mount, into a
+  `Signal<HashSet<String>>`. Each row is a `label` with the id and a checkbox. `onchange`
+  saves first and updates the set only if the save succeeded.
+- **`src/ui/settings.css`** — `.checkbox` restyles the native box to match the app. With
+  `appearance: none` it becomes a rounded square with a `--tint-border` outline. When
+  checked, it fills with the text colour and shows a check cut out in
+  `--USER__backgroundColor`, so it follows Day, Sepia and Night like the rest of the
+  settings. It shares the pill buttons' focus ring and the steppers' press-scale.
+
+### Why it works
+
+- **The composite primary key does the set semantics.** `(provider, model_id)` can't
+  repeat, so `INSERT OR IGNORE` makes a second tick a no-op instead of an error or a
+  duplicate row. `DELETE` of a missing row is also a no-op. So `set_ticked` is idempotent
+  in both directions, and the UI never has to ask "is it already there?"
+- **`query_map(..)?.collect()` into `Result<Vec<_>, _>`.** Each row is a
+  `Result<String, rusqlite::Error>`. `collect` into a `Result<Vec<_>, _>` stops at the
+  first error. It's the same trick as `?`, applied to a whole iterator.
+- **`for id in ids.iter().cloned()`.** The ids are borrowed from the resource's read guard.
+  The `onchange` closure is `move` and outlives this render, so it needs its own `String`.
+  `cloned()` gives each iteration an owned id, and the closure takes it.
+- **`let db = db.clone()` inside the attribute block.** Each row's closure moves in its own
+  `Rc<Db>`. Cloning an `Rc` bumps a counter; it doesn't copy the database.
+- **Save, then update the signal.** If the write fails, the signal isn't touched, so the
+  app's idea of what is ticked stays equal to what is stored. The box on screen doesn't
+  follow, though. The browser flipped it on the click, and since no signal changed,
+  Dioxus neither re-renders nor patches `checked`. It shows the unsaved tick until the
+  section remounts. A failing SQLite write is rare enough to leave for now.
+- **`HashSet`, not `Vec`, in the UI.** The component only asks whether an id is ticked, so
+  a set fits: `insert`/`remove` instead of `push`/`retain`. The DB still returns a sorted
+  `Vec`, because Step 4's picker will want a stable order.
+
+### Scope note
+
+- The ticks live in a signal local to `ZenCatalog`. Step 4 lifts them to an app-level
+  signal, because the chat drawer reads them too.
+- A ticked model that disappears from Zen's catalog stays in the table and simply has no
+  row to show. Pruning it can wait until it bites.
+- Gemini's models get no ticks. They stay fixed, per the phase's decisions.
+
+### Review notes (from the `simplify` pass)
+
+- **Applied:** `ticked` went from `Vec<String>` to `HashSet<String>`. It's only used for
+  membership checks.
+- **Skipped, for Step 4:** putting all of `Rc<Db>` in context gives every component access
+  to every table. Until now, only `Library` and the startup code in `main.rs` touched `Db`.
+  The better fix is the `Settings` pattern: load the ticks at the `App` root into a signal
+  and share that. The drawer is the ticks' second consumer, so the fix belongs to Step 4.
+- **Skipped:** implementing `Choice` for `Provider` to get `slug()`. `Choice` requires
+  `Default`, and `from_slug` falls back to it silently. That suits a picker setting, but
+  `Provider` has no natural default.
+- **Skipped:** reusing `SettingRow` for the catalog rows. It takes a `&'static str`
+  label and renders a `div`. A catalog row needs a runtime `String` and a `<label>`, so the
+  checkbox toggles on a click on the name. Widening it touches every caller.

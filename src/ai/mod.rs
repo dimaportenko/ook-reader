@@ -16,6 +16,13 @@ impl Provider {
             Provider::OpenCodeZen => "OpenCode Zen",
         }
     }
+
+    pub(crate) fn slug(self) -> &'static str {
+        match self {
+            Provider::Gemini => "gemini",
+            Provider::OpenCodeZen => "opencode-zen",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,6 +117,14 @@ mod test {
         assert_eq!(
             [Provider::Gemini, Provider::OpenCodeZen].map(Provider::label),
             ["Gemini", "OpenCode Zen"]
+        );
+    }
+
+    #[test]
+    fn each_provider_has_a_stable_storage_slug() {
+        assert_eq!(
+            [Provider::Gemini, Provider::OpenCodeZen].map(Provider::slug),
+            ["gemini", "opencode-zen"]
         );
     }
 

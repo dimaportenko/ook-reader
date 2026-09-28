@@ -1,10 +1,11 @@
-use std::rc::Rc;
+use std::{collections::HashSet, rc::Rc};
 
 use dioxus::prelude::*;
 use dioxus_primitives::ContentAlign;
 
 use crate::{
     ai::{gemini::Gemini, opencode, Provider},
+    db::Db,
     secrets::{api_key, SecretStore},
     settings::{
         choice::Choice, Settings, FONT_SIZE_MAX, FONT_SIZE_MIN, LINE_HEIGHT_MAX,
@@ -297,7 +298,15 @@ pub(crate) fn OpenCodeZenSettings() -> Element {
 
 #[component]
 fn ZenCatalog() -> Element {
+    let db = use_context::<Rc<Db>>();
     let catalog = use_resource(opencode::models);
+    let mut ticked = use_signal(|| {
+        db.ticked_models(Provider::OpenCodeZen)
+            .or_log("read your chosen models")
+            .unwrap_or_default()
+            .into_iter()
+            .collect::<HashSet<String>>()
+    });
 
     rsx! {
         match &*catalog.read() {
@@ -311,8 +320,34 @@ fn ZenCatalog() -> Element {
                 p { class: "{Styles::catalog_error}", "Could not load the model list: {error}" }
             },
             Some(Ok(ids)) => rsx! {
-                for id in ids {
-                    div { key: "{id}", class: "{Styles::settings_row}", {id.as_str()} }
+                for id in ids.iter().cloned() {
+                    label {
+                        key: "{id}",
+                        class: "{Styles::settings_row}",
+                        span { class: "{Styles::settings_row__label}", "{id}" }
+                        input {
+                            class: "{Styles::checkbox}",
+                            r#type: "checkbox",
+                            checked: ticked.read().contains(&id),
+                            onchange: {
+                                let db = db.clone();
+                                move |event: FormEvent| {
+                                    let tick = event.checked();
+                                    if db
+                                        .set_ticked(Provider::OpenCodeZen, &id, tick)
+                                        .or_log("save your chosen models")
+                                        .is_some()
+                                    {
+                                        if tick {
+                                            ticked.write().insert(id.clone());
+                                        } else {
+                                            ticked.write().remove(&id);
+                                        }
+                                    }
+                                }
+                            },
+                        }
+                    }
                 }
             },
         }

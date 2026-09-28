@@ -89,6 +89,7 @@ fn App() -> Element {
     let desktop = crate::renderer::use_window();
     use_hook(move || window::remember_frame(&desktop.window));
 
+    use_context_provider(|| db.clone());
     use_context_provider(|| library.clone());
     use_context_provider(|| books);
     use_context_provider(|| status);

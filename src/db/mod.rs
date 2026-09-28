@@ -2,6 +2,7 @@ use std::path::Path;
 
 use rusqlite::Connection;
 
+mod ai_models;
 mod books;
 mod positions;
 mod settings;
@@ -59,6 +60,15 @@ impl Db {
                 page_margins INTEGER NOT NULL,
                 max_line_length INTEGER NOT NULL,
                 ai_model TEXT NOT NULL DEFAULT 'flash-lite'
+            )",
+            [],
+        )?;
+
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS ai_models (
+                provider TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                PRIMARY KEY (provider, model_id)
             )",
             [],
         )?;
