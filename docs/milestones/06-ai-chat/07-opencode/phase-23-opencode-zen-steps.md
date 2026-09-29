@@ -23,7 +23,7 @@ format reuses the SSE buffer; only its JSON and the `[DONE]` marker are new.
 6. ~~**The `chat/completions` wire format.**~~ Request body, chunk text and `[DONE]`, under `#[test]`. **Done** — `adf6670`.
 7. ~~**The real Zen stream.**~~ POST with Bearer auth, checked end to end with a real key. **Done** — `36f95b4`.
 8. ~~**The deferred punch list.**~~ `GeminiModel` moves to `ai::gemini`, one shared `reqwest::Client`, and the bubble font size is restored. **Done** — `df1849d`. *(Was "Review and refactor". It became a mid-phase step on 2026-09-29, when Steps 9–10 were added.)*
-9. **Gemini thinks minimally.** Add `generationConfig.thinkingConfig.thinkingLevel: "minimal"` to the request body.
+9. ~~**Gemini thinks minimally.**~~ Add `generationConfig.thinkingConfig.thinkingLevel: "minimal"` to the request body. **Done** — `40e24eb`.
 10. **Zen thinks less.** First find, with `curl`, a flag the ticked models honor, then send it in the `chat/completions` body.
 11. **Review and refactor.**
 
@@ -1132,6 +1132,8 @@ the answers too thin.
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `40e24eb` (228 tests green, 4 ignored; clippy clean; quick-starting Gemini replies confirmed by hand).
 
 **What it is.** Every Gemini request asks for `thinkingLevel: "minimal"`, so Flash-Lite
 and Flash start answering almost immediately.

@@ -69,6 +69,6 @@ Three consequences follow, and each is a lesson:
 - [x] 6. The `chat/completions` wire format — request body, chunk text, `[DONE]`, under `#[test]`
 - [x] 7. The real Zen stream — POST, Bearer auth, end to end with a real key
 - [x] 8. The deferred punch list — `AiModel` → `ai::gemini::GeminiModel`, one shared `reqwest::Client`, bubble font size restored
-- [ ] 9. Gemini thinks minimally — `thinkingConfig.thinkingLevel: "minimal"` in the request body
+- [x] 9. Gemini thinks minimally — `thinkingConfig.thinkingLevel: "minimal"` in the request body
 - [ ] 10. Zen thinks less — a flag found by `curl` per model, sent in the `chat/completions` body
 - [ ] 11. Review and refactor
