@@ -1130,6 +1130,9 @@ the answers too thin.
 
 ## Step 9 — Gemini thinks minimally
 
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
 **What it is.** Every Gemini request asks for `thinkingLevel: "minimal"`, so Flash-Lite
 and Flash start answering almost immediately.
 
@@ -1207,3 +1210,20 @@ struct ThinkingConfig {
 - The level isn't a setting yet. A "Think harder" option in Settings → AI is a later
   refinement, and only if answers come back too thin.
 - Zen is Step 10.
+
+### Review notes (from the `simplify` pass)
+
+The pass was run inline over the 31-line, one-file diff rather than as four agents.
+
+- **Clean:** reuse. These are the first `rename_all` attributes in `src/`, and no config
+  struct existed to share with Zen.
+- **Clean:** efficiency. The config is three zero-cost structs built per request.
+- **Skipped:** a `json!` literal for `generationConfig`. It's shorter, but it gives up the
+  typed request that the rest of `GenerateRequest` uses, and a misspelled key would only
+  show up as a runtime `400`.
+- **Skipped:** a `const MINIMAL: &str`. The literal is used once, and the test is what
+  spells out the contract.
+
+Red before the implementation: `gemini_is_asked_to_think_minimally` failed with
+`left: Null`, and the tripwire `the_conversation_becomes_gemini_contents` failed on the
+missing `generationConfig`. Green after: 228 passed, 4 ignored, and clippy was clean.

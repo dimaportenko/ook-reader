@@ -23,8 +23,22 @@ impl GeminiModel {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct GenerateRequest<'a> {
     contents: Vec<Content<'a>>,
+    generation_config: GenerationConfig,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GenerationConfig {
+    thinking_config: ThinkingConfig,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ThinkingConfig {
+    thinking_level: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -41,6 +55,11 @@ struct Part<'a> {
 fn request_body(messages: &[Message]) -> GenerateRequest<'_> {
     GenerateRequest {
         contents: messages.iter().map(Content::from).collect(),
+        generation_config: GenerationConfig {
+            thinking_config: ThinkingConfig {
+                thinking_level: "minimal",
+            },
+        },
     }
 }
 
@@ -174,8 +193,19 @@ mod test {
                 "contents": [
                     { "role": "user",  "parts": [{ "text": "Which city?" }] },
                     { "role": "model", "parts": [{ "text": "Ankh-Morpork" }] },
-                ]
+                ],
+                "generationConfig": { "thinkingConfig": { "thinkingLevel": "minimal" } }
             })
+        );
+    }
+
+    #[test]
+    fn gemini_is_asked_to_think_minimally() {
+        let body = serde_json::to_value(request_body(&[Message::user("Which city?")])).unwrap();
+
+        assert_eq!(
+            body["generationConfig"],
+            json!({ "thinkingConfig": { "thinkingLevel": "minimal" } })
         );
     }
 
