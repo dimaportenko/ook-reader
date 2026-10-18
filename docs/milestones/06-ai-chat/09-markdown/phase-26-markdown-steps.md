@@ -19,9 +19,10 @@ the streaming one included.
    panic and never vanish. A `Markdown { text }` component in `src/ui/markdown.rs` replaces
    the raw `"{message.text()}"` for assistant turns and for the streaming bubble's reply
    text. *Thinking…* and `...` stay plain. **Done** — `781f5e0`.
-2. **Headings, lists, quotes and rules.** `Block::Heading`, `List { start: Option<u64>,
+2. ~~**Headings, lists, quotes and rules.**~~ `Block::Heading`, `List { start: Option<u64>,
    items }` with nested lists and tight/loose items, `Quote(Vec<Block>)` and `Rule`. Add CSS
-   for heading sizes inside a bubble, list indentation and the quote's border.
+   for heading sizes inside a bubble, list indentation and the quote's border. **Done** —
+   `fb766cc`.
 3. **Code blocks.** `Block::Code { lang: Option<String>, text }` for both fenced and
    indented blocks, plus styling for inline `code`. Use a monospaced font, a theme-tinted
    background, and `overflow-x: auto` so long lines scroll. A test pins that an unclosed
@@ -226,6 +227,8 @@ typed.
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `fb766cc` (250 tests green, 3 ignored; clippy clean). The drawer rendering is still to be confirmed by hand under `dx serve`.
 
 **What it is.** A reply with `## Steps`, a bulleted or numbered list (nested lists
 included), a `> quote` or a `---` rule now shows a heading, a real list, an indented quote
