@@ -23,10 +23,11 @@ the streaming one included.
    items }` with nested lists and tight/loose items, `Quote(Vec<Block>)` and `Rule`. Add CSS
    for heading sizes inside a bubble, list indentation and the quote's border. **Done** —
    `fb766cc`.
-3. **Code blocks.** `Block::Code { lang: Option<String>, text }` for both fenced and
+3. ~~**Code blocks.**~~ `Block::Code { lang: Option<String>, text }` for both fenced and
    indented blocks, plus styling for inline `code`. Use a monospaced font, a theme-tinted
    background, and `overflow-x: auto` so long lines scroll. A test pins that an unclosed
    fence, as seen mid-stream, still yields a code block that holds the partial text.
+   **Done** — `e718dca`.
 4. **Tables.** `Block::Table { align, head, rows }` with each cell holding inlines, from
    `Options::ENABLE_TABLES`. It renders as a real `table` inside a wrapper that scrolls
    sideways.
@@ -416,6 +417,8 @@ first and last block sit flush with the bubble's padding.
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `e718dca` (257 tests green, 3 ignored; clippy clean). The drawer rendering is still to be confirmed by hand under `dx serve`.
 
 **What it is.** A fenced block (```` ```rust ````) or an indented block in a reply now
 shows as a code box: a monospaced font on a slightly darker tint, every space and line
