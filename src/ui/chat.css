@@ -23,15 +23,79 @@
   white-space: pre-wrap;
 }
 
-.chat_panel__turn p {
+.chat_panel__turn :is(p, ul, ol, blockquote) {
   margin: 0.6em 0;
 }
 
-.chat_panel__turn p:first-child {
+.chat_panel__turn :is(h1, h2, h3, h4, h5, h6) {
+  margin: 0.9em 0 0.4em;
+  font-size: 1em;
+  line-height: 1.3;
+}
+
+.chat_panel__turn h1 {
+  font-size: 1.3em;
+}
+
+.chat_panel__turn h2 {
+  font-size: 1.18em;
+}
+
+.chat_panel__turn h3 {
+  font-size: 1.08em;
+}
+
+.chat_panel__turn :is(ul, ol) {
+  padding-left: 1.4em;
+}
+
+.chat_panel__turn ul {
+  list-style: disc;
+}
+
+.chat_panel__turn ul ul {
+  list-style: circle;
+}
+
+.chat_panel__turn ol {
+  list-style: decimal;
+}
+
+.chat_panel__turn li + li {
+  margin-top: 0.25em;
+}
+
+.chat_panel__turn li > p {
+  margin: 0;
+}
+
+.chat_panel__turn li > p + p {
+  margin-top: 0.4em;
+}
+
+.chat_panel__turn li :is(ul, ol) {
+  margin: 0.25em 0 0;
+}
+
+.chat_panel__turn blockquote {
+  padding-left: 0.75em;
+  border-left: 3px solid var(--tint-border);
+  opacity: 0.85;
+}
+
+.chat_panel__turn hr {
+  margin: 0.9em 0;
+  border: 0;
+  border-top: 1px solid var(--tint-divider);
+}
+
+.chat_panel__turn
+  :is(p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, hr):first-child {
   margin-top: 0;
 }
 
-.chat_panel__turn p:last-child {
+.chat_panel__turn
+  :is(p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, hr):last-child {
   margin-bottom: 0;
 }
 

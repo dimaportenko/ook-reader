@@ -221,3 +221,190 @@ typed.
   `ENABLE_TASKLISTS`, into the arm that ignores links and images.
 - **Skipped:** reading `message.role()` once into a local. It's called twice in the same
   `li`, and a `let` inside the RSX `for` would be more lines than it saves.
+
+## Step 2 — Headings, lists, quotes and rules
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**What it is.** A reply with `## Steps`, a bulleted or numbered list (nested lists
+included), a `> quote` or a `---` rule now shows a heading, a real list, an indented quote
+with a bar on its left, and a thin line. A numbered list that starts at 3 still counts from
+3. Code blocks and tables still show as plain paragraphs, and links and images still show
+as their text.
+
+### The crux of this step: a second stack, for blocks
+
+Step 1 had one stack, `spans`, for inline styles that are still open, and every finished
+paragraph went straight into the flat `blocks`. That works only while blocks never contain
+blocks. A list item holds paragraphs and maybe another list; a quote holds paragraphs and
+lists. So blocks now need the same trick inlines got: a stack of **containers** still
+open. `Start(List)` or `Start(BlockQuote)` pushes a frame, every finished block goes into
+the top frame instead of `blocks`, and the matching `End` pops the frame, turns it into a
+`Block` and pushes that into the frame below. The two stacks stay separate because they
+nest at different levels: a span can never hold a block, and a block always ends every
+span still open inside it.
+
+### Runnable check first
+
+`src/chat/markdown.rs` — seven new tests, and one reworked:
+
+```rust
+#[test]
+fn lists_nest_inside_items() {
+    assert_eq!(
+        parse("- one\n  - inner\n- two"),
+        [Block::List {
+            start: None,
+            items: vec![
+                vec![
+                    paragraph(vec![text("one")]),
+                    Block::List {
+                        start: None,
+                        items: vec![vec![paragraph(vec![text("inner")])]],
+                    },
+                ],
+                vec![paragraph(vec![text("two")])],
+            ],
+        }]
+    );
+}
+
+#[test]
+fn a_quote_holds_its_blocks() {
+    assert_eq!(
+        parse("> quoted\n>\n> - item"),
+        [Block::Quote(vec![
+            paragraph(vec![text("quoted")]),
+            Block::List {
+                start: None,
+                items: vec![vec![paragraph(vec![text("item")])]],
+            },
+        ])]
+    );
+}
+```
+
+The others: `headings_keep_their_level` (`#` and `###`, with emphasis inside),
+`a_tight_list_gives_each_item_a_paragraph`, `a_loose_list_keeps_every_paragraph_of_an_item`,
+`an_ordered_list_keeps_its_start` (`3.` → `Some(3)`) and `a_rule_sits_between_paragraphs`.
+
+`unhandled_blocks_keep_their_text` drops the heading, list, quote and rule, which are
+handled now, and keeps the code block, table, link, image and inline HTML. It adds a code
+block inside a list item and a table inside a quote, and walks the tree with a recursive
+`collect_text`, so the "nothing vanishes" guarantee now covers text inside containers too.
+
+Red, with the new `Block` variants and their rendering in place but `parse` unchanged: 7
+failed, 243 passed, 3 ignored. The reworked `unhandled_blocks_keep_their_text` passed,
+since Step 1 already flattened everything.
+
+```
+test chat::markdown::test::a_loose_list_keeps_every_paragraph_of_an_item ... FAILED
+test chat::markdown::test::a_rule_sits_between_paragraphs ... FAILED
+test chat::markdown::test::a_tight_list_gives_each_item_a_paragraph ... FAILED
+test chat::markdown::test::a_quote_holds_its_blocks ... FAILED
+test chat::markdown::test::headings_keep_their_level ... FAILED
+test chat::markdown::test::an_ordered_list_keeps_its_start ... FAILED
+test chat::markdown::test::lists_nest_inside_items ... FAILED
+```
+
+Green after: 250 passed, 3 ignored, and `cargo clippy --all-targets` was clean.
+
+**Eyeball under `dx serve`:** ask for "a short outline with a heading, a nested bulleted
+list, a numbered list starting at 3, a quote and a horizontal rule". The heading is a
+little larger and bold but not huge. Bullets and numbers sit indented inside the bubble,
+the nested list uses hollow bullets, the numbers start at 3. The quote has a faint bar on
+its left. The rule is a thin line. There are no blank lines between list items, and the
+first and last block sit flush with the bubble's padding.
+
+### Minimal implementation
+
+- **`src/chat/markdown.rs`** —
+  - `Block` gains `Heading { level: u8, inlines }`, `List { start: Option<u64>, items:
+    Vec<Vec<Block>> }`, `Quote(Vec<Block>)` and `Rule`.
+  - A private `Container` enum, `Quote(Vec<Block>)` or `List { start, items }`, with
+    `into_block`. `Builder` gains `containers: Vec<Container>`.
+  - `push_block` writes into the top container (a list's last item), or into `blocks`
+    when none is open. `end_block` now goes through it, so a paragraph lands wherever it
+    belongs.
+  - `take_inlines` is the old first half of `end_block`: close every open span, take the
+    inlines. `end_block` and the new `end_heading` share it.
+  - New arms: `End(Heading(level))` → `end_heading`. `Start(BlockQuote | List)` →
+    `open_container`. `End(BlockQuote | List)` → `close_container`. `Start(Item)` →
+    `start_item`, which pushes an empty item onto the open list. `Rule` → `rule`. All of
+    them call `end_block` first. `End(Item)`, `Start(Heading)`, `Start/End(Paragraph)`,
+    code blocks and table cells still fall to the `Start(_) | End(_)` arm, which ends the
+    current paragraph.
+- **`src/ui/markdown.rs`** — `Markdown` is now just `render_blocks(&parse(&text))`. The
+  recursive `render_blocks` maps `Paragraph` → `p`, `List` → `ul` or `ol { start }` of
+  `li`s that recurse, `Quote` → `blockquote` that recurses, `Rule` → `hr`.
+  `render_heading` maps the level to `h1`–`h6`.
+- **`src/ui/chat.css`** — `p`, `ul`, `ol` and `blockquote` share the `0.6em` vertical
+  margin. Headings are `1.3em`/`1.18em`/`1.08em` for levels 1–3 and `1em` below that, with
+  more space above than below. Lists get `1.4em` of indent and an explicit `list-style`.
+  Paragraphs inside an item lose their margins, and nested lists sit `0.25em` under their
+  item. The quote has a `3px` `--tint-border` bar and is slightly faded. The rule is a
+  `1px` `--tint-divider` line. The first-child/last-child rule that kept paragraphs flush
+  now covers every block element.
+
+### Why it works
+
+- **Where does this block go?** `push_block` answers that in one place, from the top of
+  the container stack. `- one\n  - inner` arrives as `Start(List) Start(Item) Text(one)
+  Start(List) Start(Item) Text(inner) End(Item) End(List) End(Item) End(List)`. The
+  inner `Start(List)` ends `one` as a paragraph in the outer item, then becomes the top
+  frame. Its `End(List)` pops it, and `push_block` puts the finished `List` into the outer
+  list's last item, right after `one`.
+- **Tight lists need no special case.** In a tight list `pulldown-cmark` sends an item's
+  text with no `Paragraph` around it. That text gathers in `inlines` like any other, and
+  `end_block` wraps it in a `Paragraph` when the next boundary arrives: the nested list's
+  `Start`, the `End(Item)`, or anything else. A loose list sends real `Paragraph` events,
+  which end up in the same shape.
+- **A list's items live inside its frame.** Items aren't containers of their own: an item
+  is the last `Vec<Block>` of the open list, and `Start(Item)` just pushes a new one. That
+  keeps the stack to two kinds of frame.
+- **`End` always meets its own frame.** `pulldown-cmark` closes every block it opened,
+  even at the end of half-streamed text, so popping the top frame on `End(List)` or
+  `End(BlockQuote)` is always right, the same reasoning that makes `spans` safe.
+- **Headings own their inlines.** `End(Heading)` takes whatever inlines gathered since the
+  heading started, so emphasis inside a heading works with no extra code.
+- **No stray blank lines.** The bubble keeps `white-space: pre-wrap`, so a stray newline
+  text node between two blocks would show as a blank line. RSX never creates whitespace
+  between elements: the only `"\n"` text nodes are `SoftBreak`s, inside paragraphs. So
+  pre-wrap needs no reset, and soft breaks still break lines.
+- **Lists need an explicit `list-style`.** The bubble is itself an `li` inside the
+  messages `ul`, which sets `list-style: none`. `list-style` is inherited, so without
+  `list-style: disc` and `decimal` a reply's bullets and numbers would vanish.
+
+### Forks taken
+
+- **Tight and loose items have the same shape.** Item text always becomes a `Paragraph`.
+  The alternative is `List { tight: bool, .. }` and rendering tight items' inlines bare in
+  the `li`. In a narrow bubble the difference is a few pixels of spacing, and CSS
+  (`li > p { margin: 0 }`) already makes a tight list look tight. The cost: a loose list
+  looks tight too, apart from `0.4em` between paragraphs of the same item.
+- **Heading levels map one to one to `h1`–`h6`.** CSS sizes them down to fit a bubble
+  (`h1` is only `1.3em`). The alternative is to shift the levels (`#` → `h3`), which saves
+  CSS but lies about the structure.
+- **`level: u8`, not `HeadingLevel`.** The tree stays free of `pulldown-cmark` types, like
+  the rest of it. `level as u8` works because `HeadingLevel` is `H1 = 1, H2, …`.
+- **`start: Option<u64>` doubles as "ordered or not".** `None` is a bulleted list, `Some`
+  is numbered. That's the shape `Tag::List` already uses, so no extra `ordered: bool`.
+- **Headings render through a helper.** RSX can't pick a tag name at run time, so
+  `render_heading` matches the level to six `rsx!` arms. Levels beyond 6 can't occur; the
+  catch-all arm is `h6`.
+
+### Scope note
+
+- Code blocks are still paragraphs (Step 3); inside a list item or a quote they now land
+  in that item or quote, still as paragraphs. Tables are Step 4, links, images and raw HTML
+  Step 5.
+- GFM task lists (`- [ ]`) stay off; `TaskListMarker` is still ignored.
+
+### Review notes (from the `simplify` pass)
+
+- **Applied:** dropped a `finish` method that popped any containers still open at the end
+  of the text. `pulldown-cmark` closes every block itself, and `spans` already relies on
+  the same guarantee.
+- **Skipped:** a separate `Container::Item` frame. Treating an item as the list's last
+  `Vec<Block>` is less code and needs no "is the parent a list?" check on `End(Item)`.

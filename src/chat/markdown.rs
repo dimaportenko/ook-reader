@@ -1,8 +1,18 @@
-use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Block {
     Paragraph(Vec<Inline>),
+    Heading {
+        level: u8,
+        inlines: Vec<Inline>,
+    },
+    List {
+        start: Option<u64>,
+        items: Vec<Vec<Block>>,
+    },
+    Quote(Vec<Block>),
+    Rule,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,9 +43,27 @@ impl Span {
     }
 }
 
+enum Container {
+    Quote(Vec<Block>),
+    List {
+        start: Option<u64>,
+        items: Vec<Vec<Block>>,
+    },
+}
+
+impl Container {
+    fn into_block(self) -> Block {
+        match self {
+            Container::Quote(blocks) => Block::Quote(blocks),
+            Container::List { start, items } => Block::List { start, items },
+        }
+    }
+}
+
 #[derive(Default)]
 struct Builder {
     blocks: Vec<Block>,
+    containers: Vec<Container>,
     inlines: Vec<Inline>,
     spans: Vec<(Span, Vec<Inline>)>,
 }
@@ -62,13 +90,60 @@ impl Builder {
         }
     }
 
-    fn end_block(&mut self) {
+    fn take_inlines(&mut self) -> Vec<Inline> {
         while !self.spans.is_empty() {
             self.close();
         }
-        if !self.inlines.is_empty() {
-            let inlines = std::mem::take(&mut self.inlines);
-            self.blocks.push(Block::Paragraph(inlines));
+        std::mem::take(&mut self.inlines)
+    }
+
+    fn push_block(&mut self, block: Block) {
+        match self.containers.last_mut() {
+            Some(Container::Quote(blocks)) => blocks.push(block),
+            Some(Container::List { items, .. }) => match items.last_mut() {
+                Some(item) => item.push(block),
+                None => items.push(vec![block]),
+            },
+            None => self.blocks.push(block),
+        }
+    }
+
+    fn end_block(&mut self) {
+        let inlines = self.take_inlines();
+        if !inlines.is_empty() {
+            self.push_block(Block::Paragraph(inlines));
+        }
+    }
+
+    fn end_heading(&mut self, level: HeadingLevel) {
+        let inlines = self.take_inlines();
+        self.push_block(Block::Heading {
+            level: level as u8,
+            inlines,
+        });
+    }
+
+    fn rule(&mut self) {
+        self.end_block();
+        self.push_block(Block::Rule);
+    }
+
+    fn open_container(&mut self, container: Container) {
+        self.end_block();
+        self.containers.push(container);
+    }
+
+    fn start_item(&mut self) {
+        self.end_block();
+        if let Some(Container::List { items, .. }) = self.containers.last_mut() {
+            items.push(Vec::new());
+        }
+    }
+
+    fn close_container(&mut self) {
+        self.end_block();
+        if let Some(container) = self.containers.pop() {
+            self.push_block(container.into_block());
         }
     }
 }
@@ -84,10 +159,21 @@ pub(crate) fn parse(text: &str) -> Vec<Block> {
             Event::End(TagEnd::Strong | TagEnd::Emphasis | TagEnd::Strikethrough) => {
                 builder.close()
             }
+            Event::End(TagEnd::Heading(level)) => builder.end_heading(level),
+            Event::Start(Tag::BlockQuote(_)) => {
+                builder.open_container(Container::Quote(Vec::new()))
+            }
+            Event::Start(Tag::List(start)) => builder.open_container(Container::List {
+                start,
+                items: Vec::new(),
+            }),
+            Event::End(TagEnd::BlockQuote(_) | TagEnd::List(_)) => builder.close_container(),
+            Event::Start(Tag::Item) => builder.start_item(),
+            Event::Rule => builder.rule(),
             Event::Start(Tag::Link { .. } | Tag::Image { .. })
             | Event::End(TagEnd::Link | TagEnd::Image)
             | Event::TaskListMarker(_) => {}
-            Event::Start(_) | Event::End(_) | Event::Rule => builder.end_block(),
+            Event::Start(_) | Event::End(_) => builder.end_block(),
             Event::Code(code) => builder.push(Inline::Code(code.into_string())),
             Event::SoftBreak => builder.push(Inline::SoftBreak),
             Event::HardBreak => builder.push(Inline::HardBreak),
@@ -186,26 +272,142 @@ mod test {
     }
 
     #[test]
+    fn headings_keep_their_level() {
+        assert_eq!(
+            parse("# Title\n\n### Sub *part*"),
+            [
+                Block::Heading {
+                    level: 1,
+                    inlines: vec![text("Title")],
+                },
+                Block::Heading {
+                    level: 3,
+                    inlines: vec![text("Sub "), Inline::Emphasis(vec![text("part")])],
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_tight_list_gives_each_item_a_paragraph() {
+        assert_eq!(
+            parse("- one\n- **two**"),
+            [Block::List {
+                start: None,
+                items: vec![
+                    vec![paragraph(vec![text("one")])],
+                    vec![paragraph(vec![Inline::Strong(vec![text("two")])])],
+                ],
+            }]
+        );
+    }
+
+    #[test]
+    fn a_loose_list_keeps_every_paragraph_of_an_item() {
+        assert_eq!(
+            parse("1. one\n\n2. two\n\n   more"),
+            [Block::List {
+                start: Some(1),
+                items: vec![
+                    vec![paragraph(vec![text("one")])],
+                    vec![paragraph(vec![text("two")]), paragraph(vec![text("more")])],
+                ],
+            }]
+        );
+    }
+
+    #[test]
+    fn an_ordered_list_keeps_its_start() {
+        assert_eq!(
+            parse("3. three\n4. four"),
+            [Block::List {
+                start: Some(3),
+                items: vec![
+                    vec![paragraph(vec![text("three")])],
+                    vec![paragraph(vec![text("four")])],
+                ],
+            }]
+        );
+    }
+
+    #[test]
+    fn lists_nest_inside_items() {
+        assert_eq!(
+            parse("- one\n  - inner\n- two"),
+            [Block::List {
+                start: None,
+                items: vec![
+                    vec![
+                        paragraph(vec![text("one")]),
+                        Block::List {
+                            start: None,
+                            items: vec![vec![paragraph(vec![text("inner")])]],
+                        },
+                    ],
+                    vec![paragraph(vec![text("two")])],
+                ],
+            }]
+        );
+    }
+
+    #[test]
+    fn a_quote_holds_its_blocks() {
+        assert_eq!(
+            parse("> quoted\n>\n> - item"),
+            [Block::Quote(vec![
+                paragraph(vec![text("quoted")]),
+                Block::List {
+                    start: None,
+                    items: vec![vec![paragraph(vec![text("item")])]],
+                },
+            ])]
+        );
+    }
+
+    #[test]
+    fn a_rule_sits_between_paragraphs() {
+        assert_eq!(
+            parse("above\n\n---\n\nbelow"),
+            [
+                paragraph(vec![text("above")]),
+                Block::Rule,
+                paragraph(vec![text("below")]),
+            ]
+        );
+    }
+
+    fn collect_text(blocks: &[Block], seen: &mut String) {
+        for block in blocks {
+            match block {
+                Block::Paragraph(inlines) | Block::Heading { inlines, .. } => {
+                    for inline in inlines {
+                        if let Inline::Text(text) | Inline::Code(text) = inline {
+                            seen.push_str(text);
+                            seen.push('|');
+                        }
+                    }
+                }
+                Block::List { items, .. } => {
+                    for item in items {
+                        collect_text(item, seen);
+                    }
+                }
+                Block::Quote(blocks) => collect_text(blocks, seen),
+                Block::Rule => {}
+            }
+        }
+    }
+
+    #[test]
     fn unhandled_blocks_keep_their_text() {
         let blocks = parse(
-            "# Title\n\n- one\n- two\n\n> quoted\n\n```\nlet x = 1;\n```\n\n| a | b |\n|---|---|\n| c | d |\n\n[link](https://example.com) ![alt](x.png) <b>html</b>\n\n---",
+            "```\nlet x = 1;\n```\n\n| a | b |\n|---|---|\n| c | d |\n\n[link](https://example.com) ![alt](x.png) <b>html</b>\n\n- item\n\n  ```\n  nested code\n  ```\n\n> | e | f |\n> |---|---|",
         );
 
         let mut seen = String::new();
-        for Block::Paragraph(inlines) in &blocks {
-            for inline in inlines {
-                if let Inline::Text(text) | Inline::Code(text) = inline {
-                    seen.push_str(text);
-                    seen.push('|');
-                }
-            }
-        }
+        collect_text(&blocks, &mut seen);
 
         for expected in [
-            "Title",
-            "one",
-            "two",
-            "quoted",
             "let x = 1;",
             "a",
             "b",
@@ -216,6 +418,10 @@ mod test {
             "<b>",
             "html",
             "</b>",
+            "item",
+            "nested code",
+            "e",
+            "f",
         ] {
             assert!(
                 seen.contains(expected),
