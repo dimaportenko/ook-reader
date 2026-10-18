@@ -7,7 +7,7 @@ a chat whose first message is already filled in — book title, author, the sele
 so the only thing left to type is the question. First provider: **Gemini Flash-Lite**.
 The provider and model must be swappable later without touching the reader.
 
-**Status:** 🚧 in progress — captured 2026-09-11; [Phase 17](01-provider/phase-17-provider-boundary.md) closed 2026-09-13; [Phase 18](02-key-storage/phase-18-key-storage.md) closed 2026-09-20; [Phase 19](03-chat-panel/phase-19-chat-panel.md) closed 2026-09-22; [Phase 20](04-selection/phase-20-selection-chat.md) closed 2026-09-24; [Phase 22](05-streaming/phase-22-streaming.md) closed 2026-09-27, **ahead of Phase 21**. [Phase 23](07-opencode/phase-23-opencode-zen.md) (OpenCode Zen) opened 2026-09-27 ahead of Phase 21, then paused the same day for [Phase 24](06-settings-screen/phase-24-settings-screen.md) (settings screen), which closed 2026-09-28. [Phase 25](08-openai/phase-25-openai.md) (OpenAI, GPT-6 Luna) captured 2026-10-18, to follow Phase 23, opened the same day before Phase 23's review step, and closed the same day. On 2026-10-18 the OpenCode Zen provider was removed (it didn't work as expected; OpenAI covers the need), so Phase 23 is superseded with Step 11 undone. No ADR yet. Sits behind
+**Status:** 🚧 in progress — captured 2026-09-11; [Phase 17](01-provider/phase-17-provider-boundary.md) closed 2026-09-13; [Phase 18](02-key-storage/phase-18-key-storage.md) closed 2026-09-20; [Phase 19](03-chat-panel/phase-19-chat-panel.md) closed 2026-09-22; [Phase 20](04-selection/phase-20-selection-chat.md) closed 2026-09-24; [Phase 22](05-streaming/phase-22-streaming.md) closed 2026-09-27, **ahead of Phase 21**. [Phase 23](07-opencode/phase-23-opencode-zen.md) (OpenCode Zen) opened 2026-09-27 ahead of Phase 21, then paused the same day for [Phase 24](06-settings-screen/phase-24-settings-screen.md) (settings screen), which closed 2026-09-28. [Phase 25](08-openai/phase-25-openai.md) (OpenAI, GPT-6 Luna) captured 2026-10-18, to follow Phase 23, opened the same day before Phase 23's review step, and closed the same day. On 2026-10-18 the OpenCode Zen provider was removed (it didn't work as expected; OpenAI covers the need), so Phase 23 is superseded with Step 11 undone. [Phase 26](09-markdown/phase-26-markdown.md) (Markdown replies) captured 2026-10-18, ahead of Phase 21, opened the same day and closed the same day. No ADR yet. Sits behind
 nothing: Milestones 3 and 5 both have no phase in progress.
 
 ## The idea in one paragraph
@@ -33,6 +33,7 @@ deliberately pushed to its own phase so the first end-to-end slice is request/re
 | 24 | [Settings screen](06-settings-screen/phase-24-settings-screen.md) | A gear in the library opens a full-screen settings view: sidebar on desktop, list → section on a phone; *Reader theme* and *AI* sections, with Gemini's key and model moved out of the reader popover | ✅ |
 | 23 | [Second provider: OpenCode Zen](07-opencode/phase-23-opencode-zen.md) | An OpenCode Zen block in Settings → AI: key, live model list, ticks for which models the chat offers; a model picker in the drawer; replies stream over OpenAI-compatible `chat/completions` from whichever provider serves the model. *Zen removed 2026-10-18; its shared client, picker and `chat_model` table remain* | ⛔ superseded |
 | 25 | [Third provider: OpenAI](08-openai/phase-25-openai.md) | An OpenAI block in Settings → AI with a key; GPT-6 Luna always offered in the drawer; its replies stream over the same `chat/completions` client as Zen, given OpenAI's base URL. *Since 2026-10-18 the client serves OpenAI only* | ✅ |
+| 26 | [Markdown replies](09-markdown/phase-26-markdown.md) | Assistant replies, streaming included, render as formatted Markdown (CommonMark + strikethrough + tables) through a typed tree, not raw HTML; safe links open in the system browser | ✅ |
 | 21 | Selection → prefilled chat (iOS) | *Ask AI* in the native edit menu via `buildMenuWithBuilder:` (objc2), reusing Phase 20's template | ⬜ |
 
 > Phase files are written as each phase is picked up, per this repo's convention — the table
@@ -70,6 +71,10 @@ last because a working non-streaming chat is already the feature; streaming is p
 > **Zen removed 2026-10-18:** the OpenCode Zen provider didn't work as expected for the
 > learner and was taken out. Phase 25's OpenAI provider is the second provider now. Phase 23
 > is superseded, and its Step 11 will not be done. Order now: 21.
+
+> **Inserted 2026-10-18:** Phase 26 (Markdown replies) goes before Phase 21, at the
+> learner's call. The models answer in Markdown and the drawer showed it raw. It touches only
+> the chat drawer and a new parser module, with no reader or provider code. Order now: 26 → 21.
 
 ## The design, in short
 

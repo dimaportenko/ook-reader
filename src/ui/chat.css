@@ -13,6 +13,7 @@
 
 .chat_panel__turn {
   align-self: flex-start;
+  min-width: 0;
   max-width: 85%;
   padding: 0.625rem 0.875rem;
   border-radius: 1rem 1rem 1rem 0.25rem;
@@ -21,6 +22,138 @@
   line-height: 1.45;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+.chat_panel__turn :where(p, ul, ol, blockquote, pre, .chat_panel__table) {
+  margin: 0.6em 0;
+}
+
+.chat_panel__turn :is(h1, h2, h3, h4, h5, h6) {
+  margin: 0.9em 0 0.4em;
+  font-size: 1em;
+  line-height: 1.3;
+}
+
+.chat_panel__turn h1 {
+  font-size: 1.3em;
+}
+
+.chat_panel__turn h2 {
+  font-size: 1.18em;
+}
+
+.chat_panel__turn h3 {
+  font-size: 1.08em;
+}
+
+.chat_panel__turn :is(ul, ol) {
+  padding-left: 1.4em;
+}
+
+.chat_panel__turn ul {
+  list-style: disc;
+}
+
+.chat_panel__turn ul ul {
+  list-style: circle;
+}
+
+.chat_panel__turn ol {
+  list-style: decimal;
+}
+
+.chat_panel__turn li + li {
+  margin-top: 0.25em;
+}
+
+.chat_panel__turn li > p {
+  margin: 0;
+}
+
+.chat_panel__turn li > p + p {
+  margin-top: 0.4em;
+}
+
+.chat_panel__turn li :is(ul, ol) {
+  margin: 0.25em 0 0;
+}
+
+.chat_panel__turn blockquote {
+  padding-left: 0.75em;
+  border-left: 3px solid var(--tint-border);
+  opacity: 0.85;
+}
+
+.chat_panel__turn :is(code, pre) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+}
+
+.chat_panel__turn code {
+  padding: 0.1em 0.3em;
+  border-radius: 0.3em;
+  background-color: var(--tint-fill);
+}
+
+.chat_panel__turn pre {
+  padding: 0.6em 0.75em;
+  border-radius: 0.5em;
+  background-color: var(--tint-fill);
+  overflow-x: auto;
+  overflow-wrap: normal;
+  white-space: pre;
+}
+
+.chat_panel__turn pre code {
+  padding: 0;
+  background-color: transparent;
+  font-size: 1em;
+}
+
+.chat_panel__table {
+  overflow-x: auto;
+}
+
+.chat_panel__table table {
+  border-collapse: collapse;
+  overflow-wrap: normal;
+  white-space: normal;
+}
+
+.chat_panel__table :is(th, td) {
+  padding: 0.3em 0.6em;
+  border: 1px solid var(--tint-border);
+  vertical-align: top;
+}
+
+.chat_panel__table th {
+  background-color: var(--tint-fill);
+  font-weight: 600;
+  text-align: left;
+}
+
+.chat_panel__turn a {
+  color: var(--focused-border-color);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.chat_panel__turn a:hover {
+  text-decoration-thickness: 2px;
+}
+
+.chat_panel__turn hr {
+  margin: 0.9em 0;
+  border: 0;
+  border-top: 1px solid var(--tint-divider);
+}
+
+.chat_panel__turn :where(*):first-child {
+  margin-top: 0;
+}
+
+.chat_panel__turn :where(*):last-child {
+  margin-bottom: 0;
 }
 
 .chat_panel__turn[data-role="user"] {

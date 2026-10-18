@@ -2,6 +2,7 @@ pub mod chat;
 pub mod components;
 pub mod drawer;
 pub mod library;
+pub mod markdown;
 pub mod reader;
 pub mod settings;
 pub mod settings_screen;

@@ -1,3 +1,5 @@
+pub(crate) mod markdown;
+
 use crate::ai::{ChatError, Message, Reply};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

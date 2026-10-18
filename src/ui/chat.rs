@@ -7,11 +7,11 @@ use crate::{
     ai_client::provider_for,
     chat::{Conversation, Status},
     secrets::SecretStore,
-    ui::{drawer::Drawer, settings::Styles as SettingsStyles, OrLog},
+    ui::{drawer::Drawer, markdown::Markdown, settings::Styles as SettingsStyles, OrLog},
 };
 
 #[css_module("/src/ui/chat.css")]
-struct Styles;
+pub(crate) struct Styles;
 
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) struct ChatHandle {
@@ -162,9 +162,9 @@ fn ChatConversation(handle: ChatHandle) -> Element {
 
     let conversation = chat.read();
     let bubble = match conversation.status() {
-        Status::Thinking => Some("Thinking…"),
-        Status::Replying(text) if text.is_empty() => Some("..."),
-        Status::Replying(text) => Some(text.as_str()),
+        Status::Thinking => Some(rsx! { "Thinking…" }),
+        Status::Replying(text) if text.trim().is_empty() => Some(rsx! { "..." }),
+        Status::Replying(text) => Some(rsx! { Markdown { text: text.clone() } }),
         _ => None,
     };
 
@@ -188,14 +188,18 @@ fn ChatConversation(handle: ChatHandle) -> Element {
                     li {
                         class: "{Styles::chat_panel__turn}",
                         "data-role": if message.role() == Role::User { "user" } else { "assistant" },
-                        "{message.text()}"
+                        if message.role() == Role::User {
+                            "{message.text()}"
+                        } else {
+                            Markdown { text: message.text().to_owned() }
+                        }
                     }
                 }
-                if let Some(text) = bubble {
+                if let Some(content) = bubble {
                     li {
                         class: "{Styles::chat_panel__turn}",
                         "data-role": "assistant",
-                        "{text}"
+                        {content}
                     }
                 }
             }
