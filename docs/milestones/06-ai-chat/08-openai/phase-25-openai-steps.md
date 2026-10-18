@@ -361,3 +361,156 @@ Relaunch the app and Luna is still picked.
   the same, and the array is shorter.
 - **Skipped:** naming the error after the model ("GPT-6 Luna isn't wired up yet"). The
   gap is the OpenAI client, not Luna, and Step 3 closes it for every OpenAI id at once.
+
+## Step 3 — The real Luna stream
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**What it is.** Picking *gpt-6-luna* with an OpenAI key saved now streams a real reply
+from `api.openai.com` into the drawer. The red *OpenAI chat isn't wired up yet* from Step 2
+is gone. Zen streams exactly as before.
+
+### Runnable check first
+
+`src/ai/opencode.rs` — the Zen request test now names Zen's URL as a literal instead of
+the deleted const, and a new test pins OpenAI's host with the same body:
+
+```rust
+#[test]
+fn an_openai_request_posts_the_same_body_to_openai() {
+    let messages = [Message::user("Which city?")];
+    let zen = Completions::zen("zen-key".to_owned(), "gpt-6-luna");
+    let openai = Completions::openai("openai-key".to_owned(), "gpt-6-luna");
+
+    let zen_request = zen.request(&messages).build().unwrap();
+    let request = openai.request(&messages).build().unwrap();
+
+    assert_eq!(request.method(), reqwest::Method::POST);
+    assert_eq!(
+        request.url().as_str(),
+        "https://api.openai.com/v1/chat/completions"
+    );
+    assert_eq!(request.headers()["authorization"], "Bearer openai-key");
+    assert_eq!(
+        request.body().unwrap().as_bytes(),
+        zen_request.body().unwrap().as_bytes()
+    );
+}
+```
+
+`src/ai_client/mod.rs` — replaces Step 2's `an_openai_key_builds_a_client_that_says_it_is_not_wired_yet`.
+It goes through `provider_for`, so it pins the routing as well as the URL:
+
+```rust
+#[test]
+fn zen_and_luna_post_to_their_own_hosts() {
+    // …save a Zen key and an OpenAI key…
+    let url = |model: &ChatModel| match provider_for(&store, model).expect("read the key") {
+        Some(AnyProvider::Completions(client)) => client
+            .request(&[Message::user("Hi")])
+            .build()
+            .expect("build the request")
+            .url()
+            .to_string(),
+        _ => panic!("{} builds no chat/completions client", model.key()),
+    };
+
+    assert_eq!(url(&zen), "https://opencode.ai/zen/v1/chat/completions");
+    assert_eq!(
+        url(&ChatModel::luna()),
+        "https://api.openai.com/v1/chat/completions"
+    );
+}
+```
+
+And `a_real_luna_streams_through_the_trait`, `#[ignore = "needs OPENAI_API_KEY and the
+network"]`, the same as Zen's live test with `Completions::openai(key, "gpt-6-luna")`.
+
+Red against a `todo!()` body for `Completions::openai`: 2 failed, 235 passed, 5 ignored.
+
+```
+test ai::opencode::test::an_openai_request_posts_the_same_body_to_openai ... FAILED
+test ai_client::test::zen_and_luna_post_to_their_own_hosts ... FAILED
+```
+
+Green after: 237 passed, 5 ignored, and clippy was clean.
+
+**The live run.** `cargo test a_real_luna_streams_through_the_trait -- --ignored` passed
+in 2.6s. A probe with the same prompt outside the test showed what the stream carries:
+
+| | Luna, "Count from one to twenty in words" |
+|---|---|
+| chunks before `[DONE]` | 42 (40 with text) |
+| time to first text | ~1.6s |
+| whole reply | ~1.4–2.0s |
+| fields in `delta` | `role`, `content`, `refusal` |
+
+- **No reasoning field.** OpenAI's `chat/completions` doesn't stream the model's reasoning,
+  so there's no `reasoning_content` and the drawer never shows *Thinking…* for Luna. The
+  wait before the first word is silent, which is what Step 4 measures.
+- **Two fields Zen doesn't send:** `refusal` in the delta and `obfuscation` on the chunk.
+  `serde` ignores unknown fields, so the parser needed no change.
+
+**Eyeball under `dx serve`:** pick *gpt-6-luna* with an OpenAI key saved and send a
+message. The reply streams in word by word, and Stop works mid-reply. Then pick a Zen
+model and check that it still answers.
+
+### Minimal implementation
+
+- **`src/ai/opencode.rs`** — `OpenCode` becomes `Completions`, with a `base_url: &'static
+  str` field. `COMPLETIONS_URL` is replaced by `ZEN_BASE_URL` and `OPENAI_BASE_URL`. A
+  private `new(base_url, key, model)` is called by two public constructors, `zen` and
+  `openai`. `request` builds `{base_url}/chat/completions` and is now `pub(crate)`, so the
+  routing test can inspect it.
+- **`src/ai/mod.rs`** — `AnyProvider::OpenCode(OpenCode)` becomes
+  `AnyProvider::Completions(Completions)`. `OpenAiNotWired` and `ChatError::NotWired` are
+  deleted.
+- **`src/ai_client/mod.rs`** — the Zen arm calls `Completions::zen`, and the OpenAI arm
+  calls `Completions::openai` with the saved key and the model id.
+
+### Why it works
+
+- **The host was the only difference.** The body, the Bearer header, the SSE framing and
+  `[DONE]` are the same on both hosts, so moving the URL into a field is the whole change.
+  The body test compares the two requests' bytes directly, so a later per-host field
+  shows up there first. Step 4 adds one on purpose.
+- **Named constructors keep the URLs private.** `provider_for` says *which host*, not
+  *what URL*. The two URLs live next to the code that appends `/chat/completions` to them.
+- **`&'static str` for the base URL.** Both hosts are compile-time constants, so the
+  client borrows them and `Clone` stays cheap. A user-configurable host would need a
+  `String`, and nothing asks for one.
+- **Inspect the request, don't send it.** `RequestBuilder::build()` gives a
+  `reqwest::Request` with its URL, headers and body, so the URL tests run offline in
+  microseconds. Only the `#[ignore]` test touches the network.
+- **The compiler cleaned up Step 2.** Deleting `OpenAiNotWired` broke `AnyProvider::stream`
+  and `provider_for`. Deleting `NotWired` broke Step 2's test, which this step replaces.
+
+### Forks taken
+
+- **One `Completions` variant, not an OpenAI arm.** Both hosts are the same type with a
+  different URL, so a second arm would hold the same type and forward the same call. If
+  Step 4's `reasoning_effort` makes them behave differently, that's a field on the
+  client, not a new type. The cost is that `matches!(…, AnyProvider::Completions(_))`
+  can't tell Zen from OpenAI, which is why the routing test reads the URL instead.
+- **Renamed the type, kept the file.** `OpenCode` would be the wrong name for a client
+  that talks to OpenAI, so the type became `Completions`. The file stays `opencode.rs`,
+  because it also holds Zen's `/models` catalog, which OpenAI doesn't use. Splitting it
+  into `completions.rs` and a small `opencode.rs` is a candidate for the Step 5 review.
+- **`MODELS_URL` stays a full literal.** It could be built from `ZEN_BASE_URL`, but a
+  `const` can't use `format!`, and a `LazyLock` for one URL is more code than it saves.
+- **`request` is `pub(crate)`, not test-only.** A `#[cfg(test)]` accessor would hide the
+  real method behind a copy. Making the method visible inside the crate costs nothing.
+
+### Scope note
+
+- No `reasoning_effort` yet. That's Step 4, which starts from the ~1.6s to first text
+  above.
+- The file split is left for Step 5.
+
+### Review notes (from the `simplify` pass)
+
+- **Applied:** nothing. The diff is a rename, one field, two constructors and two deletions.
+- **Skipped:** dropping the private `new` and writing the struct literal in both
+  constructors. Three lines saved, and the constructors would no longer read as "the same
+  client, a different host".

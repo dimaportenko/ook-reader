@@ -6,7 +6,8 @@ use super::{
 };
 
 const MODELS_URL: &str = "https://opencode.ai/zen/v1/models";
-const COMPLETIONS_URL: &str = "https://opencode.ai/zen/v1/chat/completions";
+const ZEN_BASE_URL: &str = "https://opencode.ai/zen/v1";
+const OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 
 #[derive(Debug, Deserialize)]
 struct ModelList {
@@ -114,28 +115,38 @@ fn event(payload: &str) -> Result<Event, serde_json::Error> {
 }
 
 #[derive(Clone)]
-pub(crate) struct OpenCode {
+pub(crate) struct Completions {
+    base_url: &'static str,
     key: String,
     model: String,
 }
 
-impl OpenCode {
-    pub(crate) fn new(key: String, model: impl Into<String>) -> Self {
-        OpenCode {
+impl Completions {
+    fn new(base_url: &'static str, key: String, model: impl Into<String>) -> Self {
+        Completions {
+            base_url,
             key,
             model: model.into(),
         }
     }
 
-    fn request(&self, messages: &[Message]) -> reqwest::RequestBuilder {
+    pub(crate) fn zen(key: String, model: impl Into<String>) -> Self {
+        Completions::new(ZEN_BASE_URL, key, model)
+    }
+
+    pub(crate) fn openai(key: String, model: impl Into<String>) -> Self {
+        Completions::new(OPENAI_BASE_URL, key, model)
+    }
+
+    pub(crate) fn request(&self, messages: &[Message]) -> reqwest::RequestBuilder {
         http()
-            .post(COMPLETIONS_URL)
+            .post(format!("{}/chat/completions", self.base_url))
             .bearer_auth(&self.key)
             .json(&request_body(&self.model, messages))
     }
 }
 
-impl ChatProvider for OpenCode {
+impl ChatProvider for Completions {
     async fn stream(
         &self,
         messages: &[Message],
@@ -275,7 +286,7 @@ mod test {
 
     #[test]
     fn a_request_posts_the_conversation_to_zen_with_a_bearer_key() {
-        let zen = OpenCode::new("zen-key".to_owned(), "kimi-k2.6");
+        let zen = Completions::zen("zen-key".to_owned(), "kimi-k2.6");
 
         let request = zen
             .request(&[Message::user("Which city?")])
@@ -285,22 +296,66 @@ mod test {
             serde_json::from_slice(request.body().unwrap().as_bytes().unwrap()).unwrap();
 
         assert_eq!(request.method(), reqwest::Method::POST);
-        assert_eq!(request.url().as_str(), COMPLETIONS_URL);
+        assert_eq!(
+            request.url().as_str(),
+            "https://opencode.ai/zen/v1/chat/completions"
+        );
         assert_eq!(request.headers()["authorization"], "Bearer zen-key");
         assert_eq!(body["model"], "kimi-k2.6");
         assert_eq!(body["stream"], true);
         assert_eq!(body["messages"][0]["content"], "Which city?");
     }
 
+    #[test]
+    fn an_openai_request_posts_the_same_body_to_openai() {
+        let messages = [Message::user("Which city?")];
+        let zen = Completions::zen("zen-key".to_owned(), "gpt-6-luna");
+        let openai = Completions::openai("openai-key".to_owned(), "gpt-6-luna");
+
+        let zen_request = zen.request(&messages).build().unwrap();
+        let request = openai.request(&messages).build().unwrap();
+
+        assert_eq!(request.method(), reqwest::Method::POST);
+        assert_eq!(
+            request.url().as_str(),
+            "https://api.openai.com/v1/chat/completions"
+        );
+        assert_eq!(request.headers()["authorization"], "Bearer openai-key");
+        assert_eq!(
+            request.body().unwrap().as_bytes(),
+            zen_request.body().unwrap().as_bytes()
+        );
+    }
+
     #[tokio::test]
     #[ignore = "needs OPENCODE_API_KEY and the network"]
     async fn a_real_zen_streams_through_the_trait() {
         let key = std::env::var("OPENCODE_API_KEY").expect("set OPENCODE_API_KEY to run this");
-        let zen = OpenCode::new(key, "deepseek-v4-flash");
+        let zen = Completions::zen(key, "deepseek-v4-flash");
         let messages = [Message::user("Count from one to twenty in words")];
         let mut pieces = Vec::new();
 
         let reply = ChatProvider::stream(&zen, &messages, |progress| {
+            if let Progress::Text(delta) = progress {
+                pieces.push(delta.to_owned());
+            }
+        })
+        .await
+        .unwrap();
+
+        assert!(pieces.len() > 1, "{pieces:?}");
+        assert_eq!(pieces.concat(), reply.text);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs OPENAI_API_KEY and the network"]
+    async fn a_real_luna_streams_through_the_trait() {
+        let key = std::env::var("OPENAI_API_KEY").expect("set OPENAI_API_KEY to run this");
+        let luna = Completions::openai(key, "gpt-6-luna");
+        let messages = [Message::user("Count from one to twenty in words")];
+        let mut pieces = Vec::new();
+
+        let reply = ChatProvider::stream(&luna, &messages, |progress| {
             if let Progress::Text(delta) = progress {
                 pieces.push(delta.to_owned());
             }

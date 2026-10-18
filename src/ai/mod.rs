@@ -8,7 +8,7 @@ use std::{collections::BTreeSet, sync::LazyLock};
 use reqwest::StatusCode;
 
 use gemini::{Gemini, GeminiModel};
-use opencode::OpenCode;
+use opencode::Completions;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Provider {
@@ -137,8 +137,6 @@ pub(crate) struct Reply {
 pub(crate) enum ChatError {
     #[error("the provider returned no answer")]
     Empty,
-    #[error("OpenAI chat isn't wired up yet")]
-    NotWired,
     #[error("could not reach the provider: {0}")]
     Http(#[from] reqwest::Error),
     #[error("the provider rejected the request ({status}): {body}")]
@@ -178,8 +176,7 @@ pub(crate) trait ChatProvider {
 #[derive(Clone)]
 pub(crate) enum AnyProvider {
     Gemini(Gemini),
-    OpenCode(OpenCode),
-    OpenAiNotWired,
+    Completions(Completions),
 }
 
 impl ChatProvider for AnyProvider {
@@ -190,8 +187,7 @@ impl ChatProvider for AnyProvider {
     ) -> Result<Reply, ChatError> {
         match self {
             AnyProvider::Gemini(gemini) => gemini.stream(messages, on_progress).await,
-            AnyProvider::OpenCode(zen) => zen.stream(messages, on_progress).await,
-            AnyProvider::OpenAiNotWired => Err(ChatError::NotWired),
+            AnyProvider::Completions(client) => client.stream(messages, on_progress).await,
         }
     }
 }
