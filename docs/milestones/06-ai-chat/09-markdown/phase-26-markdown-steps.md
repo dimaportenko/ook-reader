@@ -948,3 +948,171 @@ Check light, sepia and dark.
 - The HTML block's trailing newline is kept; Step 6 can decide whether to trim it.
 - The click path is read from source, not run: confirm under `dx serve` that the reader
   stays put and the browser opens.
+
+## Step 6 — Review and refactor
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**What it is.** A `code-review` pass (high effort) over the whole phase, `ba18374..HEAD`,
+then a decision on each item the earlier steps deferred here, then a `simplify` pass over
+the phase's `src/` changes (Steps 4 and 5 had skipped it). Three real bugs were fixed, all
+in the styling. The parser's behavior is unchanged.
+
+### Runnable check first
+
+The three bugs are all in CSS or RSX. The repo has no SSR or DOM test harness, so none of
+them can be pinned by a `#[test]` and none was watched going red. Their check is under
+`dx serve`, still to be confirmed by hand:
+
+- A wide table has borders, padding, a tinted header and a gap above and below, and it
+  scrolls sideways inside the bubble instead of being clipped.
+- In a tight list whose item holds a nested list, the nested list sits 0.25em under the
+  item text, not 0.6em. Two paragraphs in one loose item are 0.4em apart.
+- A reply whose first delta is only whitespace (`"\n"`) shows `...`, not an empty pill.
+
+The one new unit test, for reference-style links, was written after the code it covers.
+It passed first time, so it was checked by breaking its expected href and watching it go
+red, then putting it back:
+
+```rust
+#[test]
+fn reference_links_resolve_through_their_definitions() {
+    assert_eq!(
+        parse("see [docs][1] and [Rust] or [bad][2]\n\n[1]: https://docs.example\n[rust]: <HTTP://rust.example>\n[2]: javascript:x"),
+        [paragraph(vec![
+            text("see "),
+            link("https://docs.example", vec![text("docs")]),
+            text(" and "),
+            link("http://rust.example", vec![text("Rust")]),
+            text(" or bad"),
+        ])]
+    );
+}
+```
+
+### Minimal implementation
+
+- **`src/ui/chat.rs`** — `Styles` is `pub(crate)`, the same as `settings::Styles`. The
+  streaming bubble shows `...` while `text.trim().is_empty()`.
+- **`src/ui/markdown.rs`** — the table wrapper's class is `{ChatStyles::chat_panel__table}`
+  instead of the literal `"chat_panel__table"`. `ul` and `ol` share a `render_items` helper
+  for their `li` loop.
+- **`src/ui/chat.css`** — the block-margin rule uses `:where(…)` instead of `:is(…)`. The
+  two 13-entry `:is(…):first-child` / `:last-child` lists become
+  `.chat_panel__turn :where(*):first-child` and `:last-child`.
+- **`src/chat/markdown.rs`** — `End(TagEnd::Paragraph)` gets its own arm ahead of the
+  catch-all, so you can see where a paragraph ends. The reference-link test.
+
+### Why it works
+
+- **The table class.** `#[css_module]` renames every class in `chat.css` to
+  `<name>-<hash>`, and `Styles::<name>` is the only way to get the renamed string. Step 4
+  wrote the class as a plain literal, so not one `.chat_panel__table` rule ever matched.
+  The table had no borders, no padding, no margin and no sideways scroll, and
+  `.chat_panel__messages { overflow-x: hidden }` clipped its right-hand columns.
+- **The specificity.** `:is()` takes the specificity of its most specific argument. With
+  `.chat_panel__table` in the list, the margin rule scored two classes, `(0,2,0)`, and beat
+  `li > p`, `li > p + p` and `li :is(ul, ol)` at `(0,1,2)`. Those three rules were dead.
+  `:where()` scores zero, so the rule drops to `(0,1,0)` and the list rules win again. The
+  edge rules are now `(0,2,0)`, which still beats the margin, heading and list rules, as the
+  old `(0,3,0)` did.
+- **`:where(*)` for the edges.** It hits every first or last child at any depth, as the
+  old lists did. The extra elements it now reaches (`strong`, `li`, `tr`, `td`) have no
+  vertical margin, so for them it changes nothing, and a new block type needs no edit.
+- **`trim()`.** `parse("\n")` is empty, so `Markdown` rendered nothing inside a padded
+  bubble.
+
+### Forks taken
+
+- **Exported `chat::Styles`** rather than writing `:global(.chat_panel__table)` in the CSS,
+  or giving `Markdown` its own `markdown.css` module. It's the pattern `settings::Styles`
+  already uses. The cost is that `ui::markdown` depends on `ui::chat`, which only matters if
+  `Markdown` is ever used outside the drawer (see *Review notes*).
+- **No test for the CSS fixes.** A test that `Styles::chat_panel__table != "chat_panel__table"`
+  would test the macro, not this code.
+
+### Scope note
+
+- Hand checks still to be confirmed under `dx serve`: each syntax rendering in a real
+  reply, sideways scroll of code blocks and tables, the light, dark and sepia themes, and a
+  link opening the system browser on desktop and on iOS.
+
+### Review notes
+
+From `code-review` (high) over `ba18374..HEAD`:
+
+- **Fixed:** the table class never matched (above).
+- **Fixed:** the `:is()` specificity that killed three list-spacing rules (above).
+- **Fixed:** a whitespace-only first delta showed an empty bubble. A lone `#` or `-`
+  mid-stream still shows an empty heading or bullet for a token. That is what the reply
+  says so far, the same as an unclosed fence.
+- **Applied:** `render_items` for the duplicated `ul`/`ol` loop, and `:where(*)` for the
+  duplicated first/last-child lists.
+- **Dismissed:** "re-parsing the whole reply per delta is O(n²)". This is the phase's
+  recorded decision. A reply is a few KB.
+- **Skipped:** cloning each history message's text into `Markdown`'s prop on every render.
+  Unchanged props stop the child re-rendering, so the cost is one copy per turn per delta.
+  `Rc<str>` would mean changing `Message`, which is outside this phase.
+- **Skipped:** turning an inline `<br>` in a table cell into a `HardBreak`. Raw HTML is
+  literal text by design. It's a candidate if real replies show it often.
+- **Skipped:** dropping or showing `data-lang`. Step 3 kept the fence language on purpose,
+  and a test pins it. A visible label or highlighting can read it later.
+- **Skipped:** collapsing `Align` and `text_align` into stored CSS strings (see below).
+
+The deferred punch list:
+
+- **Skipped: SoftBreak as a space with `white-space: normal`.** A single newline in a reply
+  is usually meant: a poem's lines, a quoted passage, a "Label:" line. The drawer showed
+  those breaks in the raw-text days, and pre-wrap keeps them. The cost is that `pre` and
+  the table have to reset `white-space`, and both already do.
+- **Skipped: `Option<Align>` instead of `Align::None`.** `Align` mirrors pulldown's
+  `Alignment` one-to-one, so the `From` impl reads as a plain mapping. The renderer's
+  `match` is already exhaustive and returns `Option`. `Option<Align>` would trade one
+  variant for a `match` that can't use `From`.
+- **Skipped: trimming the HTML block's trailing `\n`.** It's invisible: a final newline in
+  a pre-wrap block draws no extra line. Trimming would need its own `End(HtmlBlock)` arm.
+- **Applied: a reference-link test** (above). `[x][1]`, a shortcut `[Rust]` with a
+  case-folded label, and a refused `javascript:` definition all go through `safe_href`.
+- **Accepted and documented: `mailto:` on iOS.** `webbrowser` 1.2.1's iOS backend
+  (`ios.rs`, `target.get_http_url()?`) opens only `http(s)` URLs. On iOS, the navigation
+  handler cancels a `mailto:` tap and the open then fails, so nothing happens. Dropping
+  `mailto` on iOS only would make `parse` depend on the target, and tests would differ per
+  platform. An email link in a reply about a book is rare, and its text still shows.
+- **Applied: the `simplify` pass** (below).
+- **The `Builder`** was flagged by both the review and `simplify` as four parallel pieces
+  of state: the `spans` and `containers` stacks and the `code` and `table` modes. See
+  below.
+
+From the `simplify` pass (reuse, simplification, efficiency, altitude) over the phase's
+`src/` diff:
+
+- **Clean (reuse):** `safe_href` is the only scheme allowlist in `src/`, and the CSS uses
+  the existing `--tint-*` and `--focused-border-color` variables.
+- **Applied:** the explicit `End(TagEnd::Paragraph)` arm.
+- **Skipped:** a recursive-descent parser (`fn blocks(events)`, `fn inlines(events)`) that
+  would replace both stacks and both modes with the call stack. It's a rewrite of the
+  phase's subject. The explicit stack is lesson 1 of the crux, and Step 3 recorded "a mode,
+  not a frame" on purpose. It's the shape to try if a fifth kind of state ever lands.
+- **Skipped:** one `Vec<Frame>` stack for quote, list, table and code, and
+  `containers: Vec<Block>` in place of `Container`. Each needs an unreachable arm wherever
+  only one kind of frame is valid. That is the same "can't happen" that the current
+  `if let` guards express without a panic.
+- **Skipped:** turning those `if let` guards into `expect`. A malformed event order
+  should never crash the chat drawer mid-stream.
+- **Skipped:** flushing pending inlines once at the top of the loop instead of in each
+  block method. It needs a list of "inline events" that would have to stay in sync with
+  `parse`'s match, and it is easier to get wrong than the current calls.
+- **Skipped:** `Span::wrap` returning one `Inline` instead of a `Vec`. That is Step 5's
+  recorded fork, and the cost is one small allocation per span.
+- **Skipped:** a `push_text(&str)` that saves the allocation when text merges into the
+  previous `Text`, and building the lower-cased href without `format!`. Microseconds per
+  reply.
+- **Skipped:** moving the Markdown rules into their own `markdown.css` module with a root
+  element and flex `gap`, and scoping `pre-wrap` to text elements. That restyles every
+  block while the hand checks are still pending. It's the candidate if `Markdown` is ever
+  used outside the drawer.
+- **Skipped:** a shared `TurnBody` for the history loop and the streaming bubble. The two
+  differ (the bubble has placeholders), and there is only one caller of each.
+- **Skipped:** a `render_row` helper for `th`/`td`. They are different elements, and the
+  `if` inside would cost more than the four repeated lines.

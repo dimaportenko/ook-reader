@@ -24,7 +24,7 @@
   white-space: pre-wrap;
 }
 
-.chat_panel__turn :is(p, ul, ol, blockquote, pre, .chat_panel__table) {
+.chat_panel__turn :where(p, ul, ol, blockquote, pre, .chat_panel__table) {
   margin: 0.6em 0;
 }
 
@@ -148,41 +148,11 @@
   border-top: 1px solid var(--tint-divider);
 }
 
-.chat_panel__turn
-  :is(
-    p,
-    h1,
-    h2,
-    h3,
-    h4,
-    h5,
-    h6,
-    ul,
-    ol,
-    blockquote,
-    pre,
-    hr,
-    .chat_panel__table
-  ):first-child {
+.chat_panel__turn :where(*):first-child {
   margin-top: 0;
 }
 
-.chat_panel__turn
-  :is(
-    p,
-    h1,
-    h2,
-    h3,
-    h4,
-    h5,
-    h6,
-    ul,
-    ol,
-    blockquote,
-    pre,
-    hr,
-    .chat_panel__table
-  ):last-child {
+.chat_panel__turn :where(*):last-child {
   margin-bottom: 0;
 }
 

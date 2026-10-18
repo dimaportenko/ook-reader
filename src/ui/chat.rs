@@ -11,7 +11,7 @@ use crate::{
 };
 
 #[css_module("/src/ui/chat.css")]
-struct Styles;
+pub(crate) struct Styles;
 
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) struct ChatHandle {
@@ -163,7 +163,7 @@ fn ChatConversation(handle: ChatHandle) -> Element {
     let conversation = chat.read();
     let bubble = match conversation.status() {
         Status::Thinking => Some(rsx! { "Thinking…" }),
-        Status::Replying(text) if text.is_empty() => Some(rsx! { "..." }),
+        Status::Replying(text) if text.trim().is_empty() => Some(rsx! { "..." }),
         Status::Replying(text) => Some(rsx! { Markdown { text: text.clone() } }),
         _ => None,
     };

@@ -1,6 +1,9 @@
 use dioxus::prelude::*;
 
-use crate::chat::markdown::{parse, Align, Block, Inline};
+use crate::{
+    chat::markdown::{parse, Align, Block, Inline},
+    ui::chat::Styles as ChatStyles,
+};
 
 #[component]
 pub(crate) fn Markdown(text: String) -> Element {
@@ -16,18 +19,10 @@ fn render_blocks(blocks: &[Block]) -> Element {
                 },
                 Block::Heading { level, inlines } => render_heading(*level, inlines),
                 Block::List { start: None, items } => rsx! {
-                    ul {
-                        for item in items {
-                            li { {render_blocks(item)} }
-                        }
-                    }
+                    ul { {render_items(items)} }
                 },
                 Block::List { start: Some(start), items } => rsx! {
-                    ol { start: "{start}",
-                        for item in items {
-                            li { {render_blocks(item)} }
-                        }
-                    }
+                    ol { start: "{start}", {render_items(items)} }
                 },
                 Block::Quote(blocks) => rsx! {
                     blockquote { {render_blocks(blocks)} }
@@ -38,7 +33,7 @@ fn render_blocks(blocks: &[Block]) -> Element {
                     }
                 },
                 Block::Table { align, head, rows } => rsx! {
-                    div { class: "chat_panel__table",
+                    div { class: "{ChatStyles::chat_panel__table}",
                         table {
                             thead {
                                 tr {
@@ -61,6 +56,14 @@ fn render_blocks(blocks: &[Block]) -> Element {
                 },
                 Block::Rule => rsx! { hr {} },
             }
+        }
+    }
+}
+
+fn render_items(items: &[Vec<Block>]) -> Element {
+    rsx! {
+        for item in items {
+            li { {render_blocks(item)} }
         }
     }
 }

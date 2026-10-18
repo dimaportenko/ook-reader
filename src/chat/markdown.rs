@@ -294,6 +294,7 @@ pub(crate) fn parse(text: &str) -> Vec<Block> {
             Event::Start(Tag::TableCell) | Event::End(TagEnd::TableHead | TagEnd::TableRow) => {}
             Event::Rule => builder.rule(),
             Event::TaskListMarker(_) => {}
+            Event::End(TagEnd::Paragraph) => builder.end_block(),
             Event::Start(_) | Event::End(_) => builder.end_block(),
             Event::Code(code) => builder.push(Inline::Code(code.into_string())),
             Event::SoftBreak => builder.push(Inline::SoftBreak),
@@ -705,6 +706,20 @@ mod test {
                 link("https://x.example/a", vec![text("https://x.example/a")]),
                 text(" or "),
                 link("mailto:me@example.com", vec![text("me@example.com")]),
+            ])]
+        );
+    }
+
+    #[test]
+    fn reference_links_resolve_through_their_definitions() {
+        assert_eq!(
+            parse("see [docs][1] and [Rust] or [bad][2]\n\n[1]: https://docs.example\n[rust]: <HTTP://rust.example>\n[2]: javascript:x"),
+            [paragraph(vec![
+                text("see "),
+                link("https://docs.example", vec![text("docs")]),
+                text(" and "),
+                link("http://rust.example", vec![text("Rust")]),
+                text(" or bad"),
             ])]
         );
     }
