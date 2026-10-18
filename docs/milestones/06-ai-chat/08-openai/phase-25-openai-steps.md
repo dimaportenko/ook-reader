@@ -17,10 +17,10 @@ measurement, and never reaches Zen.
    entry, and an *OpenAI* block in Settings → AI with only a key row. Nothing uses the key
    yet. The `Provider::ALL` length and `from_slug` round trip pin the new variant. **Done** —
    `f6ae53e`.
-2. **Luna in the picker.** `chat_models` always offers `ChatModel { provider: OpenAi, id:
+2. ~~**Luna in the picker.**~~ `chat_models` always offers `ChatModel { provider: OpenAi, id:
    "gpt-6-luna" }`, and the `chat_model` table remembers it across launches. `provider_for`
    needs an arm for it, so the drawer can pick Luna but gets a canned reply or a clear
-   "not wired yet" error until Step 3.
+   "not wired yet" error until Step 3. **Done** — `289accb`.
 3. **The real Luna stream.** The `chat/completions` client takes its base URL. Zen keeps
    `https://opencode.ai/zen/v1`, and OpenAI uses `https://api.openai.com/v1`. Tests pin the
    URL each provider posts to, and an `#[ignore]` test streams a real Luna reply with
@@ -215,6 +215,8 @@ returns it to *Not set*. The drawer's picker shows no *OpenAI* group yet.
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `289accb` (236 tests green, 4 ignored; clippy clean). The picker and the "not wired yet" note are still to be confirmed by hand under `dx serve`.
 
 **What it is.** The drawer's model picker always shows an *OpenAI* group with
 `gpt-6-luna`, after Gemini and the ticked Zen models. The pick survives a relaunch. With

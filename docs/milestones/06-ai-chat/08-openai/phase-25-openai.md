@@ -54,7 +54,7 @@ provider shouldn't be a copy of `opencode.rs`. It should be the existing client 
 ## Planned steps
 
 - [x] 1. The OpenAI block and its key — `Provider::OpenAi`, a third keychain entry, a key row in Settings → AI
-- [ ] 2. Luna in the picker — `chat_models` always offers `openai/gpt-6-luna`, and the chosen-model table round-trips it
+- [x] 2. Luna in the picker — `chat_models` always offers `openai/gpt-6-luna`, and the chosen-model table round-trips it
 - [ ] 3. The real Luna stream — the `chat/completions` client takes a base URL and serves both Zen and OpenAI, checked end to end with a real key
 - [ ] 4. Luna starts sooner — measure time to first text per `reasoning_effort`, then send the winner to OpenAI only
 - [ ] 5. Review and refactor
