@@ -25,11 +25,11 @@ measurement, and never reaches Zen.
    `https://opencode.ai/zen/v1`, and OpenAI uses `https://api.openai.com/v1`. Tests pin the
    URL each provider posts to, and an `#[ignore]` test streams a real Luna reply with
    `OPENAI_API_KEY`, as Zen's does with `OPENCODE_API_KEY`. **Done** — `463d0a3`.
-4. **Luna starts sooner.** First a probe: time to first text for `reasoning_effort` `none`,
+4. ~~**Luna starts sooner.**~~ First a probe: time to first text for `reasoning_effort` `none`,
    `low` and the default `medium` on a short prompt and a book-chat prompt, recorded in a
    table as in Phase 23 Step 10. Then the request body gains an optional
    `reasoning_effort`, set to `none` for OpenAI and skipped when serializing for Zen. A test
-   asserts Zen's body has no such key.
+   asserts Zen's body has no such key. **Done** — `8cf7672`.
 5. **Review and refactor.**
 
 **Why this order.** Each step ends with something to see:
@@ -522,6 +522,8 @@ model and check that it still answers.
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `8cf7672` (238 tests green, 5 ignored; clippy clean; the live Luna test passed with `reasoning_effort: "none"`). The quicker drawer reply is still to be confirmed by hand under `dx serve`.
 
 **What it is.** Every OpenAI request asks for `reasoning_effort: "none"`, so a Luna reply
 to a quoted passage starts in under a second instead of after about seven. Zen's requests
