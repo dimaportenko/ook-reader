@@ -47,13 +47,6 @@ mod test {
 
         assert_eq!(db.chat_model().expect("nothing chosen yet"), None);
 
-        let zen = ChatModel {
-            provider: Provider::OpenCodeZen,
-            id: "kimi-k2.6".to_owned(),
-        };
-        db.save_chat_model(&zen).expect("pick a Zen model");
-        assert_eq!(db.chat_model().expect("read the Zen pick"), Some(zen));
-
         let gemini = ChatModel::gemini(GeminiModel::Flash);
         db.save_chat_model(&gemini).expect("pick a Gemini model");
         assert_eq!(db.chat_model().expect("read the Gemini pick"), Some(gemini));
@@ -78,6 +71,22 @@ mod test {
                 [],
             )
             .expect("corrupt the provider");
+
+        assert_eq!(db.chat_model().expect("read"), None);
+    }
+
+    #[test]
+    fn a_saved_pick_from_the_removed_opencode_zen_provider_reads_as_no_pick() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let db = Db::open(dir.path()).expect("open");
+
+        db.conn
+            .execute(
+                "INSERT INTO chat_model (id, provider, model_id)
+                VALUES (1, 'opencode-zen', 'kimi-k2.6')",
+                [],
+            )
+            .expect("seed a Zen pick");
 
         assert_eq!(db.chat_model().expect("read"), None);
     }
