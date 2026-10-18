@@ -2,7 +2,6 @@ use std::path::Path;
 
 use rusqlite::Connection;
 
-mod ai_models;
 mod books;
 mod chat_model;
 mod positions;
@@ -64,14 +63,7 @@ impl Db {
             [],
         )?;
 
-        self.conn.execute(
-            "CREATE TABLE IF NOT EXISTS ai_models (
-                provider TEXT NOT NULL,
-                model_id TEXT NOT NULL,
-                PRIMARY KEY (provider, model_id)
-            )",
-            [],
-        )?;
+        self.conn.execute("DROP TABLE IF EXISTS ai_models", [])?;
 
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS chat_model (
@@ -124,5 +116,35 @@ mod test {
         db.save_settings(&saved).expect("save over the legacy row");
 
         assert_eq!(db.settings().expect("read"), Some(saved));
+    }
+
+    #[test]
+    fn opening_drops_the_retired_ai_models_table() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join(DB_FILENAME);
+        let legacy = Connection::open(&path).expect("open legacy database");
+        legacy
+            .execute_batch(
+                "CREATE TABLE ai_models (
+                    provider TEXT NOT NULL,
+                    model_id TEXT NOT NULL,
+                    PRIMARY KEY (provider, model_id)
+                );
+                INSERT INTO ai_models (provider, model_id) VALUES ('opencode-zen', 'kimi-k2.6');",
+            )
+            .expect("seed the legacy table");
+        drop(legacy);
+
+        let db = Db::open(dir.path()).expect("open the legacy database");
+        let tables: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ai_models'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count tables");
+
+        assert_eq!(tables, 0);
     }
 }

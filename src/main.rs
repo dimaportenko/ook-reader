@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use std::{collections::BTreeSet, rc::Rc};
+use std::rc::Rc;
 
 use dioxus::prelude::*;
 
@@ -31,7 +31,7 @@ pub(crate) use dioxus::mobile as renderer;
 use library::Library;
 
 use crate::{
-    ai::{chat_models, Provider},
+    ai::chat_models,
     config::Config,
     db::Db,
     ui::{
@@ -81,15 +81,6 @@ fn App() -> Element {
             Signal::new(Some(format!("Could not load your library: {error}"))),
         ),
     });
-    let zen_ticked = use_hook(|| {
-        Signal::new(
-            db.ticked_models(Provider::OpenCodeZen)
-                .or_log("read your chosen models")
-                .unwrap_or_default()
-                .into_iter()
-                .collect::<BTreeSet<String>>(),
-        )
-    });
     let mut chat_model = use_hook(|| {
         Signal::new(
             db.chat_model()
@@ -111,7 +102,6 @@ fn App() -> Element {
     use_context_provider(|| open_book);
     use_context_provider(|| settings);
     use_context_provider(|| secret_store.clone());
-    use_context_provider(|| zen_ticked);
     use_context_provider(|| chat_model);
 
     use_effect({
@@ -131,7 +121,7 @@ fn App() -> Element {
     });
 
     use_effect(move || {
-        let offered = chat_models(&zen_ticked.read());
+        let offered = chat_models();
         let Some(first) = offered.first() else {
             return;
         };

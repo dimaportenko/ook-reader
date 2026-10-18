@@ -1,9 +1,18 @@
 # Phase 23 — Second provider: OpenCode Zen
 
-[← Feature: Second provider: OpenCode Zen](README.md) · **Status:** 🚧 in progress — opened 2026-09-27,
+[← Feature: Second provider: OpenCode Zen](README.md) · **Status:** ⛔ superseded — opened 2026-09-27,
 paused for [Phase 24 — Settings screen](../06-settings-screen/phase-24-settings-screen.md),
-resumed 2026-09-28 ·
+resumed 2026-09-28, Steps 1–10 done; Zen removed 2026-10-18 and Step 11 superseded ·
 build log: [`phase-23-opencode-zen-steps.md`](phase-23-opencode-zen-steps.md)
+
+> **Removed 2026-10-18.** The OpenCode Zen provider has been taken out of the app (commit
+> `58b9b63`). It didn't work as expected for the learner, and [Phase 25](../08-openai/phase-25-openai.md)'s
+> OpenAI provider (GPT-6 Luna) covers the need for a second provider. The `chat/completions`
+> client, `ChatModel`, the drawer's model picker, the `chat_model` table and the *Thinking…*
+> status built here stay. The Zen catalog, the `ai_models` table (dropped on open) and the
+> Zen block in Settings → AI are gone. A saved Zen chat pick falls back to the default
+> model. Step 11 (review and refactor) is superseded and will not be done. The rest of this
+> doc is kept as history.
 
 ## Goal
 
@@ -71,4 +80,4 @@ Three consequences follow, and each is a lesson:
 - [x] 8. The deferred punch list — `AiModel` → `ai::gemini::GeminiModel`, one shared `reqwest::Client`, bubble font size restored
 - [x] 9. Gemini thinks minimally — `thinkingConfig.thinkingLevel: "minimal"` in the request body
 - [x] 10. Zen's reasoning shows as *Thinking…* — `Progress` on the stream callback, a `Thinking` status in the drawer *(was "Zen thinks less"; the 2026-09-29 measurement showed no flag helps)*
-- [ ] 11. Review and refactor
+- [ ] 11. Review and refactor — *superseded 2026-10-18: the Zen provider was removed*

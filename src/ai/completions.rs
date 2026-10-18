@@ -5,7 +5,6 @@ use super::{
     Reply, Role,
 };
 
-const ZEN_BASE_URL: &str = "https://opencode.ai/zen/v1";
 const OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 
 #[derive(Debug, Serialize)]
@@ -119,10 +118,6 @@ impl Completions {
         }
     }
 
-    pub(crate) fn zen(key: String, model: impl Into<String>) -> Self {
-        Completions::new(ZEN_BASE_URL, None, key, model)
-    }
-
     pub(crate) fn openai(key: String, model: impl Into<String>) -> Self {
         Completions::new(OPENAI_BASE_URL, Some("none"), key, model)
     }
@@ -179,12 +174,12 @@ mod test {
             Message::assistant("Ankh-Morpork"),
         ];
 
-        let body = serde_json::to_value(request_body("kimi-k2.6", &messages, None)).unwrap();
+        let body = serde_json::to_value(request_body("gpt-6-luna", &messages, None)).unwrap();
 
         assert_eq!(
             body,
             json!({
-                "model": "kimi-k2.6",
+                "model": "gpt-6-luna",
                 "messages": [
                     { "role": "user",      "content": "Which city?" },
                     { "role": "assistant", "content": "Ankh-Morpork" },
@@ -200,7 +195,7 @@ mod test {
             "id": "chatcmpl-1",
             "object": "chat.completion.chunk",
             "created": 1790582083,
-            "model": "kimi-k2.6",
+            "model": "gpt-6-luna",
             "choices": [
                 { "index": 0, "delta": { "content": "Ankh-Morpork" }, "finish_reason": null }
             ]
@@ -271,36 +266,13 @@ mod test {
     }
 
     #[test]
-    fn a_request_posts_the_conversation_to_zen_with_a_bearer_key() {
-        let zen = Completions::zen("zen-key".to_owned(), "kimi-k2.6");
+    fn an_openai_request_posts_the_conversation_with_a_bearer_key_and_no_reasoning() {
+        let openai = Completions::openai("openai-key".to_owned(), "gpt-6-luna");
 
-        let request = zen
+        let request = openai
             .request(&[Message::user("Which city?")])
             .build()
             .unwrap();
-        let body = body(&request);
-
-        assert_eq!(request.method(), reqwest::Method::POST);
-        assert_eq!(
-            request.url().as_str(),
-            "https://opencode.ai/zen/v1/chat/completions"
-        );
-        assert_eq!(request.headers()["authorization"], "Bearer zen-key");
-        assert_eq!(body["model"], "kimi-k2.6");
-        assert_eq!(body["stream"], true);
-        assert_eq!(body["messages"][0]["content"], "Which city?");
-    }
-
-    #[test]
-    fn an_openai_request_posts_the_zen_body_plus_no_reasoning_to_openai() {
-        let messages = [Message::user("Which city?")];
-        let zen = Completions::zen("zen-key".to_owned(), "gpt-6-luna");
-        let openai = Completions::openai("openai-key".to_owned(), "gpt-6-luna");
-
-        let zen_request = zen.request(&messages).build().unwrap();
-        let request = openai.request(&messages).build().unwrap();
-        let mut expected = body(&zen_request);
-        expected["reasoning_effort"] = json!("none");
 
         assert_eq!(request.method(), reqwest::Method::POST);
         assert_eq!(
@@ -308,39 +280,15 @@ mod test {
             "https://api.openai.com/v1/chat/completions"
         );
         assert_eq!(request.headers()["authorization"], "Bearer openai-key");
-        assert_eq!(body(&request), expected);
-    }
-
-    #[test]
-    fn a_zen_request_carries_no_reasoning_effort() {
-        let zen = Completions::zen("zen-key".to_owned(), "glm-5.3-flash");
-
-        let request = zen
-            .request(&[Message::user("Which city?")])
-            .build()
-            .unwrap();
-
-        assert_eq!(body(&request).get("reasoning_effort"), None);
-    }
-
-    #[tokio::test]
-    #[ignore = "needs OPENCODE_API_KEY and the network"]
-    async fn a_real_zen_streams_through_the_trait() {
-        let key = std::env::var("OPENCODE_API_KEY").expect("set OPENCODE_API_KEY to run this");
-        let zen = Completions::zen(key, "deepseek-v4-flash");
-        let messages = [Message::user("Count from one to twenty in words")];
-        let mut pieces = Vec::new();
-
-        let reply = ChatProvider::stream(&zen, &messages, |progress| {
-            if let Progress::Text(delta) = progress {
-                pieces.push(delta.to_owned());
-            }
-        })
-        .await
-        .unwrap();
-
-        assert!(pieces.len() > 1, "{pieces:?}");
-        assert_eq!(pieces.concat(), reply.text);
+        assert_eq!(
+            body(&request),
+            json!({
+                "model": "gpt-6-luna",
+                "messages": [ { "role": "user", "content": "Which city?" } ],
+                "stream": true,
+                "reasoning_effort": "none"
+            })
+        );
     }
 
     #[tokio::test]

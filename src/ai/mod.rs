@@ -1,10 +1,9 @@
 pub(crate) mod completions;
 pub(crate) mod gemini;
-pub(crate) mod opencode;
 pub(crate) mod prompt;
 mod sse;
 
-use std::{collections::BTreeSet, sync::LazyLock};
+use std::sync::LazyLock;
 
 use reqwest::StatusCode;
 
@@ -14,18 +13,15 @@ use gemini::{Gemini, GeminiModel};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Provider {
     Gemini,
-    OpenCodeZen,
     OpenAi,
 }
 
 impl Provider {
-    pub(crate) const ALL: [Provider; 3] =
-        [Provider::Gemini, Provider::OpenCodeZen, Provider::OpenAi];
+    pub(crate) const ALL: [Provider; 2] = [Provider::Gemini, Provider::OpenAi];
 
     pub(crate) fn label(self) -> &'static str {
         match self {
             Provider::Gemini => "Gemini",
-            Provider::OpenCodeZen => "OpenCode Zen",
             Provider::OpenAi => "OpenAI",
         }
     }
@@ -33,7 +29,6 @@ impl Provider {
     pub(crate) fn slug(self) -> &'static str {
         match self {
             Provider::Gemini => "gemini",
-            Provider::OpenCodeZen => "opencode-zen",
             Provider::OpenAi => "openai",
         }
     }
@@ -77,14 +72,12 @@ impl ChatModel {
     }
 }
 
-pub(crate) fn chat_models(zen_ticked: &BTreeSet<String>) -> Vec<ChatModel> {
-    let gemini = GeminiModel::ALL.into_iter().map(ChatModel::gemini);
-    let zen = zen_ticked.iter().map(|id| ChatModel {
-        provider: Provider::OpenCodeZen,
-        id: id.clone(),
-    });
-
-    gemini.chain([ChatModel::luna()]).chain(zen).collect()
+pub(crate) fn chat_models() -> Vec<ChatModel> {
+    GeminiModel::ALL
+        .into_iter()
+        .map(ChatModel::gemini)
+        .chain([ChatModel::luna()])
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -221,27 +214,16 @@ mod test {
 
     #[test]
     fn each_provider_has_a_reader_facing_label() {
-        assert_eq!(
-            Provider::ALL.map(Provider::label),
-            ["Gemini", "OpenCode Zen", "OpenAI"]
-        );
+        assert_eq!(Provider::ALL.map(Provider::label), ["Gemini", "OpenAI"]);
     }
 
     #[test]
-    fn the_chat_offers_every_gemini_model_then_the_ticked_zen_ones_then_luna() {
-        let ticked = BTreeSet::from(["kimi-k2.6".to_owned(), "deepseek-v4-flash".to_owned()]);
-        let zen = |id: &str| ChatModel {
-            provider: Provider::OpenCodeZen,
-            id: id.to_owned(),
-        };
-
+    fn the_chat_offers_every_gemini_model_then_luna() {
         assert_eq!(
-            chat_models(&ticked),
+            chat_models(),
             [
                 ChatModel::gemini(GeminiModel::FlashLite),
                 ChatModel::gemini(GeminiModel::Flash),
-                zen("deepseek-v4-flash"),
-                zen("kimi-k2.6"),
                 ChatModel::luna(),
             ]
         );
@@ -271,20 +253,12 @@ mod test {
 
     #[test]
     fn a_chat_model_key_names_its_provider_and_id() {
-        let model = ChatModel {
-            provider: Provider::OpenCodeZen,
-            id: "kimi-k2.6".to_owned(),
-        };
-
-        assert_eq!(model.key(), "opencode-zen/kimi-k2.6");
+        assert_eq!(ChatModel::luna().key(), "openai/gpt-6-luna");
     }
 
     #[test]
     fn each_provider_has_a_stable_storage_slug() {
-        assert_eq!(
-            Provider::ALL.map(Provider::slug),
-            ["gemini", "opencode-zen", "openai"]
-        );
+        assert_eq!(Provider::ALL.map(Provider::slug), ["gemini", "openai"]);
     }
 
     #[test]
@@ -293,6 +267,7 @@ mod test {
             assert_eq!(Provider::from_slug(provider.slug()), Some(provider));
         }
         assert_eq!(Provider::from_slug("anthropic"), None);
+        assert_eq!(Provider::from_slug("opencode-zen"), None);
     }
 
     #[test]

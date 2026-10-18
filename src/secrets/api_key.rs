@@ -4,13 +4,11 @@ use crate::{
 };
 
 const GEMINI_API_KEY: &str = "gemini-api-key";
-const OPENCODE_ZEN_API_KEY: &str = "opencode-zen-api-key";
 const OPENAI_API_KEY: &str = "openai-api-key";
 
 fn entry(provider: Provider) -> &'static str {
     match provider {
         Provider::Gemini => GEMINI_API_KEY,
-        Provider::OpenCodeZen => OPENCODE_ZEN_API_KEY,
         Provider::OpenAi => OPENAI_API_KEY,
     }
 }
@@ -49,44 +47,30 @@ mod test {
     fn saving_a_key_stores_it_trimmed_and_hands_it_back() {
         let store = Memory::default();
 
-        let saved = save(&store, Provider::OpenCodeZen, "  key\n").expect("save the key");
+        let saved = save(&store, Provider::OpenAi, "  key\n").expect("save the key");
 
         assert_eq!(saved, "key");
-        assert!(is_set(&store, Provider::OpenCodeZen).expect("read the key"));
+        assert!(is_set(&store, Provider::OpenAi).expect("read the key"));
     }
 
     #[test]
     fn each_provider_keeps_its_key_in_its_own_entry() {
         let store = Memory::default();
 
-        save(&store, Provider::OpenCodeZen, "zen").expect("save the Zen key");
+        save(&store, Provider::OpenAi, "openai").expect("save the OpenAI key");
         assert!(!is_set(&store, Provider::Gemini).expect("read the Gemini key"));
 
         save(&store, Provider::Gemini, "gemini").expect("save the Gemini key");
-        forget(&store, Provider::OpenCodeZen).expect("forget the Zen key");
-
-        assert!(is_set(&store, Provider::Gemini).expect("read the Gemini key"));
-        assert!(!is_set(&store, Provider::OpenCodeZen).expect("read the Zen key"));
-    }
-
-    #[test]
-    fn the_openai_key_lives_apart_from_the_other_two() {
-        let store = Memory::default();
-        save(&store, Provider::Gemini, "gemini").expect("save the Gemini key");
-        save(&store, Provider::OpenCodeZen, "zen").expect("save the Zen key");
-
-        save(&store, Provider::OpenAi, "openai").expect("save the OpenAI key");
         assert_eq!(
             get(&store, Provider::OpenAi).expect("read the OpenAI key"),
             Some("openai".to_owned())
         );
-
         forget(&store, Provider::OpenAi).expect("forget the OpenAI key");
-        assert!(!is_set(&store, Provider::OpenAi).expect("read the OpenAI key"));
+
         assert_eq!(
-            [Provider::Gemini, Provider::OpenCodeZen]
-                .map(|provider| get(&store, provider).expect("read a key")),
-            [Some("gemini".to_owned()), Some("zen".to_owned())]
+            get(&store, Provider::Gemini).expect("read the Gemini key"),
+            Some("gemini".to_owned())
         );
+        assert!(!is_set(&store, Provider::OpenAi).expect("read the OpenAI key"));
     }
 }

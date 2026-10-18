@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, rc::Rc};
+use std::rc::Rc;
 
 use dioxus::{core::Task, prelude::*};
 
@@ -55,8 +55,7 @@ pub(crate) fn ChatPanel(chat: ChatHandle) -> Element {
 #[component]
 fn ModelPicker() -> Element {
     let mut chosen = use_context::<Signal<ChatModel>>();
-    let zen_ticked = use_context::<Signal<BTreeSet<String>>>();
-    let models = chat_models(&zen_ticked.read());
+    let models = chat_models();
 
     rsx! {
         select {
@@ -64,7 +63,7 @@ fn ModelPicker() -> Element {
             aria_label: "Model",
             onpointerdown: move |e| e.stop_propagation(),
             onchange: move |event| {
-                let Some(model) = chat_models(&zen_ticked.read())
+                let Some(model) = chat_models()
                     .into_iter()
                     .find(|model| model.key() == event.value())
                 else {

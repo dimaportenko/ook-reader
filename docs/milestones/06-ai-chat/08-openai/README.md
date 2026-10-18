@@ -2,6 +2,11 @@
 
 [← Milestone 6](../README.md)
 
+> **Note 2026-10-18:** the OpenCode Zen provider has since been removed (see
+> [Phase 23](../07-opencode/phase-23-opencode-zen.md)). The shared `chat/completions` client
+> now serves OpenAI only, and the picker offers Gemini's models then Luna. Mentions of Zen
+> below describe the app as it was when this phase closed.
+
 The chat drawer can answer with **GPT-6 Luna** (`gpt-6-luna`), served directly by the
 OpenAI API. **Settings → AI** gets an *OpenAI* block with a key row, and the drawer's picker
 always offers Luna beside Gemini's models and the ticked Zen models. This is the third

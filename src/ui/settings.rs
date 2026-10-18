@@ -1,11 +1,10 @@
-use std::{collections::BTreeSet, rc::Rc};
+use std::rc::Rc;
 
 use dioxus::prelude::*;
 use dioxus_primitives::ContentAlign;
 
 use crate::{
-    ai::{opencode, Provider},
-    db::Db,
+    ai::Provider,
     secrets::{api_key, SecretStore},
     settings::{
         choice::Choice, Settings, FONT_SIZE_MAX, FONT_SIZE_MIN, LINE_HEIGHT_MAX, LINE_HEIGHT_MIN,
@@ -255,7 +254,7 @@ fn use_key_set(provider: Provider) -> Signal<bool> {
 }
 
 #[component]
-fn ProviderSettings(provider: Provider, note: Option<&'static str>, children: Element) -> Element {
+fn ProviderSettings(provider: Provider, note: Option<&'static str>) -> Element {
     let mut key_set = use_key_set(provider);
 
     rsx! {
@@ -266,9 +265,6 @@ fn ProviderSettings(provider: Provider, note: Option<&'static str>, children: El
                 provider,
                 key_set: key_set(),
                 on_change: move |key: Option<String>| key_set.set(key.is_some()),
-            }
-            if key_set() {
-                {children}
             }
         }
         if let Some(note) = note {
@@ -285,70 +281,11 @@ pub(crate) fn GeminiSettings() -> Element {
 }
 
 #[component]
-pub(crate) fn OpenCodeZenSettings() -> Element {
-    rsx! {
-        ProviderSettings { provider: Provider::OpenCodeZen, ZenCatalog {} }
-    }
-}
-
-#[component]
 pub(crate) fn OpenAiSettings() -> Element {
     rsx! {
         ProviderSettings {
             provider: Provider::OpenAi,
             note: "OpenAI keeps API requests for 30 days by default.",
-        }
-    }
-}
-
-#[component]
-fn ZenCatalog() -> Element {
-    let db = use_context::<Rc<Db>>();
-    let catalog = use_resource(opencode::models);
-    let mut ticked = use_context::<Signal<BTreeSet<String>>>();
-
-    rsx! {
-        match &*catalog.read() {
-            None => rsx! {
-                SettingRow {
-                    label: "Models",
-                    span { class: "{Styles::key_status}", "Loading…" }
-                }
-            },
-            Some(Err(error)) => rsx! {
-                p { class: "{Styles::catalog_error}", "Could not load the model list: {error}" }
-            },
-            Some(Ok(ids)) => rsx! {
-                for id in ids.iter().cloned() {
-                    label {
-                        key: "{id}",
-                        class: "{Styles::settings_row}",
-                        span { class: "{Styles::settings_row__label}", "{id}" }
-                        input {
-                            class: "{Styles::checkbox}",
-                            r#type: "checkbox",
-                            checked: ticked.read().contains(&id),
-                            onchange: {
-                                let db = db.clone();
-                                move |event: FormEvent| {
-                                    let tick = event.checked();
-                                    if db
-                                        .set_ticked(Provider::OpenCodeZen, &id, tick)
-                                        .or_log("save your chosen models")
-                                        .is_some()
-                                    {
-                                        if tick {
-                                            ticked.write().insert(id.clone());
-                                        } else {
-                                            ticked.write().remove(&id);
-                                        }
-                                    }
-                                }
-                            },
-                        }
-                    }
-                }
-            },
         }
     }
 }

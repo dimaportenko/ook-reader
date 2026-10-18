@@ -2,6 +2,15 @@
 
 [← Milestone 6](../README.md)
 
+> **Removed 2026-10-18.** The OpenCode Zen provider has been taken out of the app (commit
+> `58b9b63`). It didn't work as expected for the learner, and [Phase 25](../08-openai/phase-25-openai.md)'s
+> OpenAI provider (GPT-6 Luna) covers the need for a second provider. The `chat/completions`
+> client, `ChatModel`, the drawer's model picker, the `chat_model` table and the *Thinking…*
+> status built here stay. The Zen catalog, the `ai_models` table (dropped on open) and the
+> Zen block in Settings → AI are gone. A saved Zen chat pick falls back to the default
+> model. Step 11 (review and refactor) is superseded and will not be done. The rest of this
+> doc is kept as history.
+
 The chat drawer can answer with an **OpenCode Zen** model as well as Gemini. In
 **Settings → AI** (built in [Phase 24](../06-settings-screen/phase-24-settings-screen.md)),
 the reader pastes a Zen API key next to the Gemini one, loads Zen's live model list, and
@@ -13,7 +22,7 @@ trait change.
 
 | # | Phase | Status |
 |---|---|---|
-| 23 | [Second provider: OpenCode Zen](phase-23-opencode-zen.md) | 🚧 in progress — resumed 2026-09-28 |
+| 23 | [Second provider: OpenCode Zen](phase-23-opencode-zen.md) | ⛔ superseded — Steps 1–10 done; Zen removed 2026-10-18 |
 
 ## Why Zen, not Go or a ChatGPT subscription
 
