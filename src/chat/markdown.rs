@@ -1,4 +1,4 @@
-use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Block {
@@ -12,6 +12,10 @@ pub(crate) enum Block {
         items: Vec<Vec<Block>>,
     },
     Quote(Vec<Block>),
+    Code {
+        lang: Option<String>,
+        text: String,
+    },
     Rule,
 }
 
@@ -66,6 +70,7 @@ struct Builder {
     containers: Vec<Container>,
     inlines: Vec<Inline>,
     spans: Vec<(Span, Vec<Inline>)>,
+    code: Option<(Option<String>, String)>,
 }
 
 impl Builder {
@@ -123,6 +128,31 @@ impl Builder {
         });
     }
 
+    fn text(&mut self, text: &str) {
+        match &mut self.code {
+            Some((_, code)) => code.push_str(text),
+            None => self.push(Inline::Text(text.to_owned())),
+        }
+    }
+
+    fn start_code(&mut self, kind: CodeBlockKind) {
+        self.end_block();
+        let lang = match kind {
+            CodeBlockKind::Fenced(info) => info.split_whitespace().next().map(str::to_owned),
+            CodeBlockKind::Indented => None,
+        };
+        self.code = Some((lang, String::new()));
+    }
+
+    fn end_code(&mut self) {
+        if let Some((lang, mut text)) = self.code.take() {
+            if text.ends_with('\n') {
+                text.pop();
+            }
+            self.push_block(Block::Code { lang, text });
+        }
+    }
+
     fn rule(&mut self) {
         self.end_block();
         self.push_block(Block::Rule);
@@ -169,6 +199,8 @@ pub(crate) fn parse(text: &str) -> Vec<Block> {
             }),
             Event::End(TagEnd::BlockQuote(_) | TagEnd::List(_)) => builder.close_container(),
             Event::Start(Tag::Item) => builder.start_item(),
+            Event::Start(Tag::CodeBlock(kind)) => builder.start_code(kind),
+            Event::End(TagEnd::CodeBlock) => builder.end_code(),
             Event::Rule => builder.rule(),
             Event::Start(Tag::Link { .. } | Tag::Image { .. })
             | Event::End(TagEnd::Link | TagEnd::Image)
@@ -177,8 +209,8 @@ pub(crate) fn parse(text: &str) -> Vec<Block> {
             Event::Code(code) => builder.push(Inline::Code(code.into_string())),
             Event::SoftBreak => builder.push(Inline::SoftBreak),
             Event::HardBreak => builder.push(Inline::HardBreak),
-            Event::Text(text)
-            | Event::Html(text)
+            Event::Text(text) => builder.text(&text),
+            Event::Html(text)
             | Event::InlineHtml(text)
             | Event::InlineMath(text)
             | Event::DisplayMath(text)
@@ -376,6 +408,78 @@ mod test {
         );
     }
 
+    fn code(lang: Option<&str>, text: &str) -> Block {
+        Block::Code {
+            lang: lang.map(str::to_owned),
+            text: text.to_owned(),
+        }
+    }
+
+    #[test]
+    fn a_fenced_block_keeps_its_language_and_text() {
+        assert_eq!(
+            parse("```rust\nfn main() {\n    println!(\"hi\");\n}\n```"),
+            [code(Some("rust"), "fn main() {\n    println!(\"hi\");\n}")]
+        );
+    }
+
+    #[test]
+    fn only_the_first_word_of_the_info_string_is_the_language() {
+        assert_eq!(
+            parse("```python title=\"x.py\"\nx = 1\n```"),
+            [code(Some("python"), "x = 1")]
+        );
+    }
+
+    #[test]
+    fn an_empty_info_string_has_no_language() {
+        assert_eq!(parse("```\nplain\n```"), [code(None, "plain")]);
+    }
+
+    #[test]
+    fn an_indented_block_is_code() {
+        assert_eq!(
+            parse("Run:\n\n    let x = 1;\n    let y = 2;\n"),
+            [
+                paragraph(vec![text("Run:")]),
+                code(None, "let x = 1;\nlet y = 2;"),
+            ]
+        );
+    }
+
+    #[test]
+    fn code_text_is_kept_verbatim() {
+        assert_eq!(
+            parse("```\n**not bold** <b>\n\n  `spaced`\n```"),
+            [code(None, "**not bold** <b>\n\n  `spaced`")]
+        );
+    }
+
+    #[test]
+    fn an_unclosed_fence_mid_stream_holds_the_partial_text() {
+        assert_eq!(
+            parse("```rust\nfn main() {"),
+            [code(Some("rust"), "fn main() {")]
+        );
+    }
+
+    #[test]
+    fn a_code_block_sits_inside_a_list_item() {
+        assert_eq!(
+            parse("- run:\n\n  ```sh\n  cargo test\n  ```\n- done"),
+            [Block::List {
+                start: None,
+                items: vec![
+                    vec![
+                        paragraph(vec![text("run:")]),
+                        code(Some("sh"), "cargo test")
+                    ],
+                    vec![paragraph(vec![text("done")])],
+                ],
+            }]
+        );
+    }
+
     fn collect_text(blocks: &[Block], seen: &mut String) {
         for block in blocks {
             match block {
@@ -393,6 +497,10 @@ mod test {
                     }
                 }
                 Block::Quote(blocks) => collect_text(blocks, seen),
+                Block::Code { text, .. } => {
+                    seen.push_str(text);
+                    seen.push('|');
+                }
                 Block::Rule => {}
             }
         }
@@ -401,27 +509,14 @@ mod test {
     #[test]
     fn unhandled_blocks_keep_their_text() {
         let blocks = parse(
-            "```\nlet x = 1;\n```\n\n| a | b |\n|---|---|\n| c | d |\n\n[link](https://example.com) ![alt](x.png) <b>html</b>\n\n- item\n\n  ```\n  nested code\n  ```\n\n> | e | f |\n> |---|---|",
+            "| a | b |\n|---|---|\n| c | d |\n\n[link](https://example.com) ![alt](x.png) <b>html</b>\n\n- | g | h |\n  |---|---|\n\n> | e | f |\n> |---|---|",
         );
 
         let mut seen = String::new();
         collect_text(&blocks, &mut seen);
 
         for expected in [
-            "let x = 1;",
-            "a",
-            "b",
-            "c",
-            "d",
-            "link",
-            "alt",
-            "<b>",
-            "html",
-            "</b>",
-            "item",
-            "nested code",
-            "e",
-            "f",
+            "a", "b", "c", "d", "link", "alt", "<b>", "html", "</b>", "g", "h", "e", "f",
         ] {
             assert!(
                 seen.contains(expected),

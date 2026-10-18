@@ -411,3 +411,184 @@ first and last block sit flush with the bubble's padding.
   the same guarantee.
 - **Skipped:** a separate `Container::Item` frame. Treating an item as the list's last
   `Vec<Block>` is less code and needs no "is the parent a list?" check on `End(Item)`.
+
+## Step 3 — Code blocks
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**What it is.** A fenced block (```` ```rust ````) or an indented block in a reply now
+shows as a code box: a monospaced font on a slightly darker tint, every space and line
+break kept, and long lines scrolling sideways inside the bubble instead of wrapping or
+widening the drawer. Inline `` `code` `` gets the same font and a small tinted pill. A
+fence that hasn't closed yet, mid-stream, is already a code box holding what has arrived.
+
+### The crux of this step: a mode, not a frame
+
+Code is the first block whose text is **not** Markdown. `**not bold**` inside a fence has
+to stay exactly that, and so does every space. `pulldown-cmark` already does the hard part:
+inside a code block it sends only `Text` events, no `Strong` and no `SoftBreak`, with the
+line breaks inside the text. So the builder doesn't need a third stack. It needs a
+**mode**: while a code block is open, `Text` goes into a plain `String` instead of
+becoming an `Inline`. A code block can't hold another block, so one `Option` is enough.
+
+### Runnable check first
+
+`src/chat/markdown.rs` — seven new tests, one helper `code(lang, text)`, and the walk-the-
+tree test reworked:
+
+```rust
+#[test]
+fn an_unclosed_fence_mid_stream_holds_the_partial_text() {
+    assert_eq!(
+        parse("```rust\nfn main() {"),
+        [code(Some("rust"), "fn main() {")]
+    );
+}
+
+#[test]
+fn a_code_block_sits_inside_a_list_item() {
+    assert_eq!(
+        parse("- run:\n\n  ```sh\n  cargo test\n  ```\n- done"),
+        [Block::List {
+            start: None,
+            items: vec![
+                vec![
+                    paragraph(vec![text("run:")]),
+                    code(Some("sh"), "cargo test")
+                ],
+                vec![paragraph(vec![text("done")])],
+            ],
+        }]
+    );
+}
+
+#[test]
+fn code_text_is_kept_verbatim() {
+    assert_eq!(
+        parse("```\n**not bold** <b>\n\n  `spaced`\n```"),
+        [code(None, "**not bold** <b>\n\n  `spaced`")]
+    );
+}
+```
+
+The others: `a_fenced_block_keeps_its_language_and_text` (a multi-line `rust` block with
+indentation), `only_the_first_word_of_the_info_string_is_the_language` (`python
+title="x.py"` → `python`), `an_empty_info_string_has_no_language` and
+`an_indented_block_is_code` (a paragraph, then four-space-indented lines).
+
+`unhandled_blocks_keep_their_text` drops its two code blocks, which are handled now, and
+gains a table inside a list item in their place, so it still checks that a degraded block
+inside a container keeps its text. `collect_text` learns `Block::Code`.
+
+Red, with `Block::Code` and its rendering in place but `parse` unchanged: 7 failed, 250
+passed, 3 ignored.
+
+```
+test chat::markdown::test::a_fenced_block_keeps_its_language_and_text ... FAILED
+test chat::markdown::test::an_unclosed_fence_mid_stream_holds_the_partial_text ... FAILED
+test chat::markdown::test::a_code_block_sits_inside_a_list_item ... FAILED
+test chat::markdown::test::an_indented_block_is_code ... FAILED
+test chat::markdown::test::code_text_is_kept_verbatim ... FAILED
+test chat::markdown::test::an_empty_info_string_has_no_language ... FAILED
+test chat::markdown::test::only_the_first_word_of_the_info_string_is_the_language ... FAILED
+```
+
+Green after: 257 passed, 3 ignored, and `cargo clippy --all-targets` was clean.
+
+**Eyeball under `dx serve`:** ask for "a Rust function with one very long line, and a
+sentence that mentions `cargo test` inline". While the fence is still open, the code box is
+already there and grows line by line. Once done, the indentation is kept, the long line
+scrolls sideways inside the box (the bubble and the drawer stay their width), and the box
+sits flush with the bubble's padding when it is the first or last block. The inline
+`cargo test` is monospaced on a small pill. Check light, sepia and dark themes: the tint
+follows the text colour, so the box should be visible in all three.
+
+### Minimal implementation
+
+- **`src/chat/markdown.rs`** —
+  - `Block` gains `Code { lang: Option<String>, text: String }`.
+  - `Builder` gains `code: Option<(Option<String>, String)>`: `Some` while a code block is
+    open, holding its language and the text so far.
+  - `start_code(kind)` ends the current paragraph, takes the first whitespace-separated
+    word of a fenced block's info string as the language (an empty info string gives
+    `None`), and `Indented` gives `None`.
+  - `text(&str)` is the new home of `Event::Text`: into the code buffer when one is open,
+    otherwise `push(Inline::Text)` as before. `Html`, `InlineHtml`, math and footnote
+    references still push `Inline::Text` directly; they never occur inside a code block.
+  - `end_code` drops one trailing `\n`, if there is one, and `push_block`s the
+    `Block::Code`, so it lands in the open list item or quote like any other block.
+  - New arms: `Start(Tag::CodeBlock(kind))` → `start_code`, `End(TagEnd::CodeBlock)` →
+    `end_code`. Still no catch-all over whole events.
+- **`src/ui/markdown.rs`** — `Block::Code` renders as `pre { "data-lang": lang, code {
+  "{text}" } }`. `lang.as_deref()` is an `Option<&str>`, and Dioxus leaves the attribute
+  off when it's `None`.
+- **`src/ui/chat.css`** —
+  - `code` and `pre` share a system monospace stack and `0.9em`. Inline `code` gets a
+    small padding, a rounded corner and the `--tint-fill` background.
+  - `pre` gets padding, a rounded corner, the same `--tint-fill`, `overflow-x: auto`,
+    `white-space: pre` and `overflow-wrap: normal`. `pre code` drops the pill's padding
+    and background and keeps `1em`, so the font isn't shrunk twice.
+  - `pre` joins the `0.6em` block margin and the first-child/last-child flush rules.
+  - `.chat_panel__turn` gains `min-width: 0` next to its `max-width: 85%`.
+
+### Why it works
+
+- **The parser already separated code from Markdown.** Inside a code block `pulldown-cmark`
+  sends `Start(CodeBlock)`, one or more `Text` events (typically one per line), then
+  `End(CodeBlock)`. No inline events in between. So switching where
+  `Text` goes is the whole change, and concatenating the pieces gives back the source
+  exactly, leading spaces included: the parser has already removed the fence's own
+  indentation (the two spaces of the list item in the test).
+- **The trailing newline.** Every line of a closed block arrives with its `\n`, so the text
+  always ends in one. Left in, `pre` would render an empty last line, a visibly taller box
+  at the bottom. `end_code` drops exactly one, so a block that really ends in a blank line
+  keeps it. The mid-stream line `fn main() {` comes without a newline, and nothing is
+  removed.
+- **Mid-stream is still free.** An unclosed fence runs to the end of the text, and
+  `pulldown-cmark` closes it with `End(CodeBlock)` when the input runs out, the same
+  guarantee `spans` and `containers` rely on. So the partial text becomes a code box on the
+  very first render, and the next delta just adds to it.
+- **Why the long line scrolls instead of widening.** `white-space: pre` stops the line
+  from wrapping (it would inherit the bubble's `pre-wrap` otherwise), and `overflow-wrap:
+  normal` stops the bubble's `anywhere` from breaking it. The line can only fit by
+  scrolling, which `overflow-x: auto` allows. The `pre` is a block, so it's exactly as
+  wide as the bubble. The bubble is a flex item in a column, so its width is its cross
+  size: it shrinks to fit its content, up to `max-width: 85%`, and the messages list
+  clips anything wider (`overflow-x: hidden`). `min-width: 0` says outright that a long
+  line doesn't set a floor for the bubble's width.
+- **The tint follows the theme.** `--tint-fill` is `currentColor` at 10% over whatever is
+  behind, so the box is a shade darker on a light theme and lighter on a dark one, with no
+  per-theme rule. On a user bubble, which already uses `--tint-fill`, it stacks and is still
+  visible.
+
+### Forks taken
+
+- **A mode, not a frame on `containers`.** A `Container::Code` would make `push_block`
+  answer a question that can't happen (a block inside code). An `Option` field says "code
+  can't nest" in the type.
+- **Drop one trailing newline.** The alternatives: keep it, and let CSS hide the empty
+  line (it can't, reliably), or `trim_end` every trailing newline, which loses a block's
+  intentional blank last line.
+- **`data-lang` on `pre`, not `class: "language-rust"` on `code`.** No highlighter reads
+  it yet, so the attribute only has to be visible and stylable. `language-*` is the
+  convention highlighters like `highlight.js` look for, and is a one-line change if one
+  arrives.
+- **The language is kept as typed.** ```` ```Rust ```` stays `Rust`. Normalising to lower
+  case would only matter once something reads it.
+- **A system monospace stack.** `ui-monospace` first, then the platform faces, ending in
+  `monospace`. A bare `monospace` would trigger browsers' small default monospace size.
+
+### Scope note
+
+- No syntax highlighting; the language is recorded and shown as an attribute only.
+- No copy button. It would be the first interactive element in a reply.
+- Tables are Step 4, links, images and raw HTML Step 5.
+
+### Review notes (from the `simplify` pass)
+
+- **Applied:** moved the font stack and size onto `:is(code, pre)` so `pre` and inline
+  `code` share one rule, and set `pre code` back to `1em` so code in a block isn't
+  `0.9 × 0.9`.
+- **Skipped:** `strip_suffix('\n')` for the trailing newline. It returns a borrowed slice,
+  which would mean a second allocation; `ends_with` then `pop` edits the `String` in place.

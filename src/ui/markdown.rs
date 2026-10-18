@@ -32,6 +32,11 @@ fn render_blocks(blocks: &[Block]) -> Element {
                 Block::Quote(blocks) => rsx! {
                     blockquote { {render_blocks(blocks)} }
                 },
+                Block::Code { lang, text } => rsx! {
+                    pre { "data-lang": lang.as_deref(),
+                        code { "{text}" }
+                    }
+                },
                 Block::Rule => rsx! { hr {} },
             }
         }

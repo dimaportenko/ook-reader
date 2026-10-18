@@ -13,6 +13,7 @@
 
 .chat_panel__turn {
   align-self: flex-start;
+  min-width: 0;
   max-width: 85%;
   padding: 0.625rem 0.875rem;
   border-radius: 1rem 1rem 1rem 0.25rem;
@@ -23,7 +24,7 @@
   white-space: pre-wrap;
 }
 
-.chat_panel__turn :is(p, ul, ol, blockquote) {
+.chat_panel__turn :is(p, ul, ol, blockquote, pre) {
   margin: 0.6em 0;
 }
 
@@ -83,6 +84,32 @@
   opacity: 0.85;
 }
 
+.chat_panel__turn :is(code, pre) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+}
+
+.chat_panel__turn code {
+  padding: 0.1em 0.3em;
+  border-radius: 0.3em;
+  background-color: var(--tint-fill);
+}
+
+.chat_panel__turn pre {
+  padding: 0.6em 0.75em;
+  border-radius: 0.5em;
+  background-color: var(--tint-fill);
+  overflow-x: auto;
+  overflow-wrap: normal;
+  white-space: pre;
+}
+
+.chat_panel__turn pre code {
+  padding: 0;
+  background-color: transparent;
+  font-size: 1em;
+}
+
 .chat_panel__turn hr {
   margin: 0.9em 0;
   border: 0;
@@ -90,12 +117,12 @@
 }
 
 .chat_panel__turn
-  :is(p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, hr):first-child {
+  :is(p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, pre, hr):first-child {
   margin-top: 0;
 }
 
 .chat_panel__turn
-  :is(p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, hr):last-child {
+  :is(p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, pre, hr):last-child {
   margin-bottom: 0;
 }
 
