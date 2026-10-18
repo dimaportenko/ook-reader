@@ -23,6 +23,18 @@
   white-space: pre-wrap;
 }
 
+.chat_panel__turn p {
+  margin: 0.6em 0;
+}
+
+.chat_panel__turn p:first-child {
+  margin-top: 0;
+}
+
+.chat_panel__turn p:last-child {
+  margin-bottom: 0;
+}
+
 .chat_panel__turn[data-role="user"] {
   align-self: flex-end;
   border-radius: 1rem 1rem 0.25rem 1rem;
