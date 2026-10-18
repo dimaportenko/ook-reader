@@ -8,10 +8,10 @@ pub(crate) fn provider_for(
     model: &ChatModel,
 ) -> Result<Option<AnyProvider>, SecretError> {
     Ok(
-        api_key::get(store, model.provider)?.and_then(|key| match model.provider {
-            Provider::Gemini => Some(AnyProvider::Gemini(Gemini::new(key, &model.id))),
-            Provider::OpenCodeZen => Some(AnyProvider::OpenCode(OpenCode::new(key, &model.id))),
-            Provider::OpenAi => None,
+        api_key::get(store, model.provider)?.map(|key| match model.provider {
+            Provider::Gemini => AnyProvider::Gemini(Gemini::new(key, &model.id)),
+            Provider::OpenCodeZen => AnyProvider::OpenCode(OpenCode::new(key, &model.id)),
+            Provider::OpenAi => AnyProvider::OpenAiNotWired,
         }),
     )
 }
@@ -19,7 +19,10 @@ pub(crate) fn provider_for(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{ai::gemini::GeminiModel, secrets::Memory};
+    use crate::{
+        ai::{gemini::GeminiModel, ChatError, ChatProvider, Message},
+        secrets::Memory,
+    };
 
     #[test]
     fn the_chosen_model_needs_its_own_provider_s_key() {
@@ -46,14 +49,17 @@ mod test {
     }
 
     #[test]
-    fn an_openai_key_builds_no_client_yet() {
+    fn an_openai_key_builds_a_client_that_says_it_is_not_wired_yet() {
         let store = Memory::default();
-        let luna = ChatModel {
-            provider: Provider::OpenAi,
-            id: "gpt-6-luna".to_owned(),
-        };
-        api_key::save(&store, Provider::OpenAi, "openai").expect("save the OpenAI key");
-
+        let luna = ChatModel::luna();
         assert!(provider_for(&store, &luna).expect("read the key").is_none());
+
+        api_key::save(&store, Provider::OpenAi, "openai").expect("save the OpenAI key");
+        let client = provider_for(&store, &luna)
+            .expect("read the key")
+            .expect("an OpenAI key builds a client");
+        let result = pollster::block_on(client.stream(&[Message::user("Hi")], |_| {}));
+
+        assert!(matches!(result, Err(ChatError::NotWired)), "{result:?}");
     }
 }

@@ -64,6 +64,13 @@ impl ChatModel {
         }
     }
 
+    pub(crate) fn luna() -> Self {
+        ChatModel {
+            provider: Provider::OpenAi,
+            id: "gpt-6-luna".to_owned(),
+        }
+    }
+
     pub(crate) fn key(&self) -> String {
         format!("{}/{}", self.provider.slug(), self.id)
     }
@@ -76,7 +83,7 @@ pub(crate) fn chat_models(zen_ticked: &BTreeSet<String>) -> Vec<ChatModel> {
         id: id.clone(),
     });
 
-    gemini.chain(zen).collect()
+    gemini.chain(zen).chain([ChatModel::luna()]).collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,6 +137,8 @@ pub(crate) struct Reply {
 pub(crate) enum ChatError {
     #[error("the provider returned no answer")]
     Empty,
+    #[error("OpenAI chat isn't wired up yet")]
+    NotWired,
     #[error("could not reach the provider: {0}")]
     Http(#[from] reqwest::Error),
     #[error("the provider rejected the request ({status}): {body}")]
@@ -170,6 +179,7 @@ pub(crate) trait ChatProvider {
 pub(crate) enum AnyProvider {
     Gemini(Gemini),
     OpenCode(OpenCode),
+    OpenAiNotWired,
 }
 
 impl ChatProvider for AnyProvider {
@@ -181,6 +191,7 @@ impl ChatProvider for AnyProvider {
         match self {
             AnyProvider::Gemini(gemini) => gemini.stream(messages, on_progress).await,
             AnyProvider::OpenCode(zen) => zen.stream(messages, on_progress).await,
+            AnyProvider::OpenAiNotWired => Err(ChatError::NotWired),
         }
     }
 }
@@ -220,7 +231,7 @@ mod test {
     }
 
     #[test]
-    fn the_chat_offers_every_gemini_model_then_the_ticked_zen_ones() {
+    fn the_chat_offers_every_gemini_model_then_the_ticked_zen_ones_then_luna() {
         let ticked = BTreeSet::from(["kimi-k2.6".to_owned(), "deepseek-v4-flash".to_owned()]);
         let zen = |id: &str| ChatModel {
             provider: Provider::OpenCodeZen,
@@ -234,7 +245,19 @@ mod test {
                 ChatModel::gemini(GeminiModel::Flash),
                 zen("deepseek-v4-flash"),
                 zen("kimi-k2.6"),
+                ChatModel::luna(),
             ]
+        );
+    }
+
+    #[test]
+    fn luna_is_openai_s_gpt_6_luna() {
+        assert_eq!(
+            ChatModel::luna(),
+            ChatModel {
+                provider: Provider::OpenAi,
+                id: "gpt-6-luna".to_owned(),
+            }
         );
     }
 

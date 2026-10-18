@@ -210,3 +210,152 @@ returns it to *Not set*. The drawer's picker shows no *OpenAI* group yet.
   candidate for the Step 5 review.
 - **Skipped:** naming the OpenAI arm `_ => None` in `provider_for`. A wildcard would
   silently cover a fourth provider, which is exactly what the exhaustive match is for.
+
+## Step 2 — Luna in the picker
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**What it is.** The drawer's model picker always shows an *OpenAI* group with
+`gpt-6-luna`, after Gemini and the ticked Zen models. The pick survives a relaunch. With
+no OpenAI key, choosing Luna shows the drawer's existing "Add your OpenAI key in settings
+to chat." note. With a key, the compose box appears, and sending a message shows a red
+*OpenAI chat isn't wired up yet* under it. Step 3 replaces that with the real stream.
+
+### Runnable check first
+
+`src/ai/mod.rs` — the offer list ends with Luna, and Luna is one fixed id:
+
+```rust
+#[test]
+fn the_chat_offers_every_gemini_model_then_the_ticked_zen_ones_then_luna() {
+    // …the same ticked set as before…
+    assert_eq!(
+        chat_models(&ticked),
+        [
+            ChatModel::gemini(GeminiModel::FlashLite),
+            ChatModel::gemini(GeminiModel::Flash),
+            zen("deepseek-v4-flash"),
+            zen("kimi-k2.6"),
+            ChatModel::luna(),
+        ]
+    );
+}
+
+#[test]
+fn luna_is_openai_s_gpt_6_luna() {
+    assert_eq!(
+        ChatModel::luna(),
+        ChatModel {
+            provider: Provider::OpenAi,
+            id: "gpt-6-luna".to_owned(),
+        }
+    );
+}
+```
+
+`src/db/chat_model.rs` — the round-trip test gains a third pick, after Zen and Gemini:
+
+```rust
+db.save_chat_model(&ChatModel::luna()).expect("pick Luna");
+assert_eq!(
+    db.chat_model().expect("read the Luna pick"),
+    Some(ChatModel::luna())
+);
+```
+
+`src/ai_client/mod.rs` — replaces Step 1's `an_openai_key_builds_no_client_yet`:
+
+```rust
+#[test]
+fn an_openai_key_builds_a_client_that_says_it_is_not_wired_yet() {
+    let store = Memory::default();
+    let luna = ChatModel::luna();
+    assert!(provider_for(&store, &luna).expect("read the key").is_none());
+
+    api_key::save(&store, Provider::OpenAi, "openai").expect("save the OpenAI key");
+    let client = provider_for(&store, &luna)
+        .expect("read the key")
+        .expect("an OpenAI key builds a client");
+    let result = pollster::block_on(client.stream(&[Message::user("Hi")], |_| {}));
+
+    assert!(matches!(result, Err(ChatError::NotWired)), "{result:?}");
+}
+```
+
+Red against a `todo!()` body for `ChatModel::luna()` and the new `AnyProvider` arm, with
+`provider_for` still returning `None` for OpenAI: 4 failed, 232 passed, 4 ignored.
+
+```
+test ai::test::luna_is_openai_s_gpt_6_luna ... FAILED
+test ai_client::test::an_openai_key_builds_a_client_that_says_it_is_not_wired_yet ... FAILED
+test ai::test::the_chat_offers_every_gemini_model_then_the_ticked_zen_ones_then_luna ... FAILED
+test db::chat_model::test::the_chosen_chat_model_round_trips_and_the_latest_pick_wins ... FAILED
+```
+
+Green after: 236 passed, 4 ignored, and clippy was clean.
+
+**Eyeball under `dx serve`:** open the chat drawer. The picker shows *Gemini*, *OpenCode
+Zen* (if any are ticked), then *OpenAI* with `gpt-6-luna`. Pick it without an OpenAI key:
+the drawer asks for the OpenAI key. Save a key in Settings → AI and come back: the compose
+box shows, and sending a message puts *OpenAI chat isn't wired up yet* in red under it.
+Relaunch the app and Luna is still picked.
+
+### Minimal implementation
+
+- **`src/ai/mod.rs`** — `ChatModel::luna()` builds `{ OpenAi, "gpt-6-luna" }`.
+  `chat_models` chains `[ChatModel::luna()]` after the Zen models. `ChatError` gains
+  `NotWired` ("OpenAI chat isn't wired up yet"). `AnyProvider` gains a unit variant
+  `OpenAiNotWired`, whose `stream` returns `Err(ChatError::NotWired)` straight away.
+- **`src/ai_client/mod.rs`** — the OpenAI arm builds `AnyProvider::OpenAiNotWired`. Every
+  arm now builds a client, so `and_then` goes back to `map`.
+- **`src/db/chat_model.rs`** — no code change. The table stores the slug and the id, and
+  `from_slug` already knows `openai` since Step 1.
+
+### Why it works
+
+- **The picker reads `chat_models`.** `ModelPicker` renders an `optgroup` for each
+  provider that has a model in the list, so one more entry gives the *OpenAI* group. Its
+  `onchange` looks the pick up in the same list by `key()`, `openai/gpt-6-luna`.
+- **The startup fallback leaves Luna alone.** `main.rs` resets the pick to the first
+  offered model when the saved one isn't offered any more, as when a Zen model is unticked.
+  Luna is always offered, so a saved Luna pick survives that check.
+- **The table never needed a change.** It stores `provider.slug()` and `model.id` as text,
+  and reads back through `Provider::from_slug`. Step 1 made `openai` a known slug, so the
+  round trip already worked. The test pins it so a later change can't drop it.
+- **The error goes through the normal failure path.** `Conversation::settle(Err(e))` turns
+  any `ChatError` into `Status::Failed(e.to_string())`, which the drawer shows as a red
+  alert. The new variant needs no UI code. The question stays in the history, as it does
+  after a real network error.
+- **`and_then` back to `map`.** Step 1 used `and_then` so one arm could say "a key, but no
+  client". Now every arm builds one, and clippy's `bind_instead_of_map` flagged it.
+
+### Forks taken
+
+- **A clear error over a canned reply.** A canned reply would look like Luna answered,
+  and it would sit in the history as an assistant message. The error says what's true,
+  and it goes through the existing failure path with no UI work. The cost is a variant on
+  `AnyProvider` and one on `ChatError` that exist only until Step 3, which deletes both.
+- **The error only shows on send, not on pick.** Showing it on pick would need a third
+  drawer state between "no key" and "ready". Showing it on send keeps the drawer's two
+  states and costs one keystroke.
+- **The id lives in `ChatModel::luna()`, not a `LunaModel` enum or a `const`.** Gemini
+  has an enum because it has two models and a default. Luna is one id with nothing to
+  choose between, so a constructor next to `ChatModel::gemini` is enough. Adding Sol
+  later is the point at which an `OpenAiModel { Luna, Sol }` with an `ALL` earns its place.
+- **`OpenAiNotWired` is a unit variant.** It doesn't keep the key or the id. Step 3 needs
+  both, but it builds them into the real client, not into this placeholder.
+
+### Scope note
+
+- No request reaches OpenAI. That's Step 3, which also removes `OpenAiNotWired` and
+  `ChatError::NotWired`.
+- The saved key is read and then dropped in the OpenAI arm. Step 3 passes it to the client.
+
+### Review notes (from the `simplify` pass)
+
+- **Applied:** `and_then` → `map` in `provider_for` (clippy's suggestion, see above).
+- **Skipped:** `std::iter::once(ChatModel::luna())` over the one-element array. Both read
+  the same, and the array is shorter.
+- **Skipped:** naming the error after the model ("GPT-6 Luna isn't wired up yet"). The
+  gap is the OpenAI client, not Luna, and Step 3 closes it for every OpenAI id at once.
