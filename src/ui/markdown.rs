@@ -97,6 +97,9 @@ fn render_inlines(inlines: &[Inline]) -> Element {
                 Inline::Strikethrough(children) => rsx! { del { {render_inlines(children)} } },
                 Inline::SoftBreak => rsx! { "\n" },
                 Inline::HardBreak => rsx! { br {} },
+                Inline::Link { href, children } => rsx! {
+                    a { href: "{href}", title: "{href}", {render_inlines(children)} }
+                },
             }
         }
     }

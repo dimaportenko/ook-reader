@@ -778,3 +778,171 @@ sepia and dark: the borders and header tint follow the text colour.
 - **Skipped:** a shared `render_row(cells, align, th_or_td)` helper for the head and body
   rows. RSX can't pick the tag name at run time, so it would need a `match` on the tag
   inside, which is more code than the two short loops it replaces.
+
+## Step 5 — Links, images and raw HTML
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**What it is.** A link in a reply is now a real, underlined, accent-coloured link when it
+points at `http://`, `https://` or `mailto:`, and clicking it opens the system browser or
+mail app while the reader stays put. Any other link (`javascript:`, `data:`, `file:`, a
+relative path, a `#fragment`) shows only its text. Autolinks (`<https://…>`,
+`<me@example.com>`) are links too. An image shows as its alt text, and an image inside a
+safe link becomes a link of that alt text. Raw HTML, `<script>` included, stays literal
+text, as it has since Step 1.
+
+### The crux of this step: a link is a span that may refuse to wrap
+
+A link's events look like any other inline span: `Start(Link { link_type, dest_url, .. })`,
+its children, `End(Link)`. So a link is one more frame on the existing `spans` stack, and
+nested bold or code inside it works without new code. The twist is that the decision about
+the href is made at `Start`, before any children arrive, and an unsafe link still has to
+consume its `End`. So the frame is always pushed, carrying `Span::Link(Option<String>)`:
+`Some(href)` wraps the children in `Inline::Link`, `None` hands the children back to the
+parent unwrapped. Text then merges as usual, so `a [x](notes.md) b` is one `Text("a x b")`.
+
+**Why only these three schemes, checked against dioxus-desktop 0.7.9's source:**
+
+- `src/webview.rs` (lines ~369–393) installs wry's navigation handler. A navigation to a
+  URL that `starts_with("http://")`, `"https://"` or `"mailto:"` calls
+  `webbrowser::open(&url)` and returns `false`, cancelling it. Anything else (bar the
+  `dioxus://` index) falls to `navigation_handler … unwrap_or(true)`: it is **allowed**,
+  and would navigate the WebView away from the reader.
+- The interpreter (`dioxus-interpreter-js` 0.7.9, `native.ts` `handleClickNavigate`) also
+  intercepts clicks: when a click is delivered to Dioxus and no handler called
+  `prevent_default`, the closest `a` has its default prevented and its raw `href`
+  attribute sent over IPC as `browser_open`, which `app.rs` passes straight to
+  `webbrowser::open`, whatever the scheme. So either path ends at the system browser, and
+  the parser's filter is what keeps an arbitrary scheme from reaching it.
+- The `starts_with` checks are case-sensitive, so the parser matches the three prefixes
+  case-insensitively and **rewrites the prefix in lower case** (`HTTPS://X` becomes
+  `https://X`). The href then matches the handler's check whether or not the WebView
+  normalises the URL first. `https:x` (no slashes) is refused for the same reason.
+- `target="_blank"` is not set. dioxus-desktop installs no new-window handler, so a
+  `_blank` link would go down wry's new-window path instead of the navigation handler
+  that is known to cancel and open externally.
+- An email autolink (`LinkType::Email`) carries a bare address in `dest_url`, so the
+  parser prefixes `mailto:` itself.
+
+### Runnable check first
+
+`src/chat/markdown.rs` — nine new tests and a helper `link(href, children)`:
+
+```rust
+#[test]
+fn other_links_keep_only_their_text() {
+    assert_eq!(
+        parse(
+            "a [js](javascript:alert(1)) b [rel](notes.md) c [data](data:text/html,hi) d [frag](#top) e [file](file:///etc/passwd) f [bare](https:x)"
+        ),
+        [paragraph(vec![text("a js b rel c data d frag e file f bare")])]
+    );
+}
+
+#[test]
+fn an_image_inside_a_link_is_a_link_of_its_alt_text() {
+    assert_eq!(
+        parse("[![logo](l.png)](https://x.example)"),
+        [paragraph(vec![link("https://x.example", vec![text("logo")])])]
+    );
+}
+```
+
+The others: `safe_schemes_become_links`, `the_scheme_is_matched_in_any_case_and_lowercased`
+(`HTTPS://` and `< MailTo:…>`), `autolinks_are_links` (a URL and an email autolink),
+`formatting_nests_inside_a_link`, `a_refused_link_keeps_its_formatting`,
+`an_image_becomes_its_alt_text` and `raw_html_is_literal_text` (`<script>` as an HTML block
+and an inline `<b>`). The HTML block's text keeps pulldown-cmark's trailing `\n`; the test
+pins that as it is.
+
+The walk-the-tree test is renamed `every_word_survives_wherever_it_sits`: links are handled
+now, so nothing in its input is "unhandled" any more, but it still checks that the text of
+links, images and raw HTML survives at the top level, in a list item, a quote and a table
+cell. `collect_text` gains `collect_inlines`, which descends into bold, italic,
+strikethrough and link children, so a word inside a link still counts.
+
+Red, with `Inline::Link` and its render arm in place but `parse` unchanged: 6 failed, 265
+passed, 3 ignored. The three refusal tests and the image-alone test passed already: links
+and images flattened to text before this step, which is the behaviour they pin.
+
+```
+test chat::markdown::test::the_scheme_is_matched_in_any_case_and_lowercased ... FAILED
+test chat::markdown::test::an_image_inside_a_link_is_a_link_of_its_alt_text ... FAILED
+test chat::markdown::test::autolinks_are_links ... FAILED
+test chat::markdown::test::safe_schemes_become_links ... FAILED
+test chat::markdown::test::raw_html_is_literal_text ... FAILED
+test chat::markdown::test::formatting_nests_inside_a_link ... FAILED
+```
+
+(`raw_html_is_literal_text` failed only on the trailing `\n`, which it now expects.)
+
+Green after: 271 passed, 3 ignored, and `cargo clippy --all-targets` was clean.
+
+**Eyeball under `dx serve`:** ask for "three useful links about Rust, one written as a bare
+`<https://…>` autolink, plus an email link and a markdown image". The links show in the
+accent colour, underlined. Clicking one opens the default browser (or mail app) and the
+reader stays on its page. The image shows only its alt text, and nothing is fetched. Then
+ask it to "reply with exactly: `[click](javascript:alert(1))` and `[doc](notes.md)` as
+markdown, not in a code block": both show as plain words that do nothing when clicked.
+Check light, sepia and dark.
+
+### Minimal implementation
+
+- **`src/chat/markdown.rs`** —
+  - `Inline` gains `Link { href: String, children: Vec<Inline> }`.
+  - `Span` gains `Link(Option<String>)` and loses `Copy`. `wrap` now returns
+    `Vec<Inline>`: one wrapped inline, or for `Link(None)` the children themselves; `close`
+    pushes each, so text merges with its neighbours.
+  - `safe_href(link_type, dest)` trims the destination, prefixes `mailto:` for an email
+    autolink, and otherwise accepts it only if it starts with one of `SAFE_PREFIXES`
+    (ignoring ASCII case), returning it with the prefix lower-cased.
+  - `Start(Link)` opens the span, `End(Link)` joins the other span ends in `close()`, and
+    `Start(Image)` / `End(Image)` get their own explicit no-op arm, so the alt text flows
+    into whatever is open. Still no catch-all over whole events.
+- **`src/ui/markdown.rs`** — `Inline::Link` renders as `a { href, title: href, … }` with
+  the children through `render_inlines`.
+- **`src/ui/chat.css`** — `.chat_panel__turn a` uses `--focused-border-color` (the theme's
+  accent blue), an underline offset a little below the text, and a thicker underline on
+  hover.
+
+### Why it works
+
+- **Safety is still by construction.** The only way an `a` reaches the DOM is
+  `Inline::Link`, and the only way to build one is `safe_href` returning `Some`. The
+  renderer has nothing to check.
+- **The frame is pushed even when the link is refused.** `End(Link)` pops exactly one
+  frame. Pushing nothing for an unsafe link would make its `End` close the enclosing bold
+  or the wrong link.
+- **The image needs no frame.** Its alt text arrives as ordinary inline events between
+  `Start(Image)` and `End(Image)`, so ignoring the two tags leaves the alt text in the open
+  paragraph, cell or link. Nothing about an image (URL, title) is kept, so the app never
+  fetches a URL a model chose.
+- **Mid-stream is unchanged.** pulldown-cmark emits a link only once `](url)` is complete;
+  before that the brackets are plain text, which is what the reply really says so far.
+
+### Forks taken
+
+- **`Span::Link(Option<String>)` with a `Vec`-returning `wrap`**, rather than a separate
+  `Span::Unlinked` variant or a special case in `close`. The cost is a one-element `Vec`
+  per closed span.
+- **Prefix match on the exact strings the handler checks** (`http://`, not just `http:`),
+  rather than parsing the scheme with `split_once(':')`. It mirrors dioxus's own check, so
+  every href that becomes an `a` is one the handler is known to cancel.
+- **`title` set to the href**, so hovering shows where a link goes, since a model writes
+  the visible text. The link's own markdown title is ignored.
+- **No `rel` and no `target`.** `noopener`/`noreferrer` mean nothing when the WebView
+  never navigates, and `_blank` would take a different wry path (above).
+- **The accent is `--focused-border-color`**, the same blue as focus rings, rather than a
+  new `--link` variable.
+
+### Scope note
+
+- No GFM bare-URL autolinking (`https://x` without angle brackets stays text).
+- Reference-style links (`[x][ref]`) arrive as the same `Tag::Link`, so they should work;
+  no test pins them.
+- On iOS, `webbrowser` 1.2.1 opens only `http(s)` URLs, so a `mailto:` link there is
+  cancelled by the handler and then fails to open. Not fixed here.
+- The HTML block's trailing newline is kept; Step 6 can decide whether to trim it.
+- The click path is read from source, not run: confirm under `dx serve` that the reader
+  stays put and the browser opens.

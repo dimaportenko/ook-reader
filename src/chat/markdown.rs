@@ -1,4 +1,6 @@
-use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{
+    Alignment, CodeBlockKind, Event, HeadingLevel, LinkType, Options, Parser, Tag, TagEnd,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Block {
@@ -54,23 +56,41 @@ pub(crate) enum Inline {
     Strikethrough(Vec<Inline>),
     SoftBreak,
     HardBreak,
+    Link { href: String, children: Vec<Inline> },
 }
 
-#[derive(Clone, Copy)]
 enum Span {
     Strong,
     Emphasis,
     Strikethrough,
+    Link(Option<String>),
 }
 
 impl Span {
-    fn wrap(self, children: Vec<Inline>) -> Inline {
-        match self {
+    fn wrap(self, children: Vec<Inline>) -> Vec<Inline> {
+        let inline = match self {
             Span::Strong => Inline::Strong(children),
             Span::Emphasis => Inline::Emphasis(children),
             Span::Strikethrough => Inline::Strikethrough(children),
-        }
+            Span::Link(Some(href)) => Inline::Link { href, children },
+            Span::Link(None) => return children,
+        };
+        vec![inline]
     }
+}
+
+const SAFE_PREFIXES: [&str; 3] = ["http://", "https://", "mailto:"];
+
+fn safe_href(link_type: LinkType, dest: &str) -> Option<String> {
+    let dest = dest.trim();
+    if link_type == LinkType::Email {
+        return Some(format!("mailto:{dest}"));
+    }
+    SAFE_PREFIXES.into_iter().find_map(|prefix| {
+        let head = dest.get(..prefix.len())?;
+        head.eq_ignore_ascii_case(prefix)
+            .then(|| format!("{prefix}{}", &dest[prefix.len()..]))
+    })
 }
 
 enum Container {
@@ -118,7 +138,9 @@ impl Builder {
 
     fn close(&mut self) {
         if let Some((span, children)) = self.spans.pop() {
-            self.push(span.wrap(children));
+            for inline in span.wrap(children) {
+                self.push(inline);
+            }
         }
     }
 
@@ -244,9 +266,15 @@ pub(crate) fn parse(text: &str) -> Vec<Block> {
             Event::Start(Tag::Strong) => builder.open(Span::Strong),
             Event::Start(Tag::Emphasis) => builder.open(Span::Emphasis),
             Event::Start(Tag::Strikethrough) => builder.open(Span::Strikethrough),
-            Event::End(TagEnd::Strong | TagEnd::Emphasis | TagEnd::Strikethrough) => {
-                builder.close()
-            }
+            Event::Start(Tag::Link {
+                link_type,
+                dest_url,
+                ..
+            }) => builder.open(Span::Link(safe_href(link_type, &dest_url))),
+            Event::End(
+                TagEnd::Strong | TagEnd::Emphasis | TagEnd::Strikethrough | TagEnd::Link,
+            ) => builder.close(),
+            Event::Start(Tag::Image { .. }) | Event::End(TagEnd::Image) => {}
             Event::End(TagEnd::Heading(level)) => builder.end_heading(level),
             Event::Start(Tag::BlockQuote(_)) => {
                 builder.open_container(Container::Quote(Vec::new()))
@@ -265,9 +293,7 @@ pub(crate) fn parse(text: &str) -> Vec<Block> {
             Event::End(TagEnd::Table) => builder.end_table(),
             Event::Start(Tag::TableCell) | Event::End(TagEnd::TableHead | TagEnd::TableRow) => {}
             Event::Rule => builder.rule(),
-            Event::Start(Tag::Link { .. } | Tag::Image { .. })
-            | Event::End(TagEnd::Link | TagEnd::Image)
-            | Event::TaskListMarker(_) => {}
+            Event::TaskListMarker(_) => {}
             Event::Start(_) | Event::End(_) => builder.end_block(),
             Event::Code(code) => builder.push(Inline::Code(code.into_string())),
             Event::SoftBreak => builder.push(Inline::SoftBreak),
@@ -626,16 +652,141 @@ mod test {
         );
     }
 
+    fn link(href: &str, children: Vec<Inline>) -> Inline {
+        Inline::Link {
+            href: href.to_owned(),
+            children,
+        }
+    }
+
+    #[test]
+    fn safe_schemes_become_links() {
+        assert_eq!(
+            parse("[a](https://a.example) [b](http://b.example/x?y=1) [c](mailto:c@example.com)"),
+            [paragraph(vec![
+                link("https://a.example", vec![text("a")]),
+                text(" "),
+                link("http://b.example/x?y=1", vec![text("b")]),
+                text(" "),
+                link("mailto:c@example.com", vec![text("c")]),
+            ])]
+        );
+    }
+
+    #[test]
+    fn the_scheme_is_matched_in_any_case_and_lowercased() {
+        assert_eq!(
+            parse("[x](HTTPS://Example.com/Path) [y](< MailTo:y@example.com>)"),
+            [paragraph(vec![
+                link("https://Example.com/Path", vec![text("x")]),
+                text(" "),
+                link("mailto:y@example.com", vec![text("y")]),
+            ])]
+        );
+    }
+
+    #[test]
+    fn other_links_keep_only_their_text() {
+        assert_eq!(
+            parse(
+                "a [js](javascript:alert(1)) b [rel](notes.md) c [data](data:text/html,hi) d [frag](#top) e [file](file:///etc/passwd) f [bare](https:x)"
+            ),
+            [paragraph(vec![text(
+                "a js b rel c data d frag e file f bare"
+            )])]
+        );
+    }
+
+    #[test]
+    fn autolinks_are_links() {
+        assert_eq!(
+            parse("<https://x.example/a> or <me@example.com>"),
+            [paragraph(vec![
+                link("https://x.example/a", vec![text("https://x.example/a")]),
+                text(" or "),
+                link("mailto:me@example.com", vec![text("me@example.com")]),
+            ])]
+        );
+    }
+
+    #[test]
+    fn formatting_nests_inside_a_link() {
+        assert_eq!(
+            parse("[**bold** and `code`](https://x.example)"),
+            [paragraph(vec![link(
+                "https://x.example",
+                vec![
+                    Inline::Strong(vec![text("bold")]),
+                    text(" and "),
+                    Inline::Code("code".to_owned()),
+                ],
+            )])]
+        );
+    }
+
+    #[test]
+    fn a_refused_link_keeps_its_formatting() {
+        assert_eq!(
+            parse("see [**this**](javascript:x) now"),
+            [paragraph(vec![
+                text("see "),
+                Inline::Strong(vec![text("this")]),
+                text(" now"),
+            ])]
+        );
+    }
+
+    #[test]
+    fn an_image_becomes_its_alt_text() {
+        assert_eq!(
+            parse("see ![a cat](https://x.example/cat.png) here"),
+            [paragraph(vec![text("see a cat here")])]
+        );
+    }
+
+    #[test]
+    fn an_image_inside_a_link_is_a_link_of_its_alt_text() {
+        assert_eq!(
+            parse("[![logo](l.png)](https://x.example)"),
+            [paragraph(vec![link(
+                "https://x.example",
+                vec![text("logo")]
+            )])]
+        );
+    }
+
+    #[test]
+    fn raw_html_is_literal_text() {
+        assert_eq!(
+            parse("<script>alert(1)</script>\n\nan <b>inline</b> tag"),
+            [
+                paragraph(vec![text("<script>alert(1)</script>\n")]),
+                paragraph(vec![text("an <b>inline</b> tag")]),
+            ]
+        );
+    }
+
+    fn collect_inlines(inlines: &[Inline], seen: &mut String) {
+        for inline in inlines {
+            match inline {
+                Inline::Text(text) | Inline::Code(text) => {
+                    seen.push_str(text);
+                    seen.push('|');
+                }
+                Inline::Strong(children)
+                | Inline::Emphasis(children)
+                | Inline::Strikethrough(children)
+                | Inline::Link { children, .. } => collect_inlines(children, seen),
+                Inline::SoftBreak | Inline::HardBreak => {}
+            }
+        }
+    }
+
     fn collect_text(blocks: &[Block], seen: &mut String) {
         for block in blocks {
             match block {
                 Block::Paragraph(inlines) | Block::Heading { inlines, .. } => {
-                    for inline in inlines {
-                        if let Inline::Text(text) | Inline::Code(text) = inline {
-                            seen.push_str(text);
-                            seen.push('|');
-                        }
-                    }
+                    collect_inlines(inlines, seen)
                 }
                 Block::List { items, .. } => {
                     for item in items {
@@ -649,7 +800,7 @@ mod test {
                 }
                 Block::Table { head, rows, .. } => {
                     for cell in head.iter().chain(rows.iter().flatten()) {
-                        collect_text(&[paragraph(cell.clone())], seen);
+                        collect_inlines(cell, seen);
                     }
                 }
                 Block::Rule => {}
@@ -658,7 +809,7 @@ mod test {
     }
 
     #[test]
-    fn unhandled_blocks_keep_their_text() {
+    fn every_word_survives_wherever_it_sits() {
         let blocks = parse(
             "[link](https://example.com) ![alt](x.png) <b>html</b>\n\n- [g](https://g.example) ![h](h.png)\n\n> <i>e</i> [f](f.md)\n\n| [c](c.md) | ![d](d.png) |\n|---|---|",
         );
