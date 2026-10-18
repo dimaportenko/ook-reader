@@ -10,7 +10,7 @@ mangle a quoted `*` or a line starting with `1.`.
 
 | # | Phase | Status |
 |---|---|---|
-| 26 | [Markdown replies](phase-26-markdown.md) | 🚧 in progress — captured 2026-10-18 |
+| 26 | [Markdown replies](phase-26-markdown.md) | ✅ done — captured 2026-10-18, closed 2026-10-18 |
 
 ## Research
 

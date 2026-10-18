@@ -35,8 +35,9 @@ the streaming one included.
    scheme is `http`, `https` or `mailto` (case-insensitive). Any other link keeps just its
    children. Images become their alt text. `Html` / `InlineHtml` become literal text. Tests
    cover `javascript:`, a relative href and a `<script>` tag. **Done** — `6c67a8a`.
-6. **Review and refactor.** Run a `code-review` pass over the phase, apply the deferred
-   cleanups, and close the phase. Hand checks still pending stay unconfirmed.
+6. ~~**Review and refactor.**~~ Run a `code-review` pass over the phase, apply the deferred
+   cleanups, and close the phase. Hand checks still pending stay unconfirmed. **Done** —
+   `8e6c5a3`.
 
 **Why this order.** Each step ends with something you can see in the drawer:
 
@@ -953,6 +954,8 @@ Check light, sepia and dark.
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `8e6c5a3` (272 tests green, 3 ignored; clippy clean). The three styling fixes, each syntax in a real reply, sideways scroll, the themes and link opening on desktop and iOS are still to be confirmed by hand under `dx serve`.
 
 **What it is.** A `code-review` pass (high effort) over the whole phase, `ba18374..HEAD`,
 then a decision on each item the earlier steps deferred here, then a `simplify` pass over

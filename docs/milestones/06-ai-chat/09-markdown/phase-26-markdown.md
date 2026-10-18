@@ -1,6 +1,8 @@
 # Phase 26 — Markdown replies
 
-[← Feature: Markdown replies](README.md) · **Status:** 🚧 in progress — captured 2026-10-18 ·
+[← Feature: Markdown replies](README.md) · **Status:** ✅ done — captured 2026-10-18, closed 2026-10-18 (`8e6c5a3`, 272 tests). The hand
+checks under `dx serve` (each syntax in a real Luna or Gemini reply, sideways scroll of code
+and tables, the themes, link opening on desktop and iOS) are still to be confirmed ·
 build log: [`phase-26-markdown-steps.md`](phase-26-markdown-steps.md)
 
 ## Goal
@@ -60,4 +62,4 @@ renders that tree. That gives the phase its lessons:
 - [x] 3. Code blocks — fenced and indented, the fence's language kept, sideways scroll, an unclosed fence rendered mid-stream
 - [x] 4. Tables — GFM tables with column alignment, scrolling sideways inside the bubble
 - [x] 5. Links, images and raw HTML — safe-scheme anchors that open externally, alt text for images, HTML as literal text
-- [ ] 6. Review and refactor
+- [x] 6. Review and refactor
