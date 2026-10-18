@@ -11,7 +11,7 @@ becomes one `chat/completions` client that serves two hosts.
 
 | # | Phase | Status |
 |---|---|---|
-| 25 | [Third provider: OpenAI](phase-25-openai.md) | 🚧 in progress — captured and opened 2026-10-18 |
+| 25 | [Third provider: OpenAI](phase-25-openai.md) | ✅ done — closed 2026-10-18 (`0b417cb`, 239 tests) |
 
 ## Why the API, and why Luna
 

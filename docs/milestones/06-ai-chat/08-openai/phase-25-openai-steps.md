@@ -30,7 +30,8 @@ measurement, and never reaches Zen.
    table as in Phase 23 Step 10. Then the request body gains an optional
    `reasoning_effort`, set to `none` for OpenAI and skipped when serializing for Zen. A test
    asserts Zen's body has no such key. **Done** — `8cf7672`.
-5. **Review and refactor.**
+5. ~~**Review and refactor.**~~ A `code-review` pass over the phase, the deferred cleanups,
+   and one bug fix (OpenAI refusals). **Done** — `0b417cb`.
 
 **Why this order.** Each step ends with something to see:
 
@@ -674,6 +675,8 @@ The pass was run inline over the one-file diff.
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `0b417cb` (239 tests green, 5 ignored; clippy clean; the live Luna and Zen catalog tests passed). The settings blocks and a real Luna reply in the drawer are still to be confirmed by hand under `dx serve`.
 
 **What it is.** A `code-review` pass (high effort) over the whole phase, `ebe2d2f..HEAD`,
 then the cleanups the earlier steps deferred here. One real bug was fixed. Everything else

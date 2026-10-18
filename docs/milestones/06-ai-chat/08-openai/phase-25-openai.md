@@ -1,8 +1,9 @@
 # Phase 25 — Third provider: OpenAI
 
-[← Feature: Third provider: OpenAI](README.md) · **Status:** 🚧 in progress — captured 2026-10-18,
+[← Feature: Third provider: OpenAI](README.md) · **Status:** ✅ done — captured 2026-10-18,
 opened the same day while [Phase 23](../07-opencode/phase-23-opencode-zen.md)'s review step
-was still unwritten ·
+was still unwritten, closed 2026-10-18. The drawer check (a real Luna reply starting about
+as soon as Gemini's) is still to be confirmed by hand under `dx serve` ·
 build log: [`phase-25-openai-steps.md`](phase-25-openai-steps.md)
 
 ## Goal
@@ -57,4 +58,4 @@ provider shouldn't be a copy of `opencode.rs`. It should be the existing client 
 - [x] 2. Luna in the picker — `chat_models` always offers `openai/gpt-6-luna`, and the chosen-model table round-trips it
 - [x] 3. The real Luna stream — the `chat/completions` client takes a base URL and serves both Zen and OpenAI, checked end to end with a real key
 - [x] 4. Luna starts sooner — measure time to first text per `reasoning_effort`, then send the winner to OpenAI only
-- [ ] 5. Review and refactor
+- [x] 5. Review and refactor
