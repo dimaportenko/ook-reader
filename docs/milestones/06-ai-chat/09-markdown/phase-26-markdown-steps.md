@@ -28,9 +28,9 @@ the streaming one included.
    background, and `overflow-x: auto` so long lines scroll. A test pins that an unclosed
    fence, as seen mid-stream, still yields a code block that holds the partial text.
    **Done** — `e718dca`.
-4. **Tables.** `Block::Table { align, head, rows }` with each cell holding inlines, from
+4. ~~**Tables.**~~ `Block::Table { align, head, rows }` with each cell holding inlines, from
    `Options::ENABLE_TABLES`. It renders as a real `table` inside a wrapper that scrolls
-   sideways.
+   sideways. **Done** — `fd8da23`.
 5. **Links, images and raw HTML.** `Inline::Link { href, children }` only when the URL's
    scheme is `http`, `https` or `mailto` (case-insensitive). Any other link keeps just its
    children. Images become their alt text. `Html` / `InlineHtml` become literal text. Tests
@@ -600,6 +600,8 @@ follows the text colour, so the box should be visible in all three.
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `fd8da23` (262 tests green, 3 ignored; clippy clean). The drawer rendering is still to be confirmed by hand under `dx serve`.
 
 **What it is.** A GFM table in a reply now shows as a real table: a bold, tinted header
 row, thin cell borders, and each column aligned the way its delimiter row says (`:--`,
