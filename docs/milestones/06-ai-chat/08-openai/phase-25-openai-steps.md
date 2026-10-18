@@ -21,10 +21,10 @@ measurement, and never reaches Zen.
    "gpt-6-luna" }`, and the `chat_model` table remembers it across launches. `provider_for`
    needs an arm for it, so the drawer can pick Luna but gets a canned reply or a clear
    "not wired yet" error until Step 3. **Done** — `289accb`.
-3. **The real Luna stream.** The `chat/completions` client takes its base URL. Zen keeps
+3. ~~**The real Luna stream.**~~ The `chat/completions` client takes its base URL. Zen keeps
    `https://opencode.ai/zen/v1`, and OpenAI uses `https://api.openai.com/v1`. Tests pin the
    URL each provider posts to, and an `#[ignore]` test streams a real Luna reply with
-   `OPENAI_API_KEY`, as Zen's does with `OPENCODE_API_KEY`.
+   `OPENAI_API_KEY`, as Zen's does with `OPENCODE_API_KEY`. **Done** — `463d0a3`.
 4. **Luna starts sooner.** First a probe: time to first text for `reasoning_effort` `none`,
    `low` and the default `medium` on a short prompt, recorded in a table as in Phase 23 Step
    10. Then the request body gains an optional `reasoning_effort`, set for OpenAI and
@@ -366,6 +366,8 @@ Relaunch the app and Luna is still picked.
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `463d0a3` (237 tests green, 5 ignored; clippy clean; the live Luna test passed). The drawer stream is still to be confirmed by hand under `dx serve`.
 
 **What it is.** Picking *gpt-6-luna* with an OpenAI key saved now streams a real reply
 from `api.openai.com` into the drawer. The red *OpenAI chat isn't wired up yet* from Step 2
