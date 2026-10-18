@@ -12,13 +12,13 @@ the streaming one included.
 
 ## Step plan
 
-1. **Formatted paragraphs.** Add `pulldown-cmark` (no default features) and
+1. ~~**Formatted paragraphs.**~~ Add `pulldown-cmark` (no default features) and
    `src/chat/markdown.rs` with `parse(&str) -> Vec<Block>`. It covers `Block::Paragraph`
    and the inlines `Text`, `Strong`, `Emphasis`, `Code`, `Strikethrough`, `SoftBreak` and
    `HardBreak`, nested (bold inside italic). Unhandled events degrade to their text, never
    panic and never vanish. A `Markdown { text }` component in `src/ui/markdown.rs` replaces
    the raw `"{message.text()}"` for assistant turns and for the streaming bubble's reply
-   text. *Thinking…* and `...` stay plain.
+   text. *Thinking…* and `...` stay plain. **Done** — `781f5e0`.
 2. **Headings, lists, quotes and rules.** `Block::Heading`, `List { start: Option<u64>,
    items }` with nested lists and tight/loose items, `Quote(Vec<Block>)` and `Rule`. Add CSS
    for heading sizes inside a bubble, list indentation and the quote's border.
@@ -54,6 +54,8 @@ Step details are written by `lbb:next-implement` as each step is built.
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `781f5e0` (243 tests green, 3 ignored; clippy clean). The drawer rendering is still to be confirmed by hand under `dx serve`.
 
 **What it is.** An assistant reply in the drawer shows `**bold**` as bold, `*italic*` as
 italic, `` `code` `` as code and `~~struck~~` as struck through, with paragraphs spaced

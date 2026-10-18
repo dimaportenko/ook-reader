@@ -1,6 +1,6 @@
 # Phase 26 — Markdown replies
 
-[← Feature: Markdown replies](README.md) · **Status:** ⬜ planned — captured 2026-10-18 ·
+[← Feature: Markdown replies](README.md) · **Status:** 🚧 in progress — captured 2026-10-18 ·
 build log: [`phase-26-markdown-steps.md`](phase-26-markdown-steps.md)
 
 ## Goal
@@ -55,7 +55,7 @@ renders that tree. That gives the phase its lessons:
 
 ## Planned steps
 
-- [ ] 1. Formatted paragraphs — `parse` with paragraphs and inline bold, italic, code, strikethrough and line breaks; a `Markdown` component renders every assistant bubble, streaming included
+- [x] 1. Formatted paragraphs — `parse` with paragraphs and inline bold, italic, code, strikethrough and line breaks; a `Markdown` component renders every assistant bubble, streaming included
 - [ ] 2. Headings, lists, quotes and rules — the block structure, nested lists included, with its CSS
 - [ ] 3. Code blocks — fenced and indented, the fence's language kept, sideways scroll, an unclosed fence rendered mid-stream
 - [ ] 4. Tables — GFM tables with column alignment, scrolling sideways inside the bubble
