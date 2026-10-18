@@ -111,6 +111,12 @@ impl Message {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Progress<'a> {
+    Thinking,
+    Text(&'a str),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Reply {
     pub(crate) text: String,
@@ -152,7 +158,7 @@ pub(crate) trait ChatProvider {
     async fn stream(
         &self,
         messages: &[Message],
-        on_text: impl FnMut(&str),
+        on_progress: impl FnMut(Progress<'_>),
     ) -> Result<Reply, ChatError>;
 }
 
@@ -166,11 +172,11 @@ impl ChatProvider for AnyProvider {
     async fn stream(
         &self,
         messages: &[Message],
-        on_text: impl FnMut(&str),
+        on_progress: impl FnMut(Progress<'_>),
     ) -> Result<Reply, ChatError> {
         match self {
-            AnyProvider::Gemini(gemini) => gemini.stream(messages, on_text).await,
-            AnyProvider::OpenCode(zen) => zen.stream(messages, on_text).await,
+            AnyProvider::Gemini(gemini) => gemini.stream(messages, on_progress).await,
+            AnyProvider::OpenCode(zen) => zen.stream(messages, on_progress).await,
         }
     }
 }
@@ -189,11 +195,11 @@ mod test {
         async fn stream(
             &self,
             messages: &[Message],
-            mut on_text: impl FnMut(&str),
+            mut on_progress: impl FnMut(Progress<'_>),
         ) -> Result<Reply, ChatError> {
             self.seen.borrow_mut().extend_from_slice(messages);
             for word in self.reply.split_inclusive(' ') {
-                on_text(word);
+                on_progress(Progress::Text(word));
             }
             Ok(Reply {
                 text: self.reply.to_string(),
@@ -291,8 +297,10 @@ mod test {
         let question = Message::user("Which city?");
         let mut pieces = Vec::new();
 
-        let reply = pollster::block_on(fake.stream(std::slice::from_ref(&question), |delta| {
-            pieces.push(delta.to_owned())
+        let reply = pollster::block_on(fake.stream(std::slice::from_ref(&question), |progress| {
+            if let Progress::Text(delta) = progress {
+                pieces.push(delta.to_owned());
+            }
         }))
         .unwrap();
 

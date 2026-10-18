@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    api_error, http, non_empty_reply, sse::SseBuffer, ChatError, ChatProvider, Message, Reply, Role,
+    api_error, http, non_empty_reply, sse::SseBuffer, ChatError, ChatProvider, Message, Progress,
+    Reply, Role,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -139,7 +140,7 @@ impl ChatProvider for Gemini {
     async fn stream(
         &self,
         messages: &[Message],
-        mut on_text: impl FnMut(&str),
+        mut on_progress: impl FnMut(Progress<'_>),
     ) -> Result<Reply, ChatError> {
         let mut response = http()
             .post(endpoint(&self.model))
@@ -158,7 +159,7 @@ impl ChatProvider for Gemini {
         while let Some(chunk) = response.chunk().await? {
             for payload in sse.push(&chunk) {
                 let delta = text_of(serde_json::from_str(&payload)?);
-                on_text(&delta);
+                on_progress(Progress::Text(&delta));
                 text.push_str(&delta);
             }
         }
@@ -303,9 +304,13 @@ mod test {
         let messages = [Message::user("Count from one to twenty in words")];
         let mut pieces = Vec::new();
 
-        let reply = ChatProvider::stream(&gemini, &messages, |delta| pieces.push(delta.to_owned()))
-            .await
-            .unwrap();
+        let reply = ChatProvider::stream(&gemini, &messages, |progress| {
+            if let Progress::Text(delta) = progress {
+                pieces.push(delta.to_owned());
+            }
+        })
+        .await
+        .unwrap();
 
         assert!(pieces.len() > 1, "{pieces:?}");
         assert_eq!(pieces.concat(), reply.text);

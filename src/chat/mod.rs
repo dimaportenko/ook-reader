@@ -4,6 +4,7 @@ use crate::ai::{ChatError, Message, Reply};
 pub(crate) enum Status {
     #[default]
     Idle,
+    Thinking,
     Replying(String),
     Failed(String),
 }
@@ -17,7 +18,7 @@ pub(crate) struct Conversation {
 impl Conversation {
     pub(crate) fn ask(&mut self, question: &str) -> bool {
         let question = question.trim();
-        if question.is_empty() || matches!(self.status, Status::Replying(_)) {
+        if question.is_empty() || matches!(self.status, Status::Thinking | Status::Replying(_)) {
             return false;
         }
 
@@ -27,17 +28,28 @@ impl Conversation {
         true
     }
 
+    pub(crate) fn think(&mut self) {
+        if matches!(&self.status, Status::Replying(text) if text.is_empty()) {
+            self.status = Status::Thinking;
+        }
+    }
+
     pub(crate) fn append(&mut self, delta: &str) {
-        if let Status::Replying(text) = &mut self.status {
-            text.push_str(delta);
+        match &mut self.status {
+            Status::Replying(text) => text.push_str(delta),
+            Status::Thinking if !delta.is_empty() => {
+                self.status = Status::Replying(delta.to_owned());
+            }
+            _ => {}
         }
     }
 
     pub(crate) fn stop(&mut self) {
-        let Status::Replying(text) = &mut self.status else {
-            return;
+        let text = match &mut self.status {
+            Status::Thinking => String::new(),
+            Status::Replying(text) => std::mem::take(text),
+            _ => return,
         };
-        let text = std::mem::take(text);
         self.status = Status::Idle;
 
         if !text.is_empty() {
@@ -217,6 +229,56 @@ mod test {
     fn stopping_before_the_first_word_keeps_only_the_question() {
         let mut chat = Conversation::default();
         chat.ask("Which city?");
+
+        chat.stop();
+
+        assert_eq!(chat.messages(), &[Message::user("Which city?")]);
+        assert_eq!(chat.status(), &Status::Idle);
+    }
+
+    #[test]
+    fn reasoning_before_the_first_word_is_thinking() {
+        let mut chat = Conversation::default();
+        chat.ask("Which city?");
+
+        chat.think();
+
+        assert_eq!(chat.status(), &Status::Thinking);
+    }
+
+    #[test]
+    fn the_first_word_ends_thinking() {
+        let mut chat = Conversation::default();
+        chat.ask("Which city?");
+        chat.think();
+
+        chat.append("");
+        assert_eq!(
+            chat.status(),
+            &Status::Thinking,
+            "an empty delta is not a word"
+        );
+
+        chat.append("Ankh");
+        assert_eq!(chat.status(), &Status::Replying("Ankh".to_owned()));
+    }
+
+    #[test]
+    fn reasoning_after_the_first_word_is_ignored() {
+        let mut chat = Conversation::default();
+        chat.ask("Which city?");
+        chat.append("Ankh");
+
+        chat.think();
+
+        assert_eq!(chat.status(), &Status::Replying("Ankh".to_owned()));
+    }
+
+    #[test]
+    fn stopping_while_thinking_keeps_only_the_question() {
+        let mut chat = Conversation::default();
+        chat.ask("Which city?");
+        chat.think();
 
         chat.stop();
 

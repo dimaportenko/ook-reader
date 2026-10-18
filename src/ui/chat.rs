@@ -3,7 +3,7 @@ use std::{collections::BTreeSet, rc::Rc};
 use dioxus::{core::Task, prelude::*};
 
 use crate::{
-    ai::{chat_models, AnyProvider, ChatModel, ChatProvider, Provider, Role},
+    ai::{chat_models, AnyProvider, ChatModel, ChatProvider, Progress, Provider, Role},
     ai_client::provider_for,
     chat::{Conversation, Status},
     secrets::SecretStore,
@@ -126,7 +126,10 @@ fn ChatConversation(handle: ChatHandle) -> Element {
         let history = chat.read().messages().to_vec();
         pending_task.set(Some(spawn(async move {
             let outcome = client
-                .stream(&history, |delta| chat.write().append(delta))
+                .stream(&history, |progress| match progress {
+                    Progress::Thinking => chat.write().think(),
+                    Progress::Text(delta) => chat.write().append(delta),
+                })
                 .await;
             chat.write().settle(outcome);
             pending_task.set(None);
@@ -159,6 +162,12 @@ fn ChatConversation(handle: ChatHandle) -> Element {
     });
 
     let conversation = chat.read();
+    let bubble = match conversation.status() {
+        Status::Thinking => Some("Thinking…"),
+        Status::Replying(text) if text.is_empty() => Some("..."),
+        Status::Replying(text) => Some(text.as_str()),
+        _ => None,
+    };
 
     rsx! {
         if provider.read().is_none() {
@@ -183,11 +192,11 @@ fn ChatConversation(handle: ChatHandle) -> Element {
                         "{message.text()}"
                     }
                 }
-                if let Status::Replying(text) = conversation.status() {
+                if let Some(text) = bubble {
                     li {
                         class: "{Styles::chat_panel__turn}",
                         "data-role": "assistant",
-                        if text.is_empty() { "..." } else { "{text}" }
+                        "{text}"
                     }
                 }
             }
@@ -221,7 +230,7 @@ fn ChatConversation(handle: ChatHandle) -> Element {
                         onclick: move |_| reset(),
                         "Reset"
                     }
-                    if matches!(conversation.status(), Status::Replying(_)) {
+                    if matches!(conversation.status(), Status::Thinking | Status::Replying(_)) {
                         button {
                             class: "{SettingsStyles::pill_button}",
                             onclick: move |_| stop(),

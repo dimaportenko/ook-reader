@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    api_error, http, non_empty_reply, sse::SseBuffer, ChatError, ChatProvider, Message, Reply, Role,
+    api_error, http, non_empty_reply, sse::SseBuffer, ChatError, ChatProvider, Message, Progress,
+    Reply, Role,
 };
 
 const MODELS_URL: &str = "https://opencode.ai/zen/v1/models";
@@ -80,10 +81,12 @@ struct Choice {
 #[derive(Debug, Default, Deserialize)]
 struct Delta {
     content: Option<String>,
+    reasoning_content: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 enum Event {
+    Thinking,
     Text(String),
     Done,
 }
@@ -94,12 +97,18 @@ fn event(payload: &str) -> Result<Event, serde_json::Error> {
     }
 
     let chunk: CompletionChunk = serde_json::from_str(payload)?;
-    let text = chunk
+    let delta = chunk
         .choices
         .into_iter()
         .next()
-        .and_then(|choice| choice.delta.content)
+        .map(|choice| choice.delta)
         .unwrap_or_default();
+    let text = delta.content.unwrap_or_default();
+    let reasoning = delta.reasoning_content.unwrap_or_default();
+
+    if text.is_empty() && !reasoning.is_empty() {
+        return Ok(Event::Thinking);
+    }
 
     Ok(Event::Text(text))
 }
@@ -130,7 +139,7 @@ impl ChatProvider for OpenCode {
     async fn stream(
         &self,
         messages: &[Message],
-        mut on_text: impl FnMut(&str),
+        mut on_progress: impl FnMut(Progress<'_>),
     ) -> Result<Reply, ChatError> {
         let mut response = self.request(messages).send().await?;
 
@@ -144,8 +153,9 @@ impl ChatProvider for OpenCode {
         'stream: while let Some(chunk) = response.chunk().await? {
             for payload in sse.push(&chunk) {
                 match event(&payload)? {
+                    Event::Thinking => on_progress(Progress::Thinking),
                     Event::Text(delta) => {
-                        on_text(&delta);
+                        on_progress(Progress::Text(&delta));
                         text.push_str(&delta);
                     }
                     Event::Done => break 'stream,
@@ -230,6 +240,13 @@ mod test {
     }
 
     #[test]
+    fn a_reasoning_chunk_is_thinking() {
+        let payload = r#"{ "choices": [ { "index": 0, "delta": { "content": null, "reasoning_content": "The user asks" } } ] }"#;
+
+        assert_eq!(event(payload).unwrap(), Event::Thinking);
+    }
+
+    #[test]
     fn the_done_marker_ends_the_stream() {
         assert_eq!(event("[DONE]").unwrap(), Event::Done);
     }
@@ -283,9 +300,13 @@ mod test {
         let messages = [Message::user("Count from one to twenty in words")];
         let mut pieces = Vec::new();
 
-        let reply = ChatProvider::stream(&zen, &messages, |delta| pieces.push(delta.to_owned()))
-            .await
-            .unwrap();
+        let reply = ChatProvider::stream(&zen, &messages, |progress| {
+            if let Progress::Text(delta) = progress {
+                pieces.push(delta.to_owned());
+            }
+        })
+        .await
+        .unwrap();
 
         assert!(pieces.len() > 1, "{pieces:?}");
         assert_eq!(pieces.concat(), reply.text);

@@ -24,7 +24,7 @@ format reuses the SSE buffer; only its JSON and the `[DONE]` marker are new.
 7. ~~**The real Zen stream.**~~ POST with Bearer auth, checked end to end with a real key. **Done** — `36f95b4`.
 8. ~~**The deferred punch list.**~~ `GeminiModel` moves to `ai::gemini`, one shared `reqwest::Client`, and the bubble font size is restored. **Done** — `df1849d`. *(Was "Review and refactor". It became a mid-phase step on 2026-09-29, when Steps 9–10 were added.)*
 9. ~~**Gemini thinks minimally.**~~ Add `generationConfig.thinkingConfig.thinkingLevel: "minimal"` to the request body. **Done** — `40e24eb`.
-10. **Zen thinks less.** First find, with `curl`, a flag the ticked models honor, then send it in the `chat/completions` body.
+10. **Zen's reasoning shows as *Thinking…*.** Was "Zen thinks less" until the measurement at the start of the step showed that no flag helps. The stream now reports reasoning, and the drawer labels it.
 11. **Review and refactor.**
 
 **Why this order.** Each step ends with something to see in the settings screen or the
@@ -1229,3 +1229,128 @@ The pass was run inline over the 31-line, one-file diff rather than as four agen
 Red before the implementation: `gemini_is_asked_to_think_minimally` failed with
 `left: Null`, and the tripwire `the_conversation_becomes_gemini_contents` failed on the
 missing `generationConfig`. Green after: 228 passed, 4 ignored, and clippy was clean.
+
+## Step 10 — Zen's reasoning shows as *Thinking…*
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+### The measurement that replanned the step
+
+The step was planned as "Zen thinks less", so it started with a probe. The probe sent one
+short streaming prompt to each ticked model, once with no flag and once with each candidate
+flag (2026-09-29):
+
+| Model | No flag | `thinking: {type: disabled}` | `reasoning_effort: "none"` | `reasoning_effort: "minimal"` |
+|---|---|---|---|---|
+| `deepseek-v4-flash` | 1.01s to first text, 115 reasoning chars | 0.89s, 85 chars | 0.95s, **0 chars** | 0.94s, 202 chars |
+| `glm-5.3-flash` | **3.41s**, 1332 chars | `400` "thinking-only model" | `400` | `400` |
+| `kimi-k2.6` | `403` "Model access is disabled" (the account, not the flag) | — | — | — |
+
+Two findings killed the flag plan:
+
+- **The slow model can't be turned off.** GLM-5.3 is thinking-only and rejects every flag
+  with a `400`. One flag in every body would break it.
+- **The model that can be turned off was already fast.** DeepSeek honors
+  `reasoning_effort: "none"`, and it saved about 0.05s on a short prompt.
+
+A side finding: Cloudflare in front of Zen rejects Python's default `urllib` User-Agent with
+`403 error code: 1010`. `reqwest` sends no User-Agent and gets through.
+
+So the step became the alternative from the crux above. Keep full thinking, and **say that
+it's happening**. The bubble reads *Thinking…* instead of `...` while reasoning streams in.
+
+### Runnable check first
+
+`src/ai/opencode.rs`, with the other chunk tests:
+
+```rust
+#[test]
+fn a_reasoning_chunk_is_thinking() {
+    let payload = r#"{ "choices": [ { "index": 0, "delta": { "content": null, "reasoning_content": "The user asks" } } ] }"#;
+
+    assert_eq!(event(payload).unwrap(), Event::Thinking);
+}
+```
+
+`src/chat/mod.rs`, four tests for the new state:
+
+- `reasoning_before_the_first_word_is_thinking`: after `ask` then `think`, the status is `Status::Thinking`.
+- `the_first_word_ends_thinking`: an empty delta keeps `Thinking`, and `append("Ankh")` becomes `Replying("Ankh")`.
+- `reasoning_after_the_first_word_is_ignored`: once text has arrived, `think` changes nothing.
+- `stopping_while_thinking_keeps_only_the_question`: *Stop* goes to `Idle` without an empty assistant turn.
+
+Red. First as compile errors, because `Event::Thinking`, `Status::Thinking` and
+`Conversation::think` didn't exist. Then, with the variants added and an empty `think()`,
+three tests failed on their assertions: `left: Text("")` against `right: Thinking` for the
+chunk, and `left: Replying("")` against `right: Thinking` for the two conversation tests.
+The other two pass against the stub, because it never enters `Thinking`. They guard the
+real `think()`.
+
+**Then the eyeball check.** Under `dx serve`, tick `glm-5.3-flash`, pick it in the drawer,
+and ask something. The bubble should read *Thinking…* for about three seconds and then turn
+into the answer. With Gemini, `...` should still show briefly, as before.
+
+### Minimal implementation
+
+1. **`ai/mod.rs`.** A new `Progress<'a> { Thinking, Text(&'a str) }`. `ChatProvider::stream`
+   takes `on_progress: impl FnMut(Progress<'_>)` instead of `on_text: impl FnMut(&str)`, and
+   `AnyProvider` passes it through.
+2. **`ai/opencode.rs`.** `Delta` gains `reasoning_content: Option<String>`. `event()` returns
+   `Event::Thinking` when a chunk has reasoning but no text, and `stream` turns that into
+   `Progress::Thinking`.
+3. **`ai/gemini.rs`.** It wraps each delta in `Progress::Text`. Gemini never reports
+   thinking.
+4. **`chat/mod.rs`.** A `Status::Thinking` variant:
+   - `think()` enters it, but only from an empty `Replying`.
+   - `append` leaves it on the first non-empty delta.
+   - `stop` treats it like an empty reply.
+   - `ask` refuses while in it.
+5. **`ui/chat.rs`.** The stream callback matches on `Progress`. The drawer computes one
+   `bubble` label from the status (*Thinking…*, `...`, or the text so far), and *Stop* shows
+   for `Thinking` as well.
+
+### Why it works
+
+- **The callback's type carries the new fact.** A `&str` can't say "no text, but busy".
+  An enum can, and the compiler found every provider and caller that had to handle it. The
+  borrowed `Text(&'a str)` keeps the zero-copy hand-off that `on_text(&delta)` had.
+- **`Thinking` is a state, not a flag on `Replying`.** A `Replying { text, thinking }`
+  would allow "thinking with text", a combination that never happens. The variant makes
+  it impossible, and `think()` guarding on `text.is_empty()` means reasoning arriving
+  after the first word (some models interleave) can't flip the bubble back.
+- **Empty deltas don't end thinking.** Zen's opening and closing chunks carry
+  `content: ""`. Without the `!delta.is_empty()` guard, one would turn *Thinking…* back
+  into `...` mid-stream.
+
+### Forks taken
+
+- **One callback with an enum, rather than a second `on_thinking` closure.** Two closures
+  would each need their own capture of `chat`, and every caller would pass both. The enum
+  also grows cleanly if we later want to stream the reasoning text itself
+  (`Thinking(&str)`).
+- **`Thinking` carries no text.** The drawer only needs the label. Showing the reasoning
+  is the richer alternative from the crux, and it's held for later.
+- **No flag for DeepSeek.** A per-model `reasoning_effort: "none"` works, but it needs a
+  table of model names, and the measured gain was about 0.05s.
+
+### Scope note
+
+- `delta.reasoning` (the field name some OpenAI-compatible hosts use) isn't read. The crux
+  recorded `reasoning_content`, which is what Zen sends.
+- `matches!(status, Status::Thinking | Status::Replying(_))` appears in `Conversation::ask`
+  and in the drawer's *Stop* button. A `Status::is_replying()` would keep the rule in one
+  place. It's a candidate for Step 11.
+
+### Review notes (from the `simplify` pass)
+
+The pass was run inline over the five-file, ~140-line diff.
+
+- **Applied:** `event()` binds `reasoning` with `unwrap_or_default()`, mirroring `text`,
+  instead of an `is_some_and` closure that rustfmt split over four lines.
+- **Applied:** the drawer computes one `bubble: Option<&str>` from the status, rather than
+  two near-identical `li` blocks, one for `Thinking` and one for `Replying`.
+- **Skipped:** `Status::is_replying()`. It's two call sites, one of them pre-existing. It's
+  listed for Step 11 rather than widening this diff.
+
+Green after: 233 passed, 4 ignored, and clippy was clean.
