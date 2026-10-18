@@ -19,7 +19,7 @@ pub(crate) fn draft(passage: &Passage) -> String {
         write!(out, ", chapter \"{chapter}\"").expect("writing to a String cannot fail");
     }
 
-    out.push_str(" переклади та поясни наступний текст українською.\n\n");
+    out.push_str(" переклади та поясни наступний текст українською загалом та окремі слова або словосполучення, сталі вирази тощо\n\n");
     for line in clipped(passage.text).lines() {
         writeln!(out, "> {line}").expect("writing to a String cannot fail");
     }

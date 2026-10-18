@@ -84,7 +84,7 @@ pub(crate) fn chat_models(zen_ticked: &BTreeSet<String>) -> Vec<ChatModel> {
         id: id.clone(),
     });
 
-    gemini.chain(zen).chain([ChatModel::luna()]).collect()
+    gemini.chain([ChatModel::luna()]).chain(zen).collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
