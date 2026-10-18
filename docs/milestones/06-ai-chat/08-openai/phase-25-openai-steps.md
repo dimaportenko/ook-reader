@@ -13,9 +13,10 @@ measurement, and never reaches Zen.
 
 ## Step plan
 
-1. **The OpenAI block and its key.** `Provider::OpenAi` (slug `openai`), a third keychain
+1. ~~**The OpenAI block and its key.**~~ `Provider::OpenAi` (slug `openai`), a third keychain
    entry, and an *OpenAI* block in Settings → AI with only a key row. Nothing uses the key
-   yet. The `Provider::ALL` length and `from_slug` round trip pin the new variant.
+   yet. The `Provider::ALL` length and `from_slug` round trip pin the new variant. **Done** —
+   `f6ae53e`.
 2. **Luna in the picker.** `chat_models` always offers `ChatModel { provider: OpenAi, id:
    "gpt-6-luna" }`, and the `chat_model` table remembers it across launches. `provider_for`
    needs an arm for it, so the drawer can pick Luna but gets a canned reply or a clear
@@ -46,6 +47,8 @@ Step details are written by `lbb:next` when this phase starts.
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `f6ae53e` (235 tests green, 4 ignored; clippy clean). The settings block is still to be confirmed by hand under `dx serve`.
 
 **What it is.** Settings → AI now shows three blocks: *Gemini*, *OpenCode Zen* and
 *OpenAI*. The OpenAI block has only a key row, with a one-line note under it saying that
