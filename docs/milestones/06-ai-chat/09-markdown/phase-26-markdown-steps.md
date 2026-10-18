@@ -595,3 +595,184 @@ follows the text colour, so the box should be visible in all three.
   `0.9 × 0.9`.
 - **Skipped:** `strip_suffix('\n')` for the trailing newline. It returns a borrowed slice,
   which would mean a second allocation; `ends_with` then `pop` edits the `String` in place.
+
+## Step 4 — Tables
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**What it is.** A GFM table in a reply now shows as a real table: a bold, tinted header
+row, thin cell borders, and each column aligned the way its delimiter row says (`:--`,
+`:-:`, `--:`). Bold and inline code work inside a cell. A table wider than the bubble
+scrolls sideways inside it. Mid-stream, the table appears as soon as the delimiter row is
+complete, header first, and grows a row at a time.
+
+### The crux of this step: the head is just the first row
+
+`pulldown-cmark`'s table events (checked in the 0.13.4 source and by printing them) are:
+
+```
+Start(Table([Left, Right, ...]))
+  Start(TableHead)                    <- holds cells directly, no TableRow inside
+    Start(TableCell) ...inlines... End(TableCell)
+  End(TableHead)
+  Start(TableRow)                     <- one per body row; there is no TableBody tag
+    Start(TableCell) ...inlines... End(TableCell)
+  End(TableRow)
+End(Table)
+```
+
+`TableHead` and `TableRow` both mean "a row starts", and the head always comes first. So
+the builder treats them the same: each pushes an empty row, each `End(TableCell)` takes the
+current inlines as one cell, and `End(Table)` splits the first row off as the head. Like a
+code block, a table can't hold a block or another table, so it's a second **mode**
+(`Option`), not a frame on `containers`. Cells reuse the span stack untouched: a cell's
+inlines are collected exactly as a paragraph's would be.
+
+Two shapes come straight from the parser and needed no code, only tests:
+
+- **A header plus a delimiter row and no body yet** is already a table: `Table`,
+  `TableHead`, `End(Table)`. It becomes a table with `rows: []`.
+- **A short row is padded** by `pulldown-cmark` with empty cells up to the head's width,
+  and extra cells are dropped. So every row is as wide as `align`.
+- **A half-typed delimiter row** (`|--`) is not a table yet, just a paragraph with the
+  pipes as text. On the next delta it becomes one.
+
+### Runnable check first
+
+`src/chat/markdown.rs` — five new tests and a helper `table(align, head, rows)`:
+
+```rust
+#[test]
+fn a_table_with_no_body_rows_yet_is_just_its_head() {
+    assert_eq!(
+        parse("| a | b |\n|---|---|"),
+        [table(
+            vec![Align::None, Align::None],
+            vec![vec![text("a")], vec![text("b")]],
+            vec![],
+        )]
+    );
+}
+
+#[test]
+fn a_short_row_is_padded_to_the_head() {
+    assert_eq!(
+        parse("| a | b | c |\n|---|---|---|\n| x |"),
+        [table(
+            vec![Align::None; 3],
+            vec![vec![text("a")], vec![text("b")], vec![text("c")]],
+            vec![vec![vec![text("x")], vec![], vec![]]],
+        )]
+    );
+}
+```
+
+The others: `a_table_keeps_its_head_rows_and_alignment` (left, right, center and unset
+columns; `**tea**` and `` `2` `` in body cells), `a_table_sits_inside_a_list_item` and
+`a_half_typed_delimiter_row_is_still_a_paragraph`.
+
+`unhandled_blocks_keep_their_text` loses its tables, which are handled now. It keeps the
+link, the image and the raw HTML at the top level, and gains them inside a list item, a
+quote and a table cell, so it still checks that what is left unhandled (links and images
+until Step 5, raw HTML for good) keeps its text wherever it sits. `collect_text` learns
+`Block::Table`.
+
+Red, with `Block::Table`, `Align` and the rendering in place but `parse` unchanged: 4
+failed, 258 passed, 3 ignored. The half-typed delimiter test and the reworked walk-the-tree
+test passed already: they pin behaviour the parser had before this step.
+
+```
+test chat::markdown::test::a_short_row_is_padded_to_the_head ... FAILED
+test chat::markdown::test::a_table_keeps_its_head_rows_and_alignment ... FAILED
+test chat::markdown::test::a_table_sits_inside_a_list_item ... FAILED
+test chat::markdown::test::a_table_with_no_body_rows_yet_is_just_its_head ... FAILED
+```
+
+Green after: 262 passed, 3 ignored, and `cargo clippy --all-targets` was clean.
+
+**Eyeball under `dx serve`:** ask for "a markdown table comparing five programming
+languages across six columns, with the numeric columns right-aligned and some bold
+names". While it streams, the pipes show as text for a moment, then the header appears
+as a table and rows are added one at a time. Once done, the numbers line up on the right,
+the header is bold on a tint, and the table scrolls sideways inside the bubble without
+widening the bubble or the drawer. Cells should not wrap one letter per line. Check light,
+sepia and dark: the borders and header tint follow the text colour.
+
+### Minimal implementation
+
+- **`src/chat/markdown.rs`** —
+  - `Block` gains `Table { align: Vec<Align>, head: Vec<Cell>, rows: Vec<Vec<Cell>> }`,
+    with `type Cell = Vec<Inline>` (clippy flagged the nested `Vec`s as too complex).
+  - Its own `Align { None, Left, Center, Right }`, with `From<pulldown_cmark::Alignment>`,
+    so the tree doesn't expose the parser's types.
+  - `Builder` gains `table: Option<(Vec<Align>, Vec<Vec<Cell>>)>`.
+  - `start_table` ends the current paragraph and opens the mode; `start_row` pushes an
+    empty row (for both `TableHead` and `TableRow`); `end_cell` moves `take_inlines()` into
+    the last row; `end_table` takes the first row as the head and `push_block`s the table,
+    so it lands in the open list item or quote.
+  - New arms for `Start(Table)`, `Start(TableHead | TableRow)`, `End(TableCell)`,
+    `End(Table)`, and an explicit no-op for `Start(TableCell)` and
+    `End(TableHead | TableRow)`. Still no catch-all over whole events.
+- **`src/ui/markdown.rs`** — `Block::Table` renders as `div.chat_panel__table > table`
+  with a `thead` row of `th` and a `tbody` of `td` rows. Each cell gets `text_align:
+  text_align(align, column)`, an `Option<&str>`: `None` for an unset column, so Dioxus
+  leaves the style off.
+- **`src/ui/chat.css`** —
+  - `.chat_panel__table` gets `overflow-x: auto` and joins the `0.6em` block margin and the
+    first-child/last-child flush rules.
+  - The `table` gets `border-collapse: collapse`, `overflow-wrap: normal` and `white-space:
+    normal`. Cells get padding, a `--tint-border` border and `vertical-align: top`; `th`
+    gets `--tint-fill`, weight 600 and a left default alignment.
+
+### Why it works
+
+- **One code path for both kinds of row.** Because `TableHead` holds cells directly, not a
+  `TableRow`, a builder that only listened for `TableRow` would put the head's cells
+  nowhere. Treating "head" as "row 0" means there is no `in_head` flag to keep in sync,
+  and a table that has only a head (mid-stream) falls out as `rows: []`.
+- **Mid-stream is still free.** The parser closes the table at the end of the text, the
+  same guarantee code blocks and containers rely on. Before the delimiter row is complete
+  there is no table at all, just a paragraph, which is the honest rendering of what has
+  arrived.
+- **Why the table scrolls instead of squeezing.** The bubble sets `overflow-wrap:
+  anywhere`, and `anywhere` (unlike `break-word`) lowers an element's min-content width
+  to one character. An auto-layout table sizes columns from their min-content width, so it
+  would rather shrink every column to a letter wide than overflow. `overflow-wrap: normal`
+  on the table puts the real minimum back: words stay whole, the table gets wider than the
+  bubble, and the wrapper's `overflow-x: auto` scrolls it. The wrapper is a block, so it's
+  exactly as wide as the bubble, which `min-width: 0` and `max-width: 85%` already cap.
+- **`white-space: pre-wrap` doesn't break the layout.** Dioxus creates no whitespace text
+  nodes between elements, so there are no stray newlines between `tr` and `td` for
+  `pre-wrap` to show. `white-space: normal` on the table is a guard: cell text from the
+  parser is already trimmed, and nothing inside a cell needs to keep runs of spaces.
+- **The alignment is inline, not a class.** An inline `text-align` beats the `th` rule's
+  `left`, so an aligned header follows its column and an unset one stays left.
+
+### Forks taken
+
+- **A mode, not a container frame.** Same reasoning as code blocks: a table can't hold
+  blocks, and an `Option` says so in the type.
+- **Own `Align` enum with `None`**, mirroring `pulldown-cmark`'s, rather than
+  `Option<Align>` with three variants. It keeps `align` the same length as the head and
+  maps one to one; the cost is a variant named `None` next to `Option::None`.
+- **Head as row 0, split at the end**, rather than a `head` field filled while an
+  `in_head` flag is set.
+- **Rendering trusts the parser's padding**: cells are enumerated per row and the
+  alignment is looked up by index (`align.get(column)`), so a row of a different width
+  would still render, just without alignment past the end.
+- **Unset columns are left-aligned** in the header (GitHub's look) rather than the
+  browser's centred `th`.
+
+### Scope note
+
+- No sorting, no sticky header, no per-cell wrapping control.
+- Links and images inside a cell still flatten to their text; that's Step 5.
+
+### Review notes (from the `simplify` pass)
+
+- **Applied:** `type Cell = Vec<Inline>`, which names what the nested `Vec`s mean and
+  clears clippy's `type_complexity`.
+- **Skipped:** a shared `render_row(cells, align, th_or_td)` helper for the head and body
+  rows. RSX can't pick the tag name at run time, so it would need a `match` on the tag
+  inside, which is more code than the two short loops it replaces.

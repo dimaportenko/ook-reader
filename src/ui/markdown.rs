@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 
-use crate::chat::markdown::{parse, Block, Inline};
+use crate::chat::markdown::{parse, Align, Block, Inline};
 
 #[component]
 pub(crate) fn Markdown(text: String) -> Element {
@@ -37,9 +37,40 @@ fn render_blocks(blocks: &[Block]) -> Element {
                         code { "{text}" }
                     }
                 },
+                Block::Table { align, head, rows } => rsx! {
+                    div { class: "chat_panel__table",
+                        table {
+                            thead {
+                                tr {
+                                    for (column, cell) in head.iter().enumerate() {
+                                        th { text_align: text_align(align, column), {render_inlines(cell)} }
+                                    }
+                                }
+                            }
+                            tbody {
+                                for row in rows {
+                                    tr {
+                                        for (column, cell) in row.iter().enumerate() {
+                                            td { text_align: text_align(align, column), {render_inlines(cell)} }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
                 Block::Rule => rsx! { hr {} },
             }
         }
+    }
+}
+
+fn text_align(align: &[Align], column: usize) -> Option<&'static str> {
+    match align.get(column)? {
+        Align::None => None,
+        Align::Left => Some("left"),
+        Align::Center => Some("center"),
+        Align::Right => Some("right"),
     }
 }
 

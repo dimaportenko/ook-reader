@@ -24,7 +24,7 @@
   white-space: pre-wrap;
 }
 
-.chat_panel__turn :is(p, ul, ol, blockquote, pre) {
+.chat_panel__turn :is(p, ul, ol, blockquote, pre, .chat_panel__table) {
   margin: 0.6em 0;
 }
 
@@ -110,6 +110,28 @@
   font-size: 1em;
 }
 
+.chat_panel__table {
+  overflow-x: auto;
+}
+
+.chat_panel__table table {
+  border-collapse: collapse;
+  overflow-wrap: normal;
+  white-space: normal;
+}
+
+.chat_panel__table :is(th, td) {
+  padding: 0.3em 0.6em;
+  border: 1px solid var(--tint-border);
+  vertical-align: top;
+}
+
+.chat_panel__table th {
+  background-color: var(--tint-fill);
+  font-weight: 600;
+  text-align: left;
+}
+
 .chat_panel__turn hr {
   margin: 0.9em 0;
   border: 0;
@@ -117,12 +139,40 @@
 }
 
 .chat_panel__turn
-  :is(p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, pre, hr):first-child {
+  :is(
+    p,
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6,
+    ul,
+    ol,
+    blockquote,
+    pre,
+    hr,
+    .chat_panel__table
+  ):first-child {
   margin-top: 0;
 }
 
 .chat_panel__turn
-  :is(p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, pre, hr):last-child {
+  :is(
+    p,
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6,
+    ul,
+    ol,
+    blockquote,
+    pre,
+    hr,
+    .chat_panel__table
+  ):last-child {
   margin-bottom: 0;
 }
 

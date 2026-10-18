@@ -1,4 +1,4 @@
-use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Block {
@@ -16,7 +16,33 @@ pub(crate) enum Block {
         lang: Option<String>,
         text: String,
     },
+    Table {
+        align: Vec<Align>,
+        head: Vec<Cell>,
+        rows: Vec<Vec<Cell>>,
+    },
     Rule,
+}
+
+pub(crate) type Cell = Vec<Inline>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Align {
+    None,
+    Left,
+    Center,
+    Right,
+}
+
+impl From<Alignment> for Align {
+    fn from(alignment: Alignment) -> Self {
+        match alignment {
+            Alignment::None => Align::None,
+            Alignment::Left => Align::Left,
+            Alignment::Center => Align::Center,
+            Alignment::Right => Align::Right,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +97,7 @@ struct Builder {
     inlines: Vec<Inline>,
     spans: Vec<(Span, Vec<Inline>)>,
     code: Option<(Option<String>, String)>,
+    table: Option<(Vec<Align>, Vec<Vec<Cell>>)>,
 }
 
 impl Builder {
@@ -153,6 +180,37 @@ impl Builder {
         }
     }
 
+    fn start_table(&mut self, alignments: Vec<Alignment>) {
+        self.end_block();
+        let align = alignments.into_iter().map(Align::from).collect();
+        self.table = Some((align, Vec::new()));
+    }
+
+    fn start_row(&mut self) {
+        if let Some((_, rows)) = &mut self.table {
+            rows.push(Vec::new());
+        }
+    }
+
+    fn end_cell(&mut self) {
+        let cell = self.take_inlines();
+        if let Some(row) = self.table.as_mut().and_then(|(_, rows)| rows.last_mut()) {
+            row.push(cell);
+        }
+    }
+
+    fn end_table(&mut self) {
+        if let Some((align, rows)) = self.table.take() {
+            let mut rows = rows.into_iter();
+            let head = rows.next().unwrap_or_default();
+            self.push_block(Block::Table {
+                align,
+                head,
+                rows: rows.collect(),
+            });
+        }
+    }
+
     fn rule(&mut self) {
         self.end_block();
         self.push_block(Block::Rule);
@@ -201,6 +259,11 @@ pub(crate) fn parse(text: &str) -> Vec<Block> {
             Event::Start(Tag::Item) => builder.start_item(),
             Event::Start(Tag::CodeBlock(kind)) => builder.start_code(kind),
             Event::End(TagEnd::CodeBlock) => builder.end_code(),
+            Event::Start(Tag::Table(alignments)) => builder.start_table(alignments),
+            Event::Start(Tag::TableHead | Tag::TableRow) => builder.start_row(),
+            Event::End(TagEnd::TableCell) => builder.end_cell(),
+            Event::End(TagEnd::Table) => builder.end_table(),
+            Event::Start(Tag::TableCell) | Event::End(TagEnd::TableHead | TagEnd::TableRow) => {}
             Event::Rule => builder.rule(),
             Event::Start(Tag::Link { .. } | Tag::Image { .. })
             | Event::End(TagEnd::Link | TagEnd::Image)
@@ -224,7 +287,7 @@ pub(crate) fn parse(text: &str) -> Vec<Block> {
 
 #[cfg(test)]
 mod test {
-    use super::{parse, Block, Inline};
+    use super::{parse, Align, Block, Inline};
 
     fn text(text: &str) -> Inline {
         Inline::Text(text.to_owned())
@@ -480,6 +543,89 @@ mod test {
         );
     }
 
+    fn table(align: Vec<Align>, head: Vec<Vec<Inline>>, rows: Vec<Vec<Vec<Inline>>>) -> Block {
+        Block::Table { align, head, rows }
+    }
+
+    #[test]
+    fn a_table_keeps_its_head_rows_and_alignment() {
+        assert_eq!(
+            parse("| Name | Qty | Note | Tag |\n|:--|--:|:-:|---|\n| **tea** | `2` | hot | x |"),
+            [table(
+                vec![Align::Left, Align::Right, Align::Center, Align::None],
+                vec![
+                    vec![text("Name")],
+                    vec![text("Qty")],
+                    vec![text("Note")],
+                    vec![text("Tag")],
+                ],
+                vec![vec![
+                    vec![Inline::Strong(vec![text("tea")])],
+                    vec![Inline::Code("2".to_owned())],
+                    vec![text("hot")],
+                    vec![text("x")],
+                ]],
+            )]
+        );
+    }
+
+    #[test]
+    fn a_table_with_no_body_rows_yet_is_just_its_head() {
+        assert_eq!(
+            parse("| a | b |\n|---|---|"),
+            [table(
+                vec![Align::None, Align::None],
+                vec![vec![text("a")], vec![text("b")]],
+                vec![],
+            )]
+        );
+    }
+
+    #[test]
+    fn a_half_typed_delimiter_row_is_still_a_paragraph() {
+        assert_eq!(
+            parse("| a | b |\n|--"),
+            [paragraph(vec![
+                text("| a | b |"),
+                Inline::SoftBreak,
+                text("|--"),
+            ])]
+        );
+    }
+
+    #[test]
+    fn a_short_row_is_padded_to_the_head() {
+        assert_eq!(
+            parse("| a | b | c |\n|---|---|---|\n| x |"),
+            [table(
+                vec![Align::None; 3],
+                vec![vec![text("a")], vec![text("b")], vec![text("c")]],
+                vec![vec![vec![text("x")], vec![], vec![]]],
+            )]
+        );
+    }
+
+    #[test]
+    fn a_table_sits_inside_a_list_item() {
+        assert_eq!(
+            parse("- totals:\n\n  | k | v |\n  |---|---|\n  | n | 1 |\n- done"),
+            [Block::List {
+                start: None,
+                items: vec![
+                    vec![
+                        paragraph(vec![text("totals:")]),
+                        table(
+                            vec![Align::None, Align::None],
+                            vec![vec![text("k")], vec![text("v")]],
+                            vec![vec![vec![text("n")], vec![text("1")]]],
+                        ),
+                    ],
+                    vec![paragraph(vec![text("done")])],
+                ],
+            }]
+        );
+    }
+
     fn collect_text(blocks: &[Block], seen: &mut String) {
         for block in blocks {
             match block {
@@ -501,6 +647,11 @@ mod test {
                     seen.push_str(text);
                     seen.push('|');
                 }
+                Block::Table { head, rows, .. } => {
+                    for cell in head.iter().chain(rows.iter().flatten()) {
+                        collect_text(&[paragraph(cell.clone())], seen);
+                    }
+                }
                 Block::Rule => {}
             }
         }
@@ -509,14 +660,14 @@ mod test {
     #[test]
     fn unhandled_blocks_keep_their_text() {
         let blocks = parse(
-            "| a | b |\n|---|---|\n| c | d |\n\n[link](https://example.com) ![alt](x.png) <b>html</b>\n\n- | g | h |\n  |---|---|\n\n> | e | f |\n> |---|---|",
+            "[link](https://example.com) ![alt](x.png) <b>html</b>\n\n- [g](https://g.example) ![h](h.png)\n\n> <i>e</i> [f](f.md)\n\n| [c](c.md) | ![d](d.png) |\n|---|---|",
         );
 
         let mut seen = String::new();
         collect_text(&blocks, &mut seen);
 
         for expected in [
-            "a", "b", "c", "d", "link", "alt", "<b>", "html", "</b>", "g", "h", "e", "f",
+            "link", "alt", "<b>", "html", "</b>", "g", "h", "<i>", "e", "</i>", "f", "c", "d",
         ] {
             assert!(
                 seen.contains(expected),
