@@ -1,3 +1,4 @@
+pub(crate) mod completions;
 pub(crate) mod gemini;
 pub(crate) mod opencode;
 pub(crate) mod prompt;
@@ -7,8 +8,8 @@ use std::{collections::BTreeSet, sync::LazyLock};
 
 use reqwest::StatusCode;
 
+use completions::Completions;
 use gemini::{Gemini, GeminiModel};
-use opencode::Completions;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Provider {

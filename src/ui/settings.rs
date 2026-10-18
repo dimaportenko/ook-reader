@@ -255,59 +255,48 @@ fn use_key_set(provider: Provider) -> Signal<bool> {
 }
 
 #[component]
-pub(crate) fn GeminiSettings() -> Element {
-    let mut key_set = use_key_set(Provider::Gemini);
+fn ProviderSettings(provider: Provider, note: Option<&'static str>, children: Element) -> Element {
+    let mut key_set = use_key_set(provider);
 
     rsx! {
-        h3 { class: "{Styles::settings_group_title}", "Gemini" }
+        h3 { class: "{Styles::settings_group_title}", {provider.label()} }
         div {
             class: "{Styles::settings_group}",
             ApiKeyControl {
-                provider: Provider::Gemini,
+                provider,
                 key_set: key_set(),
                 on_change: move |key: Option<String>| key_set.set(key.is_some()),
             }
+            if key_set() {
+                {children}
+            }
         }
+        if let Some(note) = note {
+            p { class: "{Styles::settings_group_note}", {note} }
+        }
+    }
+}
+
+#[component]
+pub(crate) fn GeminiSettings() -> Element {
+    rsx! {
+        ProviderSettings { provider: Provider::Gemini }
     }
 }
 
 #[component]
 pub(crate) fn OpenCodeZenSettings() -> Element {
-    let mut key_set = use_key_set(Provider::OpenCodeZen);
-
     rsx! {
-        h3 { class: "{Styles::settings_group_title}", "OpenCode Zen" }
-        div {
-            class: "{Styles::settings_group}",
-            ApiKeyControl {
-                provider: Provider::OpenCodeZen,
-                key_set: key_set(),
-                on_change: move |key: Option<String>| key_set.set(key.is_some()),
-            }
-            if key_set() {
-                ZenCatalog {}
-            }
-        }
+        ProviderSettings { provider: Provider::OpenCodeZen, ZenCatalog {} }
     }
 }
 
 #[component]
 pub(crate) fn OpenAiSettings() -> Element {
-    let mut key_set = use_key_set(Provider::OpenAi);
-
     rsx! {
-        h3 { class: "{Styles::settings_group_title}", "OpenAI" }
-        div {
-            class: "{Styles::settings_group}",
-            ApiKeyControl {
-                provider: Provider::OpenAi,
-                key_set: key_set(),
-                on_change: move |key: Option<String>| key_set.set(key.is_some()),
-            }
-        }
-        p {
-            class: "{Styles::settings_group_note}",
-            "OpenAI keeps API requests for 30 days by default."
+        ProviderSettings {
+            provider: Provider::OpenAi,
+            note: "OpenAI keeps API requests for 30 days by default.",
         }
     }
 }

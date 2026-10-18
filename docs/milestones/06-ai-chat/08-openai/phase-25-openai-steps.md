@@ -669,3 +669,122 @@ The pass was run inline over the one-file diff.
   and once in the test, which is the contract.
 - **Skipped:** putting the effort in `request_body` behind a host check. The body builder
   would then need to know about hosts, and it's tested on its own without one.
+
+## Step 5 — Review and refactor
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**What it is.** A `code-review` pass (high effort) over the whole phase, `ebe2d2f..HEAD`,
+then the cleanups the earlier steps deferred here. One real bug was fixed. Everything else
+keeps behavior identical.
+
+### Runnable check first
+
+The one bug got a test, which was watched fail before the fix:
+
+```rust
+#[test]
+fn a_refusal_chunk_yields_the_refusal_as_text() {
+    let payload = r#"{ "choices": [ { "index": 0, "delta": { "content": null, "refusal": "I can't help with that." } } ] }"#;
+
+    assert_eq!(
+        event(payload).unwrap(),
+        Event::Text("I can't help with that.".into())
+    );
+}
+```
+
+The red was `left: Text("")`, `right: Text("I can't help with that.")`. The refactors are
+covered by the existing suite. The settings block is visual, so its check is under
+`dx serve`: Settings → AI shows the same three blocks as before, Zen's catalog still appears
+only with a key, and the OpenAI note still sits under its block.
+
+### Minimal implementation
+
+- **`src/ai/completions.rs`** (new) holds the shared `chat/completions` client: the request
+  body, the chunk parser, `Completions` with its `zen` and `openai` constructors, the two
+  base URLs, and their tests. It's a move, with no code changes apart from the refusal fix.
+- **`src/ai/opencode.rs`** keeps only what is Zen's: `MODELS_URL`, `models()` and the
+  catalog tests.
+- **`Delta` reads `refusal`.** `event()` takes `content`, falls back to `refusal`, and
+  otherwise yields `""` as before.
+- **`ProviderSettings { provider, note, children }`** in `src/ui/settings.rs` is the one key
+  block. The title is `provider.label()`. `children` render inside the group only when a key
+  is set, which is where Zen's catalog goes. An optional `note` renders under the group.
+  `GeminiSettings`, `OpenCodeZenSettings` and `OpenAiSettings` are now one line each, so
+  `settings_screen.rs` doesn't change.
+- **`settings.css`:** `.settings_group_note + .settings_group_title` gets the same top
+  margin as `.settings_group + .settings_group_title`.
+
+### Why it works
+
+- **The refusal.** When OpenAI declines a request, the stream sends the explanation in
+  `delta.refusal` with `content: null`. The old parser only knew `content` and
+  `reasoning_content`, so every chunk became `Text("")`, the reply stayed empty, and
+  `non_empty_reply` turned it into `ChatError::Empty`. The reader saw "no answer" instead of
+  OpenAI's reason. `content.or(refusal)` streams the refusal into the bubble like any other
+  text. Zen's models don't send the field, so nothing changes for them.
+- **The split.** Step 3 renamed the type but kept the file, so `opencode::Completions` was
+  what OpenAI went through. Now the module name says what it holds. Zen's catalog is the only
+  part that's really OpenCode's.
+- **`children` behind `if key_set()`.** The key state lives in `ProviderSettings`, so
+  anything that depends on it has to render inside it. Passing the catalog as children keeps
+  the Zen-only part in Zen's wrapper while the shared block owns the state. Gemini and OpenAI
+  pass no children, and an empty `Element` renders nothing.
+
+### Forks taken
+
+- **Kept the three thin wrappers** over calling `ProviderSettings` directly from
+  `settings_screen.rs`. The wrappers keep Zen's catalog and OpenAI's note in `settings.rs`.
+  Without them, `ZenCatalog` would have to go `pub(crate)` and the note text would move into
+  the screen layout.
+- **`children` over a `catalog: bool` prop.** A bool would make the shared block know about
+  Zen. With `children` it only knows "something that needs a key".
+- **Refusal as plain text, not an error.** It is the model's answer, and it should stay in
+  the history like one. An error would also drop it on retry.
+
+### Scope note
+
+- No display names in the picker. `gpt-6-luna` shows as its id, the same as Gemini's and
+  Zen's models. A `ChatModel` label is a picker change for every provider.
+- The phase-close check, a real Luna reply streaming into the drawer about as soon as
+  Gemini's, still needs a hand check under `dx serve`. The live
+  `a_real_luna_streams_through_the_trait` test passes, which covers the stream but not the
+  drawer.
+
+### Review notes
+
+From `code-review` (high) over `ebe2d2f..HEAD`:
+
+- **Fixed:** refusals dropped (above).
+- **Dismissed:** "the drawer keeps 'no key' after saving the OpenAI key". The settings screen
+  lives in the library and the drawer lives in the reader. `main.rs` renders one or the other,
+  so the drawer always remounts and rereads the key. Gemini has always worked this way too.
+- **Dismissed:** "`reasoning_effort` is per host, not per model". That's Step 4's recorded
+  fork, and its scope note says when it moves to the model (when an OpenAI model rejects it).
+- **Skipped:** showing "GPT-6 Luna" instead of the id in the picker (see *Scope note*).
+- **Skipped:** storing full completions URLs instead of a base URL plus `format!`. One small
+  allocation per chat turn, and the base URL is the phase's crux.
+- **Skipped:** dropping `a_zen_request_carries_no_reasoning_effort` and the `ai_client`
+  routing test as redundant. The first is the contract Step 4 planned (Zen's GLM rejects the
+  flag). The second tests `provider_for`'s routing, which the client tests can't see.
+
+The deferred punch list:
+
+- **Applied:** the shared key block, which Steps 1 and 3 deferred here.
+- **Applied:** the `completions.rs` split, which Steps 3 and 4 deferred here.
+- **Applied:** the note-margin selector from Step 1's scope note. It's one selector and
+  changes nothing today, but it removes the trap for a fourth block.
+- **Skipped:** making `Completions::request` test-only again. Step 3's fork still holds: a
+  `#[cfg(test)]` accessor would be a copy of the real method, and the routing test needs a
+  built request to read the URL.
+- **Skipped:** `Status::is_replying()`. It's a Phase 23 candidate in `src/chat/` and
+  `src/ui/chat.rs`, outside this phase's range, and it belongs to Phase 23 Step 11.
+
+From the `simplify` pass, run inline over the final diff:
+
+- **Clean:** the move is byte-for-byte apart from the refusal lines, and the imports are
+  trimmed to what each file uses.
+- **Skipped:** inlining `use_key_set` into `ProviderSettings`, its only caller now. The
+  named hook keeps the keychain read out of the render body.

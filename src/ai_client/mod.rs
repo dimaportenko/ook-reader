@@ -1,5 +1,5 @@
 use crate::{
-    ai::{gemini::Gemini, opencode::Completions, AnyProvider, ChatModel, Provider},
+    ai::{completions::Completions, gemini::Gemini, AnyProvider, ChatModel, Provider},
     secrets::{api_key, SecretError, SecretStore},
 };
 
