@@ -39,6 +39,8 @@ struct CompletionRequest<'a> {
     model: &'a str,
     messages: Vec<CompletionMessage<'a>>,
     stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<&'static str>,
 }
 
 #[derive(Debug, Serialize)]
@@ -47,11 +49,16 @@ struct CompletionMessage<'a> {
     content: &'a str,
 }
 
-fn request_body<'a>(model: &'a str, messages: &'a [Message]) -> CompletionRequest<'a> {
+fn request_body<'a>(
+    model: &'a str,
+    messages: &'a [Message],
+    reasoning_effort: Option<&'static str>,
+) -> CompletionRequest<'a> {
     CompletionRequest {
         model,
         messages: messages.iter().map(CompletionMessage::from).collect(),
         stream: true,
+        reasoning_effort,
     }
 }
 
@@ -117,32 +124,39 @@ fn event(payload: &str) -> Result<Event, serde_json::Error> {
 #[derive(Clone)]
 pub(crate) struct Completions {
     base_url: &'static str,
+    reasoning_effort: Option<&'static str>,
     key: String,
     model: String,
 }
 
 impl Completions {
-    fn new(base_url: &'static str, key: String, model: impl Into<String>) -> Self {
+    fn new(
+        base_url: &'static str,
+        reasoning_effort: Option<&'static str>,
+        key: String,
+        model: impl Into<String>,
+    ) -> Self {
         Completions {
             base_url,
+            reasoning_effort,
             key,
             model: model.into(),
         }
     }
 
     pub(crate) fn zen(key: String, model: impl Into<String>) -> Self {
-        Completions::new(ZEN_BASE_URL, key, model)
+        Completions::new(ZEN_BASE_URL, None, key, model)
     }
 
     pub(crate) fn openai(key: String, model: impl Into<String>) -> Self {
-        Completions::new(OPENAI_BASE_URL, key, model)
+        Completions::new(OPENAI_BASE_URL, Some("none"), key, model)
     }
 
     pub(crate) fn request(&self, messages: &[Message]) -> reqwest::RequestBuilder {
         http()
             .post(format!("{}/chat/completions", self.base_url))
             .bearer_auth(&self.key)
-            .json(&request_body(&self.model, messages))
+            .json(&request_body(&self.model, messages, self.reasoning_effort))
     }
 }
 
@@ -190,7 +204,7 @@ mod test {
             Message::assistant("Ankh-Morpork"),
         ];
 
-        let body = serde_json::to_value(request_body("kimi-k2.6", &messages)).unwrap();
+        let body = serde_json::to_value(request_body("kimi-k2.6", &messages, None)).unwrap();
 
         assert_eq!(
             body,
@@ -284,6 +298,10 @@ mod test {
         );
     }
 
+    fn body(request: &reqwest::Request) -> serde_json::Value {
+        serde_json::from_slice(request.body().unwrap().as_bytes().unwrap()).unwrap()
+    }
+
     #[test]
     fn a_request_posts_the_conversation_to_zen_with_a_bearer_key() {
         let zen = Completions::zen("zen-key".to_owned(), "kimi-k2.6");
@@ -292,8 +310,7 @@ mod test {
             .request(&[Message::user("Which city?")])
             .build()
             .unwrap();
-        let body: serde_json::Value =
-            serde_json::from_slice(request.body().unwrap().as_bytes().unwrap()).unwrap();
+        let body = body(&request);
 
         assert_eq!(request.method(), reqwest::Method::POST);
         assert_eq!(
@@ -307,13 +324,15 @@ mod test {
     }
 
     #[test]
-    fn an_openai_request_posts_the_same_body_to_openai() {
+    fn an_openai_request_posts_the_zen_body_plus_no_reasoning_to_openai() {
         let messages = [Message::user("Which city?")];
         let zen = Completions::zen("zen-key".to_owned(), "gpt-6-luna");
         let openai = Completions::openai("openai-key".to_owned(), "gpt-6-luna");
 
         let zen_request = zen.request(&messages).build().unwrap();
         let request = openai.request(&messages).build().unwrap();
+        let mut expected = body(&zen_request);
+        expected["reasoning_effort"] = json!("none");
 
         assert_eq!(request.method(), reqwest::Method::POST);
         assert_eq!(
@@ -321,10 +340,19 @@ mod test {
             "https://api.openai.com/v1/chat/completions"
         );
         assert_eq!(request.headers()["authorization"], "Bearer openai-key");
-        assert_eq!(
-            request.body().unwrap().as_bytes(),
-            zen_request.body().unwrap().as_bytes()
-        );
+        assert_eq!(body(&request), expected);
+    }
+
+    #[test]
+    fn a_zen_request_carries_no_reasoning_effort() {
+        let zen = Completions::zen("zen-key".to_owned(), "glm-5.3-flash");
+
+        let request = zen
+            .request(&[Message::user("Which city?")])
+            .build()
+            .unwrap();
+
+        assert_eq!(body(&request).get("reasoning_effort"), None);
     }
 
     #[tokio::test]

@@ -26,9 +26,10 @@ measurement, and never reaches Zen.
    URL each provider posts to, and an `#[ignore]` test streams a real Luna reply with
    `OPENAI_API_KEY`, as Zen's does with `OPENCODE_API_KEY`. **Done** — `463d0a3`.
 4. **Luna starts sooner.** First a probe: time to first text for `reasoning_effort` `none`,
-   `low` and the default `medium` on a short prompt, recorded in a table as in Phase 23 Step
-   10. Then the request body gains an optional `reasoning_effort`, set for OpenAI and
-   skipped when serializing for Zen. A test asserts Zen's body has no such key.
+   `low` and the default `medium` on a short prompt and a book-chat prompt, recorded in a
+   table as in Phase 23 Step 10. Then the request body gains an optional
+   `reasoning_effort`, set to `none` for OpenAI and skipped when serializing for Zen. A test
+   asserts Zen's body has no such key.
 5. **Review and refactor.**
 
 **Why this order.** Each step ends with something to see:
@@ -516,3 +517,153 @@ model and check that it still answers.
 - **Skipped:** dropping the private `new` and writing the struct literal in both
   constructors. Three lines saved, and the constructors would no longer read as "the same
   client, a different host".
+
+## Step 4 — Luna starts sooner
+
+> **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
+> reviewed by hand.
+
+**What it is.** Every OpenAI request asks for `reasoning_effort: "none"`, so a Luna reply
+to a quoted passage starts in under a second instead of after about seven. Zen's requests
+are byte-for-byte what they were.
+
+### The measurement first
+
+A throwaway Python probe (`http.client`, not `urllib`, with its own User-Agent) streamed
+`gpt-6-luna` over `chat/completions` five times per config, on 2026-10-18. *Short* is Step
+3's "Count from one to twenty in words". *Book* is a `prompt::draft`-shaped message: the
+Ukrainian "translate and explain" line, the three opening lines of *The Colour of Magic*
+quoted, and the question "why is the turtle swimming through the interstellar gulf?".
+Medians of five, first text / whole reply:
+
+| `reasoning_effort` | Short | Book |
+|---|---|---|
+| absent (the default) | 1.40s / 1.72s | **7.16s** / 11.71s |
+| `"none"` | 0.91s / 1.26s | **0.74s** / 4.91s |
+| `"low"` | 0.84s / 1.16s | 3.26s / 7.16s |
+| `"medium"` | 1.00s / 1.37s | 7.16s / 11.46s |
+
+- **The book prompt is where it shows.** The short prompt needs no thought at any level,
+  so every row is about a second. The book prompt makes Luna think for 4–12s before the
+  first word at the default, and that wait is silent, because OpenAI doesn't stream
+  reasoning over `chat/completions` (Step 3). `"none"` cuts it to under a second and the
+  whole reply to less than half.
+- **Absent behaves like `"medium"`** on the book prompt, which fits `medium` being the
+  default.
+- **Quality held.** All three answers translated the passage, explained Discworld's turtle
+  and elephants, and caught the *secondhand dimensions* joke. `low` and `medium` also
+  caught the *plane* / aeroplane pun, and `none` missed it. That's the trade: a slightly
+  shallower explanation for a reply that starts ten times sooner.
+- **`"low"` isn't a middle ground** worth picking. It still waits about three seconds on
+  the book prompt, which is the silent pause this step is about.
+
+So the plan held, unlike Phase 23 Step 10: Luna can turn reasoning off, and turning it off
+is the difference between a second and seven.
+
+### Runnable check first
+
+`src/ai/opencode.rs` — Step 3's `an_openai_request_posts_the_same_body_to_openai` was the
+tripwire for this step: it compared the two hosts' body bytes, and "the same body" is no
+longer true. It becomes:
+
+```rust
+#[test]
+fn an_openai_request_posts_the_zen_body_plus_no_reasoning_to_openai() {
+    // …zen and openai clients for "gpt-6-luna", as before…
+    let mut expected = body(&zen_request);
+    expected["reasoning_effort"] = json!("none");
+
+    // …method, URL and Bearer asserts as before…
+    assert_eq!(body(&request), expected);
+}
+
+#[test]
+fn a_zen_request_carries_no_reasoning_effort() {
+    let zen = Completions::zen("zen-key".to_owned(), "glm-5.3-flash");
+
+    let request = zen
+        .request(&[Message::user("Which city?")])
+        .build()
+        .unwrap();
+
+    assert_eq!(body(&request).get("reasoning_effort"), None);
+}
+```
+
+`body` is a small test helper that parses a built request's JSON. The Zen request test
+uses it too.
+
+Red with the field plumbed through and `Completions::openai` still passing `None`: 1
+failed, 237 passed, 5 ignored. The OpenAI body was missing `"reasoning_effort": "none"`.
+
+```
+test ai::opencode::test::an_openai_request_posts_the_zen_body_plus_no_reasoning_to_openai ... FAILED
+```
+
+The Zen guard was green from the start, because `skip_serializing_if` came in with the
+plumbing. To see it live, the attribute was removed for one run. Three tests went red:
+the Zen guard (`left: Some(Null)`), the OpenAI test, and the whole-body
+`the_conversation_becomes_chat_completions_messages`, which found `"reasoning_effort":
+null`. Then it was put back.
+
+Green after: 238 passed, 5 ignored, and clippy was clean. The live
+`a_real_luna_streams_through_the_trait` passed again with the flag on, in 1.2s.
+
+**Eyeball under `dx serve`:** select a paragraph, send it to the drawer with Luna picked,
+and the reply should start in about a second rather than after a long `...`.
+
+### Minimal implementation
+
+- **`src/ai/opencode.rs`** — `CompletionRequest` gains `reasoning_effort:
+  Option<&'static str>` with `#[serde(skip_serializing_if = "Option::is_none")]`.
+  `request_body` takes it as a third argument. `Completions` keeps it as a field next to
+  `base_url`, the private `new` takes it, `zen` passes `None`, and `openai` passes
+  `Some("none")`.
+
+### Why it works
+
+- **`skip_serializing_if` drops the key, not just the value.** Without it, `None`
+  serializes as `"reasoning_effort": null`. GLM on Zen rejects the flag with a `400`
+  (Phase 23 Step 10), and a `null` is still the flag being present. With it, Zen's JSON is
+  exactly what it was before this step.
+- **The effort is per host, so it lives with the host.** `base_url` and
+  `reasoning_effort` are both decided by which constructor ran. `provider_for` still says
+  only *which host*, and nothing outside `opencode.rs` knows the flag exists.
+- **`get` over indexing in the Zen test.** `body["reasoning_effort"]` gives `Null` both
+  for a missing key and for an explicit `null`, so it can't tell them apart. `get` returns
+  `None` only when the key is absent, which is the property Zen needs.
+- **The tripwire did its job.** Step 3 compared whole bodies so that a per-host field
+  would break a test. The new version still compares whole bodies, with the one expected
+  difference spelled out, so a second per-host field would break it again.
+
+### Forks taken
+
+- **`"none"`, not `"low"`.** The table above. `"low"` still waits about three seconds on
+  a real passage.
+- **A field on `Completions`, not a parameter to `request`.** The effort is fixed per
+  host, like the URL. A parameter would push the choice into `AnyProvider` and
+  `provider_for`, which only know about hosts.
+- **`Option<&'static str>`, not a `ReasoningEffort` enum.** One value is ever sent. An enum
+  earns its place if the effort becomes a setting ("think harder" in Settings → AI), which
+  Phase 23 Step 9 also left for later.
+- **No *Thinking…* for Luna.** With effort `"none"` there's nothing to wait for. If a
+  later step raises the effort, the silent wait comes back, because `chat/completions`
+  doesn't stream OpenAI's reasoning.
+
+### Scope note
+
+- The effort isn't a setting. Same reasoning as Gemini's `"minimal"` in Phase 23 Step 9.
+- Sol, or any other OpenAI model, would get `"none"` too, since it's set per host. If one
+  rejects it, the effort moves from the host to the model.
+- The file split from Step 3's notes is still left for Step 5.
+
+### Review notes (from the `simplify` pass)
+
+The pass was run inline over the one-file diff.
+
+- **Applied:** the Zen request test reuses the new `body` helper instead of parsing the
+  request body inline.
+- **Skipped:** a `const NO_REASONING: &str = "none"`. The literal appears once in the code
+  and once in the test, which is the contract.
+- **Skipped:** putting the effort in `request_body` behind a host check. The body builder
+  would then need to know about hosts, and it's tested on its own without one.
