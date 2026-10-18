@@ -59,5 +59,5 @@ renders that tree. That gives the phase its lessons:
 - [x] 2. Headings, lists, quotes and rules — the block structure, nested lists included, with its CSS
 - [x] 3. Code blocks — fenced and indented, the fence's language kept, sideways scroll, an unclosed fence rendered mid-stream
 - [x] 4. Tables — GFM tables with column alignment, scrolling sideways inside the bubble
-- [ ] 5. Links, images and raw HTML — safe-scheme anchors that open externally, alt text for images, HTML as literal text
+- [x] 5. Links, images and raw HTML — safe-scheme anchors that open externally, alt text for images, HTML as literal text
 - [ ] 6. Review and refactor

@@ -31,10 +31,10 @@ the streaming one included.
 4. ~~**Tables.**~~ `Block::Table { align, head, rows }` with each cell holding inlines, from
    `Options::ENABLE_TABLES`. It renders as a real `table` inside a wrapper that scrolls
    sideways. **Done** — `fd8da23`.
-5. **Links, images and raw HTML.** `Inline::Link { href, children }` only when the URL's
+5. ~~**Links, images and raw HTML.**~~ `Inline::Link { href, children }` only when the URL's
    scheme is `http`, `https` or `mailto` (case-insensitive). Any other link keeps just its
    children. Images become their alt text. `Html` / `InlineHtml` become literal text. Tests
-   cover `javascript:`, a relative href and a `<script>` tag.
+   cover `javascript:`, a relative href and a `<script>` tag. **Done** — `6c67a8a`.
 6. **Review and refactor.** Run a `code-review` pass over the phase, apply the deferred
    cleanups, and close the phase. Hand checks still pending stay unconfirmed.
 
@@ -783,6 +783,8 @@ sepia and dark: the borders and header tint follow the text colour.
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `6c67a8a` (271 tests green, 3 ignored; clippy clean). The drawer rendering and link clicks are still to be confirmed by hand under `dx serve`.
 
 **What it is.** A link in a reply is now a real, underlined, accent-coloured link when it
 points at `http://`, `https://` or `mailto:`, and clicking it opens the system browser or
