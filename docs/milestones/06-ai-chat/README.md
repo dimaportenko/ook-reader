@@ -7,7 +7,7 @@ a chat whose first message is already filled in — book title, author, the sele
 so the only thing left to type is the question. First provider: **Gemini Flash-Lite**.
 The provider and model must be swappable later without touching the reader.
 
-**Status:** 🚧 in progress — captured 2026-09-11; [Phase 17](01-provider/phase-17-provider-boundary.md) closed 2026-09-13; [Phase 18](02-key-storage/phase-18-key-storage.md) closed 2026-09-20; [Phase 19](03-chat-panel/phase-19-chat-panel.md) closed 2026-09-22; [Phase 20](04-selection/phase-20-selection-chat.md) closed 2026-09-24; [Phase 22](05-streaming/phase-22-streaming.md) closed 2026-09-27, **ahead of Phase 21**. [Phase 23](07-opencode/phase-23-opencode-zen.md) (OpenCode Zen) opened 2026-09-27 ahead of Phase 21, then paused the same day for [Phase 24](06-settings-screen/phase-24-settings-screen.md) (settings screen), which closed 2026-09-28. No ADR yet. Sits behind
+**Status:** 🚧 in progress — captured 2026-09-11; [Phase 17](01-provider/phase-17-provider-boundary.md) closed 2026-09-13; [Phase 18](02-key-storage/phase-18-key-storage.md) closed 2026-09-20; [Phase 19](03-chat-panel/phase-19-chat-panel.md) closed 2026-09-22; [Phase 20](04-selection/phase-20-selection-chat.md) closed 2026-09-24; [Phase 22](05-streaming/phase-22-streaming.md) closed 2026-09-27, **ahead of Phase 21**. [Phase 23](07-opencode/phase-23-opencode-zen.md) (OpenCode Zen) opened 2026-09-27 ahead of Phase 21, then paused the same day for [Phase 24](06-settings-screen/phase-24-settings-screen.md) (settings screen), which closed 2026-09-28. [Phase 25](08-openai/phase-25-openai.md) (OpenAI, GPT-6 Luna) captured 2026-10-18, to follow Phase 23. No ADR yet. Sits behind
 nothing: Milestones 3 and 5 both have no phase in progress.
 
 ## The idea in one paragraph
@@ -32,6 +32,7 @@ deliberately pushed to its own phase so the first end-to-end slice is request/re
 | 22 | [Streaming replies](05-streaming/phase-22-streaming.md) | Tokens appear as they arrive; cancel mid-reply | ✅ |
 | 24 | [Settings screen](06-settings-screen/phase-24-settings-screen.md) | A gear in the library opens a full-screen settings view: sidebar on desktop, list → section on a phone; *Reader theme* and *AI* sections, with Gemini's key and model moved out of the reader popover | ✅ |
 | 23 | [Second provider: OpenCode Zen](07-opencode/phase-23-opencode-zen.md) | An OpenCode Zen block in Settings → AI: key, live model list, ticks for which models the chat offers; a model picker in the drawer; replies stream over OpenAI-compatible `chat/completions` from whichever provider serves the model | 🚧 |
+| 25 | [Third provider: OpenAI](08-openai/phase-25-openai.md) | An OpenAI block in Settings → AI with a key; GPT-6 Luna always offered in the drawer; its replies stream over the same `chat/completions` client as Zen, given OpenAI's base URL | ⬜ |
 | 21 | Selection → prefilled chat (iOS) | *Ask AI* in the native edit menu via `buildMenuWithBuilder:` (objc2), reusing Phase 20's template | ⬜ |
 
 > Phase files are written as each phase is picked up, per this repo's convention — the table
@@ -60,6 +61,11 @@ last because a working non-streaming chat is already the feature; streaming is p
 > before any Phase 23 code was written. Phase 23 was replanned around a live Zen model list
 > you tick models from, with the model choice made in the drawer. Neither fits in the reader
 > popover, so a settings screen comes first. Order now: 24 → 23 → 21.
+
+> **Inserted 2026-10-18:** Phase 25 (OpenAI) follows Phase 23 and goes before Phase 21, at
+> the learner's call. They want GPT-6 Luna in the drawer. Like Phase 23, it touches only
+> `src/ai/`, the secret store and Settings → AI. It was kept out of Phase 23 so that Phase
+> 23's review step closes the Zen scope. Order now: 24 → 23 → 25 → 21.
 
 ## The design, in short
 
