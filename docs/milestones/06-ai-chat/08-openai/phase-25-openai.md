@@ -6,6 +6,11 @@ was still unwritten, closed 2026-10-18. The drawer check (a real Luna reply star
 as soon as Gemini's) is still to be confirmed by hand under `dx serve` ·
 build log: [`phase-25-openai-steps.md`](phase-25-openai-steps.md)
 
+> **Note 2026-10-18:** the OpenCode Zen provider has since been removed (see
+> [Phase 23](../07-opencode/phase-23-opencode-zen.md)). The shared `chat/completions` client
+> now serves OpenAI only, and the picker offers Gemini's models then Luna. Mentions of Zen
+> below describe the app as it was when this phase closed.
+
 ## Goal
 
 In **Settings → AI**, an *OpenAI* block sits below Gemini and OpenCode Zen, with a key row.
