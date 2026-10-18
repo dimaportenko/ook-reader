@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 
 use crate::ui::{
     components::icon::{self, Icon},
-    settings::{GeminiSettings, OpenCodeZenSettings, ReaderThemeControls},
+    settings::{GeminiSettings, OpenAiSettings, OpenCodeZenSettings, ReaderThemeControls},
 };
 
 #[css_module("/src/ui/settings_screen.css")]
@@ -45,14 +45,21 @@ pub(crate) fn SettingsScreen(mut open: Signal<bool>) -> Element {
                     class: "icon-button {Styles::settings_screen__back}",
                     aria_label: "Back to settings",
                     onclick: move |_| chosen.set(None),
-                    Icon { icon: icon::CHEVRON_LEFT }
+                    Icon {
+                        icon: icon::CHEVRON_LEFT,
+                    }
                 }
-                h1 { class: "{Styles::settings_screen__title}", "Settings" }
+                h1 {
+                    class: "{Styles::settings_screen__title}",
+                    "Settings"
+                }
                 button {
                     class: "icon-button",
                     aria_label: "Close settings",
                     onclick: move |_| open.set(false),
-                    Icon { icon: icon::CLOSE }
+                    Icon {
+                        icon: icon::CLOSE,
+                    }
                 }
             }
             div {
@@ -65,8 +72,12 @@ pub(crate) fn SettingsScreen(mut open: Signal<bool>) -> Element {
                             class: "{Styles::settings_screen__section_button}",
                             aria_current: if item == current { "page" },
                             onclick: move |_| chosen.set(Some(item)),
-                            span { {item.label()} }
-                            Icon { icon: icon::CHEVRON_RIGHT }
+                            span {
+                                {item.label()}
+                            }
+                            Icon {
+                                icon: icon::CHEVRON_RIGHT,
+                            }
                         }
                     }
                 }
@@ -74,11 +85,17 @@ pub(crate) fn SettingsScreen(mut open: Signal<bool>) -> Element {
                     class: "{Styles::settings_screen__section}",
                     div {
                         class: "{Styles::settings_screen__content}",
-                        h2 { class: "{Styles::settings_screen__heading}", {current.label()} }
+                        h2 {
+                            class: "{Styles::settings_screen__heading}",
+                            {current.label()}
+                        }
                         match current {
-                            SettingsSection::ReaderTheme => rsx! { ReaderThemeControls {} },
+                            SettingsSection::ReaderTheme => rsx! {
+                                ReaderThemeControls {}
+                            },
                             SettingsSection::Ai => rsx! {
                                 GeminiSettings {}
+                                OpenAiSettings {}
                                 OpenCodeZenSettings {}
                             },
                         }

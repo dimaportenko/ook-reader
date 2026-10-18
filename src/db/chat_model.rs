@@ -57,6 +57,12 @@ mod test {
         let gemini = ChatModel::gemini(GeminiModel::Flash);
         db.save_chat_model(&gemini).expect("pick a Gemini model");
         assert_eq!(db.chat_model().expect("read the Gemini pick"), Some(gemini));
+
+        db.save_chat_model(&ChatModel::luna()).expect("pick Luna");
+        assert_eq!(
+            db.chat_model().expect("read the Luna pick"),
+            Some(ChatModel::luna())
+        );
     }
 
     #[test]
@@ -67,7 +73,10 @@ mod test {
         db.save_chat_model(&ChatModel::gemini(GeminiModel::Flash))
             .expect("seed the row");
         db.conn
-            .execute("UPDATE chat_model SET provider = 'openai' WHERE id = 1", [])
+            .execute(
+                "UPDATE chat_model SET provider = 'anthropic' WHERE id = 1",
+                [],
+            )
             .expect("corrupt the provider");
 
         assert_eq!(db.chat_model().expect("read"), None);

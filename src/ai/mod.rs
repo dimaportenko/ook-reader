@@ -1,3 +1,4 @@
+pub(crate) mod completions;
 pub(crate) mod gemini;
 pub(crate) mod opencode;
 pub(crate) mod prompt;
@@ -7,22 +8,25 @@ use std::{collections::BTreeSet, sync::LazyLock};
 
 use reqwest::StatusCode;
 
+use completions::Completions;
 use gemini::{Gemini, GeminiModel};
-use opencode::OpenCode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Provider {
     Gemini,
     OpenCodeZen,
+    OpenAi,
 }
 
 impl Provider {
-    pub(crate) const ALL: [Provider; 2] = [Provider::Gemini, Provider::OpenCodeZen];
+    pub(crate) const ALL: [Provider; 3] =
+        [Provider::Gemini, Provider::OpenCodeZen, Provider::OpenAi];
 
     pub(crate) fn label(self) -> &'static str {
         match self {
             Provider::Gemini => "Gemini",
             Provider::OpenCodeZen => "OpenCode Zen",
+            Provider::OpenAi => "OpenAI",
         }
     }
 
@@ -30,6 +34,7 @@ impl Provider {
         match self {
             Provider::Gemini => "gemini",
             Provider::OpenCodeZen => "opencode-zen",
+            Provider::OpenAi => "openai",
         }
     }
 
@@ -60,6 +65,13 @@ impl ChatModel {
         }
     }
 
+    pub(crate) fn luna() -> Self {
+        ChatModel {
+            provider: Provider::OpenAi,
+            id: "gpt-6-luna".to_owned(),
+        }
+    }
+
     pub(crate) fn key(&self) -> String {
         format!("{}/{}", self.provider.slug(), self.id)
     }
@@ -72,7 +84,7 @@ pub(crate) fn chat_models(zen_ticked: &BTreeSet<String>) -> Vec<ChatModel> {
         id: id.clone(),
     });
 
-    gemini.chain(zen).collect()
+    gemini.chain([ChatModel::luna()]).chain(zen).collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -165,7 +177,7 @@ pub(crate) trait ChatProvider {
 #[derive(Clone)]
 pub(crate) enum AnyProvider {
     Gemini(Gemini),
-    OpenCode(OpenCode),
+    Completions(Completions),
 }
 
 impl ChatProvider for AnyProvider {
@@ -176,7 +188,7 @@ impl ChatProvider for AnyProvider {
     ) -> Result<Reply, ChatError> {
         match self {
             AnyProvider::Gemini(gemini) => gemini.stream(messages, on_progress).await,
-            AnyProvider::OpenCode(zen) => zen.stream(messages, on_progress).await,
+            AnyProvider::Completions(client) => client.stream(messages, on_progress).await,
         }
     }
 }
@@ -210,13 +222,13 @@ mod test {
     #[test]
     fn each_provider_has_a_reader_facing_label() {
         assert_eq!(
-            [Provider::Gemini, Provider::OpenCodeZen].map(Provider::label),
-            ["Gemini", "OpenCode Zen"]
+            Provider::ALL.map(Provider::label),
+            ["Gemini", "OpenCode Zen", "OpenAI"]
         );
     }
 
     #[test]
-    fn the_chat_offers_every_gemini_model_then_the_ticked_zen_ones() {
+    fn the_chat_offers_every_gemini_model_then_the_ticked_zen_ones_then_luna() {
         let ticked = BTreeSet::from(["kimi-k2.6".to_owned(), "deepseek-v4-flash".to_owned()]);
         let zen = |id: &str| ChatModel {
             provider: Provider::OpenCodeZen,
@@ -230,7 +242,19 @@ mod test {
                 ChatModel::gemini(GeminiModel::Flash),
                 zen("deepseek-v4-flash"),
                 zen("kimi-k2.6"),
+                ChatModel::luna(),
             ]
+        );
+    }
+
+    #[test]
+    fn luna_is_openai_s_gpt_6_luna() {
+        assert_eq!(
+            ChatModel::luna(),
+            ChatModel {
+                provider: Provider::OpenAi,
+                id: "gpt-6-luna".to_owned(),
+            }
         );
     }
 
@@ -258,8 +282,8 @@ mod test {
     #[test]
     fn each_provider_has_a_stable_storage_slug() {
         assert_eq!(
-            [Provider::Gemini, Provider::OpenCodeZen].map(Provider::slug),
-            ["gemini", "opencode-zen"]
+            Provider::ALL.map(Provider::slug),
+            ["gemini", "opencode-zen", "openai"]
         );
     }
 
@@ -268,7 +292,7 @@ mod test {
         for provider in Provider::ALL {
             assert_eq!(Provider::from_slug(provider.slug()), Some(provider));
         }
-        assert_eq!(Provider::from_slug("openai"), None);
+        assert_eq!(Provider::from_slug("anthropic"), None);
     }
 
     #[test]

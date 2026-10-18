@@ -12,8 +12,16 @@
   opacity: 0.6;
 }
 
-.settings_group + .settings_group_title {
+.settings_group + .settings_group_title,
+.settings_group_note + .settings_group_title {
   margin-top: 1.5rem;
+}
+
+.settings_group_note {
+  margin: 0.5rem 0 0;
+  padding: 0 1rem;
+  font-size: 0.8125rem;
+  opacity: 0.6;
 }
 
 .settings_group {
