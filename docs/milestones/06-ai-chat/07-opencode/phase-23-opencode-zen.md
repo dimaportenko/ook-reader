@@ -70,5 +70,5 @@ Three consequences follow, and each is a lesson:
 - [x] 7. The real Zen stream — POST, Bearer auth, end to end with a real key
 - [x] 8. The deferred punch list — `AiModel` → `ai::gemini::GeminiModel`, one shared `reqwest::Client`, bubble font size restored
 - [x] 9. Gemini thinks minimally — `thinkingConfig.thinkingLevel: "minimal"` in the request body
-- [ ] 10. Zen's reasoning shows as *Thinking…* — `Progress` on the stream callback, a `Thinking` status in the drawer *(was "Zen thinks less"; the 2026-09-29 measurement showed no flag helps)*
+- [x] 10. Zen's reasoning shows as *Thinking…* — `Progress` on the stream callback, a `Thinking` status in the drawer *(was "Zen thinks less"; the 2026-09-29 measurement showed no flag helps)*
 - [ ] 11. Review and refactor

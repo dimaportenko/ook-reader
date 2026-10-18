@@ -24,7 +24,7 @@ format reuses the SSE buffer; only its JSON and the `[DONE]` marker are new.
 7. ~~**The real Zen stream.**~~ POST with Bearer auth, checked end to end with a real key. **Done** — `36f95b4`.
 8. ~~**The deferred punch list.**~~ `GeminiModel` moves to `ai::gemini`, one shared `reqwest::Client`, and the bubble font size is restored. **Done** — `df1849d`. *(Was "Review and refactor". It became a mid-phase step on 2026-09-29, when Steps 9–10 were added.)*
 9. ~~**Gemini thinks minimally.**~~ Add `generationConfig.thinkingConfig.thinkingLevel: "minimal"` to the request body. **Done** — `40e24eb`.
-10. **Zen's reasoning shows as *Thinking…*.** Was "Zen thinks less" until the measurement at the start of the step showed that no flag helps. The stream now reports reasoning, and the drawer labels it.
+10. ~~**Zen's reasoning shows as *Thinking…*.**~~ Was "Zen thinks less" until the measurement at the start of the step showed that no flag helps. The stream now reports reasoning, and the drawer labels it. **Done** — `21e9c01`.
 11. **Review and refactor.**
 
 **Why this order.** Each step ends with something to see in the settings screen or the
@@ -1234,6 +1234,8 @@ missing `generationConfig`. Green after: 228 passed, 4 ignored, and clippy was c
 
 > **Written by:** `lbb:next-implement` — implementation and tests written by the agent,
 > reviewed by hand.
+
+> **Status:** done — committed in `21e9c01` (233 tests green, 4 ignored; clippy clean; *Thinking…* bubble confirmed by hand in a release build on iPad).
 
 ### The measurement that replanned the step
 
