@@ -292,6 +292,27 @@ pub(crate) fn OpenCodeZenSettings() -> Element {
 }
 
 #[component]
+pub(crate) fn OpenAiSettings() -> Element {
+    let mut key_set = use_key_set(Provider::OpenAi);
+
+    rsx! {
+        h3 { class: "{Styles::settings_group_title}", "OpenAI" }
+        div {
+            class: "{Styles::settings_group}",
+            ApiKeyControl {
+                provider: Provider::OpenAi,
+                key_set: key_set(),
+                on_change: move |key: Option<String>| key_set.set(key.is_some()),
+            }
+        }
+        p {
+            class: "{Styles::settings_group_note}",
+            "OpenAI keeps API requests for 30 days by default."
+        }
+    }
+}
+
+#[component]
 fn ZenCatalog() -> Element {
     let db = use_context::<Rc<Db>>();
     let catalog = use_resource(opencode::models);

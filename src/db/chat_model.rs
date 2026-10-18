@@ -67,7 +67,10 @@ mod test {
         db.save_chat_model(&ChatModel::gemini(GeminiModel::Flash))
             .expect("seed the row");
         db.conn
-            .execute("UPDATE chat_model SET provider = 'openai' WHERE id = 1", [])
+            .execute(
+                "UPDATE chat_model SET provider = 'anthropic' WHERE id = 1",
+                [],
+            )
             .expect("corrupt the provider");
 
         assert_eq!(db.chat_model().expect("read"), None);

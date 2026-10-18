@@ -1,7 +1,8 @@
 # Phase 25 — Third provider: OpenAI
 
-[← Feature: Third provider: OpenAI](README.md) · **Status:** ⬜ planned — captured 2026-10-18,
-after [Phase 23](../07-opencode/phase-23-opencode-zen.md) closes ·
+[← Feature: Third provider: OpenAI](README.md) · **Status:** 🚧 in progress — captured 2026-10-18,
+opened the same day while [Phase 23](../07-opencode/phase-23-opencode-zen.md)'s review step
+was still unwritten ·
 build log: [`phase-25-openai-steps.md`](phase-25-openai-steps.md)
 
 ## Goal

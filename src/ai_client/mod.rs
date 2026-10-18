@@ -8,9 +8,10 @@ pub(crate) fn provider_for(
     model: &ChatModel,
 ) -> Result<Option<AnyProvider>, SecretError> {
     Ok(
-        api_key::get(store, model.provider)?.map(|key| match model.provider {
-            Provider::Gemini => AnyProvider::Gemini(Gemini::new(key, &model.id)),
-            Provider::OpenCodeZen => AnyProvider::OpenCode(OpenCode::new(key, &model.id)),
+        api_key::get(store, model.provider)?.and_then(|key| match model.provider {
+            Provider::Gemini => Some(AnyProvider::Gemini(Gemini::new(key, &model.id))),
+            Provider::OpenCodeZen => Some(AnyProvider::OpenCode(OpenCode::new(key, &model.id))),
+            Provider::OpenAi => None,
         }),
     )
 }
@@ -42,5 +43,17 @@ mod test {
 
         api_key::forget(&store, Provider::OpenCodeZen).expect("forget the Zen key");
         assert!(client(&zen).is_none());
+    }
+
+    #[test]
+    fn an_openai_key_builds_no_client_yet() {
+        let store = Memory::default();
+        let luna = ChatModel {
+            provider: Provider::OpenAi,
+            id: "gpt-6-luna".to_owned(),
+        };
+        api_key::save(&store, Provider::OpenAi, "openai").expect("save the OpenAI key");
+
+        assert!(provider_for(&store, &luna).expect("read the key").is_none());
     }
 }

@@ -14,15 +14,18 @@ use opencode::OpenCode;
 pub(crate) enum Provider {
     Gemini,
     OpenCodeZen,
+    OpenAi,
 }
 
 impl Provider {
-    pub(crate) const ALL: [Provider; 2] = [Provider::Gemini, Provider::OpenCodeZen];
+    pub(crate) const ALL: [Provider; 3] =
+        [Provider::Gemini, Provider::OpenCodeZen, Provider::OpenAi];
 
     pub(crate) fn label(self) -> &'static str {
         match self {
             Provider::Gemini => "Gemini",
             Provider::OpenCodeZen => "OpenCode Zen",
+            Provider::OpenAi => "OpenAI",
         }
     }
 
@@ -30,6 +33,7 @@ impl Provider {
         match self {
             Provider::Gemini => "gemini",
             Provider::OpenCodeZen => "opencode-zen",
+            Provider::OpenAi => "openai",
         }
     }
 
@@ -210,8 +214,8 @@ mod test {
     #[test]
     fn each_provider_has_a_reader_facing_label() {
         assert_eq!(
-            [Provider::Gemini, Provider::OpenCodeZen].map(Provider::label),
-            ["Gemini", "OpenCode Zen"]
+            Provider::ALL.map(Provider::label),
+            ["Gemini", "OpenCode Zen", "OpenAI"]
         );
     }
 
@@ -258,8 +262,8 @@ mod test {
     #[test]
     fn each_provider_has_a_stable_storage_slug() {
         assert_eq!(
-            [Provider::Gemini, Provider::OpenCodeZen].map(Provider::slug),
-            ["gemini", "opencode-zen"]
+            Provider::ALL.map(Provider::slug),
+            ["gemini", "opencode-zen", "openai"]
         );
     }
 
@@ -268,7 +272,7 @@ mod test {
         for provider in Provider::ALL {
             assert_eq!(Provider::from_slug(provider.slug()), Some(provider));
         }
-        assert_eq!(Provider::from_slug("openai"), None);
+        assert_eq!(Provider::from_slug("anthropic"), None);
     }
 
     #[test]

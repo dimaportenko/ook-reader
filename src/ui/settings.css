@@ -16,6 +16,13 @@
   margin-top: 1.5rem;
 }
 
+.settings_group_note {
+  margin: 0.5rem 0 0;
+  padding: 0 1rem;
+  font-size: 0.8125rem;
+  opacity: 0.6;
+}
+
 .settings_group {
   padding: 0 1rem;
   border-radius: 1rem;
