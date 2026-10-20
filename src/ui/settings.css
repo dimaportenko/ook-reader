@@ -209,6 +209,6 @@
 }
 
 .prompt_template:focus {
-  border-color: var(--focused-border-color);
+  border-color: var(--tint-focus);
   outline: none;
 }
