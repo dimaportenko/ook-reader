@@ -3,7 +3,8 @@ use std::rc::Rc;
 use dioxus::prelude::*;
 
 use crate::{
-    ai::Provider,
+    ai::{prompt::DEFAULT_PROMPT_TEMPLATE, Provider},
+    library::Library,
     secrets::{api_key, SecretStore},
     settings::{
         choice::Choice, Settings, FONT_SIZE_MAX, FONT_SIZE_MIN, LINE_HEIGHT_MAX, LINE_HEIGHT_MIN,
@@ -286,6 +287,93 @@ pub(crate) fn OpenAiSettings() -> Element {
             note: "OpenAI keeps API requests for 30 days by default.",
         }
     }
+}
+
+const PLACEHOLDER_HINT: &str = "Placeholders: {title} {author} {chapter} {selection}";
+
+#[component]
+fn PromptTemplateEditor(
+    label: &'static str,
+    status: &'static str,
+    custom: bool,
+    reset_label: &'static str,
+    text: String,
+    on_save: EventHandler<String>,
+    on_reset: EventHandler,
+) -> Element {
+    let mut revision = use_signal(|| 0_u32);
+
+    rsx! {
+        div {
+            class: "{Styles::settings_group}",
+            SettingRow {
+                label: status,
+                button {
+                    class: "{Styles::pill_button}",
+                    disabled: !custom,
+                    onclick: move |_| {
+                        on_reset.call(());
+                        revision += 1;
+                    },
+                    {reset_label}
+                }
+            }
+            textarea {
+                key: "{revision}",
+                class: "{Styles::prompt_template}",
+                aria_label: label,
+                spellcheck: "false",
+                value: "{text}",
+                onchange: move |event| {
+                    on_save.call(event.value());
+                    revision += 1;
+                },
+            }
+        }
+        p { class: "{Styles::settings_group_note}", {PLACEHOLDER_HINT} }
+    }
+}
+
+#[component]
+pub(crate) fn GlobalPromptTemplateSettings() -> Element {
+    let library = use_context::<Rc<Library>>();
+    let mut global = use_signal(|| read_global_prompt_template(&library));
+    let custom = global.read().is_some();
+    let status = if custom { "Custom" } else { "Default" };
+    let text = global().unwrap_or_else(|| DEFAULT_PROMPT_TEMPLATE.to_string());
+
+    rsx! {
+        h3 { class: "{Styles::settings_group_title}", "Prompt template" }
+        PromptTemplateEditor {
+            label: "Global prompt template",
+            status,
+            custom,
+            reset_label: "Reset to default",
+            text,
+            on_save: {
+                let library = library.clone();
+                move |template: String| {
+                    library
+                        .set_global_prompt_template(&template)
+                        .or_log("save the global prompt template");
+                    global.set(read_global_prompt_template(&library));
+                }
+            },
+            on_reset: move |_| {
+                library
+                    .clear_global_prompt_template()
+                    .or_log("reset the global prompt template");
+                global.set(read_global_prompt_template(&library));
+            },
+        }
+    }
+}
+
+fn read_global_prompt_template(library: &Library) -> Option<String> {
+    library
+        .global_prompt_template()
+        .or_log("read the global prompt template")
+        .flatten()
 }
 
 #[component]
