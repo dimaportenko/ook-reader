@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 
 use crate::ui::{
     components::icon::{self, Icon},
-    settings::{GeminiSettings, OpenAiSettings, ReaderThemeControls},
+    settings::{GeminiSettings, GlobalPromptTemplateSettings, OpenAiSettings, ReaderThemeControls},
 };
 
 #[css_module("/src/ui/settings_screen.css")]
@@ -96,6 +96,7 @@ pub(crate) fn SettingsScreen(mut open: Signal<bool>) -> Element {
                             SettingsSection::Ai => rsx! {
                                 GeminiSettings {}
                                 OpenAiSettings {}
+                                GlobalPromptTemplateSettings {}
                             },
                         }
                     }

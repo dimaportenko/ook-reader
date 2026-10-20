@@ -221,7 +221,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
     });
 
     use_revoke_blob_on_unmount();
-    use_bridge(state, docs, library, book.id, show_controls, opened);
+    use_bridge(state, docs, library.clone(), book.id, show_controls, opened);
 
     rsx! {
         div {
@@ -279,19 +279,27 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                             let title = book.title.clone();
                             let author = book.author.clone();
                             let chapter = chapter_label.clone();
+                            let library = library.clone();
+                            let book_id = book.id;
                             move |_| {
                                 let (title, author, chapter) = (
                                     title.clone(),
                                     author.clone(),
                                     chapter.clone(),
                                 );
+                                let template = library
+                                    .effective_prompt_template(book_id)
+                                    .or_log("read the effective prompt template")
+                                    .unwrap_or_else(|| {
+                                        prompt::DEFAULT_PROMPT_TEMPLATE.to_string()
+                                    });
                                 async move {
                                     let selected = document::eval(TAKE_SELECTION_JS)
                                         .join::<String>()
                                         .await
                                         .unwrap_or_default();
                                     match selection_draft(
-                                        prompt::DEFAULT_PROMPT_TEMPLATE,
+                                        &template,
                                         &title,
                                         author.as_deref(),
                                         &chapter,

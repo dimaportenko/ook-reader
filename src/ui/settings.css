@@ -190,3 +190,25 @@
   outline: 2px solid var(--tint-focus);
   outline-offset: 2px;
 }
+
+.prompt_template {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 12rem;
+  margin: 0.75rem 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--tint-border);
+  border-radius: 0.75rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: max(1rem, 16px);
+  line-height: 1.4;
+  resize: vertical;
+}
+
+.prompt_template:focus {
+  border-color: var(--focused-border-color);
+  outline: none;
+}
