@@ -47,7 +47,9 @@ pub(crate) fn ChatPanel(chat: ChatHandle) -> Element {
             open: chat.open,
             label: "Chat",
             ModelPicker {}
-            ChatConversation { handle: chat }
+            ChatConversation {
+                handle: chat,
+            }
         }
     }
 }
@@ -66,7 +68,7 @@ fn ModelPicker() -> Element {
                 let Some(model) = chat_models()
                     .into_iter()
                     .find(|model| model.key() == event.value())
-                else {
+                    else {
                     return;
                 };
                 chosen.set(model);
@@ -164,7 +166,11 @@ fn ChatConversation(handle: ChatHandle) -> Element {
     let bubble = match conversation.status() {
         Status::Thinking => Some(rsx! { "Thinking…" }),
         Status::Replying(text) if text.trim().is_empty() => Some(rsx! { "..." }),
-        Status::Replying(text) => Some(rsx! { Markdown { text: text.clone() } }),
+        Status::Replying(text) => Some(rsx! {
+            Markdown {
+                text: text.clone(),
+            }
+        }),
         _ => None,
     };
 
@@ -188,10 +194,8 @@ fn ChatConversation(handle: ChatHandle) -> Element {
                     li {
                         class: "{Styles::chat_panel__turn}",
                         "data-role": if message.role() == Role::User { "user" } else { "assistant" },
-                        if message.role() == Role::User {
-                            "{message.text()}"
-                        } else {
-                            Markdown { text: message.text().to_owned() }
+                        Markdown {
+                            text: message.text().to_owned(),
                         }
                     }
                 }
