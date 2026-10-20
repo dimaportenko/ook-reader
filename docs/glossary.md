@@ -114,3 +114,23 @@ nothing needs arbitrating and the whole problem becomes a pure merge function.
 - **`RemoteStore`** — the project's own four-method boundary (list / get / put / delete) with
   Drive behind it. Its purpose is not provider-swapping but **testability**: an in-memory
   fake lets the merge engine be exercised with no network and no OAuth.
+
+## AI chat
+
+- **Ask message** — the first user message of a chat, sent automatically when the reader
+  asks about a selection. It is a *user* turn, not a system prompt. Produced by rendering
+  the effective prompt template with the current book, chapter and selection.
+- **Prompt template** — the user-editable text an ask message is rendered from, with named
+  placeholders (`{title}`, `{author}`, `{chapter}`, `{selection}`) where book info and the
+  selection go. A placeholder with no value (a book with no author) renders as nothing.
+  _Avoid_: system prompt, initial prompt.
+- **Default prompt template** — the built-in template the app ships with. It is not stored;
+  resetting the global prompt template returns to it.
+- **Global prompt template** — the user's own template for every book, set in Settings.
+  When it has never been set (or was reset), the default prompt template stands in.
+- **Book prompt template** — a template set for one book. It **replaces** the global one
+  outright; it does not add to it. A book without one follows the global template, so a
+  later global edit reaches it, while a book with one keeps its own text. Text identical
+  to the global template is not a book prompt template.
+- **Effective prompt template** — the one an ask actually uses: the book prompt template if
+  the book has one, otherwise the global prompt template, otherwise the default.
