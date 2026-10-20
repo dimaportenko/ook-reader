@@ -126,7 +126,7 @@ fn selection_draft(
     template: &str,
     title: &str,
     author: Option<&str>,
-    chapter: &str,
+    chapter: Option<&str>,
     selected: &str,
 ) -> Option<String> {
     let text = selected.trim();
@@ -136,7 +136,7 @@ fn selection_draft(
             &Passage {
                 title,
                 author,
-                chapter: Some(chapter),
+                chapter,
                 text,
             },
         )
@@ -176,6 +176,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
 
     let page_label = page_label(page(), page_count());
     let chapter_label = chapter_label(&entries, chapter(), state.chapter_count);
+    let toc_chapter = toc::label_for_spine(&entries, chapter()).map(str::to_string);
     let show_controls = use_signal(|| true);
     let opened = use_signal(|| false);
 
@@ -278,7 +279,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                         onclick: {
                             let title = book.title.clone();
                             let author = book.author.clone();
-                            let chapter = chapter_label.clone();
+                            let chapter = toc_chapter.clone();
                             let library = library.clone();
                             let book_id = book.id;
                             move |_| {
@@ -302,7 +303,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                                         &template,
                                         &title,
                                         author.as_deref(),
-                                        &chapter,
+                                        chapter.as_deref(),
                                         &selected,
                                     ) {
                                         Some(text) => chat.send(text),
@@ -485,7 +486,7 @@ mod test {
                 prompt::DEFAULT_PROMPT_TEMPLATE,
                 "Dune",
                 None,
-                "Book I",
+                Some("Book I"),
                 " \n\t"
             ),
             None
@@ -494,11 +495,28 @@ mod test {
             "{title} {author} {chapter}: {selection}",
             "Dune",
             Some("Frank Herbert"),
-            "Book I",
+            Some("Book I"),
             "  spice\n",
         )
         .expect("a real selection drafts");
         assert_eq!(draft, "Dune Frank Herbert Book I: > spice\n");
+    }
+
+    #[test]
+    fn a_page_with_no_toc_chapter_leaves_the_chapter_placeholder_empty() {
+        let (epub, docs) =
+            epub::open_with_spine(Path::new(crate::TEST_BOOK)).expect("open fixture book");
+        let entries = toc::toc_entries(&epub, &docs);
+
+        let draft = selection_draft(
+            "[{chapter}] {selection}",
+            "Sherlock",
+            None,
+            toc::label_for_spine(&entries, 0),
+            "x",
+        );
+
+        assert_eq!(draft.as_deref(), Some("[] > x\n"));
     }
 
     #[test]
