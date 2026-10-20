@@ -15,7 +15,7 @@ use crate::{
         chat::{use_chat_handle, ChatPanel},
         components::icon::{self, Icon},
         library::OpenBook,
-        settings::SettingsPopover,
+        settings::ReadingSettingsDrawer,
         toc::ContentsPopover,
         OrLog, SWIPE_MIN_PX,
     },
@@ -267,7 +267,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                         chapter: chapter(),
                         on_pick,
                     }
-                    SettingsPopover {}
+                    ReadingSettingsDrawer {}
                     button {
                         class: "icon-button",
                         aria_label: "AI Chat",
