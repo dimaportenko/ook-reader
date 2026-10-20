@@ -136,3 +136,13 @@ Important project skills:
   `lbb:next-implement` is `lbb:next` **plus the implementation** — it derives the step the
   same way, then writes the code and tests, runs a `simplify` cleanup pass over the diff for
   the user to review, and still leaves the commit to `lbb:commit`.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues on `dimaportenko/ook-reader` (via the `gh` CLI). See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context: `docs/glossary.md` + `docs/adr/`. See `docs/agents/domain.md`.
