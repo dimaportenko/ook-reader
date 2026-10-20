@@ -165,8 +165,30 @@ impl Library {
         Ok(self.db.clear_global_prompt_template()?)
     }
 
-    pub(crate) fn effective_prompt_template(&self, _book_id: i64) -> Result<String, Error> {
-        self.global_or_default_prompt_template()
+    pub(crate) fn book_prompt_template(&self, book_id: i64) -> Result<Option<String>, Error> {
+        Ok(self.db.book_prompt_template(book_id)?)
+    }
+
+    pub(crate) fn set_book_prompt_template(
+        &self,
+        book_id: i64,
+        template: &str,
+    ) -> Result<(), Error> {
+        if is_unset_prompt_template(template, &self.global_or_default_prompt_template()?) {
+            return self.clear_book_prompt_template(book_id);
+        }
+        Ok(self.db.save_book_prompt_template(book_id, template)?)
+    }
+
+    pub(crate) fn clear_book_prompt_template(&self, book_id: i64) -> Result<(), Error> {
+        Ok(self.db.clear_book_prompt_template(book_id)?)
+    }
+
+    pub(crate) fn effective_prompt_template(&self, book_id: i64) -> Result<String, Error> {
+        match self.book_prompt_template(book_id)? {
+            Some(template) => Ok(template),
+            None => self.global_or_default_prompt_template(),
+        }
     }
 
     fn global_or_default_prompt_template(&self) -> Result<String, Error> {
@@ -649,6 +671,162 @@ mod test {
                 .expect("effective"),
             DEFAULT_PROMPT_TEMPLATE
         );
+    }
+
+    fn library_with_two_books(dir: &tempfile::TempDir) -> (Library, Book, Book, PathBuf) {
+        let (library, source, books_dir) = library_with_source(dir);
+        let second_source = dir.path().join("holmes-second-source.epub");
+        std::fs::copy(crate::TEST_BOOK, &second_source).expect("second fixture source");
+        let first = library.add_from_path(&source, 1_000).expect("import first");
+        let second = library
+            .add_from_path(&second_source, 1_000)
+            .expect("import second");
+        (library, first, second, books_dir)
+    }
+
+    #[test]
+    fn a_saved_book_prompt_template_is_effective_for_that_book_only_and_survives_reopening() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let (library, book, other, books_dir) = library_with_two_books(&dir);
+
+        library
+            .set_book_prompt_template(book.id, "Summarise {selection}")
+            .expect("save the book template");
+        assert_eq!(
+            library
+                .effective_prompt_template(book.id)
+                .expect("effective"),
+            "Summarise {selection}"
+        );
+        assert_eq!(
+            library
+                .effective_prompt_template(other.id)
+                .expect("effective"),
+            DEFAULT_PROMPT_TEMPLATE
+        );
+        drop(library);
+
+        let library = Library::new(Rc::new(Db::open(&dir).expect("reopen")), &books_dir);
+        assert_eq!(
+            library.book_prompt_template(book.id).expect("read"),
+            Some("Summarise {selection}".to_string())
+        );
+        assert_eq!(library.book_prompt_template(other.id).expect("read"), None);
+        assert_eq!(
+            library
+                .effective_prompt_template(book.id)
+                .expect("effective"),
+            "Summarise {selection}"
+        );
+    }
+
+    #[test]
+    fn a_book_following_global_sees_a_later_global_edit_and_a_book_with_its_own_template_does_not()
+    {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let (library, following, tuned, _) = library_with_two_books(&dir);
+        library
+            .set_book_prompt_template(tuned.id, "Summarise {selection}")
+            .expect("save the book template");
+
+        library
+            .set_global_prompt_template("Explain {selection}")
+            .expect("edit the global template");
+
+        assert_eq!(
+            library.book_prompt_template(following.id).expect("read"),
+            None
+        );
+        assert_eq!(
+            library
+                .effective_prompt_template(following.id)
+                .expect("effective"),
+            "Explain {selection}"
+        );
+        assert_eq!(
+            library
+                .effective_prompt_template(tuned.id)
+                .expect("effective"),
+            "Summarise {selection}"
+        );
+    }
+
+    #[test]
+    fn saving_blank_or_inherited_text_leaves_the_book_prompt_template_not_set() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let (library, book, _, _) = library_with_two_books(&dir);
+
+        for not_a_template in ["", "  \n\t ", DEFAULT_PROMPT_TEMPLATE] {
+            library
+                .set_book_prompt_template(book.id, "Summarise {selection}")
+                .expect("save a book template");
+            library
+                .set_book_prompt_template(book.id, not_a_template)
+                .expect("save text that is not a book template");
+            assert_eq!(
+                library.book_prompt_template(book.id).expect("read"),
+                None,
+                "{not_a_template:?} should leave the book template not set"
+            );
+        }
+
+        library
+            .set_global_prompt_template("Explain {selection}")
+            .expect("save a global template");
+        library
+            .set_book_prompt_template(book.id, "Summarise {selection}")
+            .expect("save a book template");
+        library
+            .set_book_prompt_template(book.id, "Explain {selection}\n")
+            .expect("save the global text");
+
+        assert_eq!(library.book_prompt_template(book.id).expect("read"), None);
+        library
+            .set_global_prompt_template("Translate {selection}")
+            .expect("edit the global template");
+        assert_eq!(
+            library
+                .effective_prompt_template(book.id)
+                .expect("effective"),
+            "Translate {selection}"
+        );
+    }
+
+    #[test]
+    fn using_global_returns_the_book_to_the_global_prompt_template() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let (library, book, _, _) = library_with_two_books(&dir);
+        library
+            .set_global_prompt_template("Explain {selection}")
+            .expect("save a global template");
+        library
+            .set_book_prompt_template(book.id, "Summarise {selection}")
+            .expect("save a book template");
+
+        library
+            .clear_book_prompt_template(book.id)
+            .expect("use global");
+
+        assert_eq!(library.book_prompt_template(book.id).expect("read"), None);
+        assert_eq!(
+            library
+                .effective_prompt_template(book.id)
+                .expect("effective"),
+            "Explain {selection}"
+        );
+    }
+
+    #[test]
+    fn removing_a_book_removes_its_prompt_template() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let (library, book, _, _) = library_with_two_books(&dir);
+        library
+            .set_book_prompt_template(book.id, "Summarise {selection}")
+            .expect("save a book template");
+
+        assert!(library.remove(book.id).expect("remove book"));
+
+        assert_eq!(library.book_prompt_template(book.id).expect("read"), None);
     }
 
     #[test]

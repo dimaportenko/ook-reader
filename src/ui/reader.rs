@@ -271,7 +271,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                         chapter: chapter(),
                         on_pick,
                     }
-                    ReadingSettingsDrawer {}
+                    ReadingSettingsDrawer { book_id: book.id }
                     button {
                         class: "icon-button",
                         aria_label: "AI Chat",
