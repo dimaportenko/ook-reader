@@ -291,17 +291,42 @@ pub(crate) fn OpenAiSettings() -> Element {
 
 const PLACEHOLDER_HINT: &str = "Placeholders: {title} {author} {chapter} {selection}";
 
+#[derive(Clone, Copy, PartialEq)]
+struct PromptTemplateLabels {
+    field: &'static str,
+    custom_status: &'static str,
+    uncustomized_status: &'static str,
+    reset: &'static str,
+}
+
+const GLOBAL_PROMPT_TEMPLATE_LABELS: PromptTemplateLabels = PromptTemplateLabels {
+    field: "Global prompt template",
+    custom_status: "Custom",
+    uncustomized_status: "Default",
+    reset: "Reset to default",
+};
+
+const BOOK_PROMPT_TEMPLATE_LABELS: PromptTemplateLabels = PromptTemplateLabels {
+    field: "Book prompt template",
+    custom_status: "Custom template",
+    uncustomized_status: "Following global",
+    reset: "Use global",
+};
+
 #[component]
 fn PromptTemplateEditor(
-    label: &'static str,
-    status: &'static str,
+    labels: PromptTemplateLabels,
     custom: bool,
-    reset_label: &'static str,
     text: String,
     on_save: EventHandler<String>,
     on_reset: EventHandler,
 ) -> Element {
     let mut textarea_generation = use_signal(|| 0_u32);
+    let status = if custom {
+        labels.custom_status
+    } else {
+        labels.uncustomized_status
+    };
 
     rsx! {
         div {
@@ -315,13 +340,13 @@ fn PromptTemplateEditor(
                         on_reset.call(());
                         textarea_generation += 1;
                     },
-                    {reset_label}
+                    {labels.reset}
                 }
             }
             textarea {
                 key: "{textarea_generation}",
                 class: "{Styles::prompt_template}",
-                aria_label: label,
+                aria_label: labels.field,
                 spellcheck: "false",
                 value: "{text}",
                 onchange: move |event| {
@@ -339,16 +364,13 @@ pub(crate) fn GlobalPromptTemplateSettings() -> Element {
     let library = use_context::<Rc<Library>>();
     let mut global = use_signal(|| read_global_prompt_template(&library));
     let custom = global.read().is_some();
-    let status = if custom { "Custom" } else { "Default" };
     let text = global().unwrap_or_else(|| DEFAULT_PROMPT_TEMPLATE.to_string());
 
     rsx! {
         h3 { class: "{Styles::settings_group_title}", "Prompt template" }
         PromptTemplateEditor {
-            label: "Global prompt template",
-            status,
+            labels: GLOBAL_PROMPT_TEMPLATE_LABELS,
             custom,
-            reset_label: "Reset to default",
             text,
             on_save: {
                 let library = library.clone();
@@ -396,19 +418,12 @@ fn BookPromptTemplateSettings(book_id: ReadSignal<i64>, open: ReadSignal<bool>) 
         }
     });
     let StoredBookPromptTemplate { custom, text } = stored();
-    let status = if custom {
-        "Custom template"
-    } else {
-        "Following global"
-    };
 
     rsx! {
         h3 { class: "{Styles::settings_group_title}", "This book" }
         PromptTemplateEditor {
-            label: "Book prompt template",
-            status,
+            labels: BOOK_PROMPT_TEMPLATE_LABELS,
             custom,
-            reset_label: "Use global",
             text,
             on_save: {
                 let library = library.clone();
