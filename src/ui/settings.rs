@@ -377,7 +377,54 @@ fn read_global_prompt_template(library: &Library) -> Option<String> {
 }
 
 #[component]
-pub(crate) fn ReadingSettingsDrawer() -> Element {
+fn BookPromptTemplateSettings(book_id: i64, open: ReadSignal<bool>) -> Element {
+    let library = use_context::<Rc<Library>>();
+    let mut saved = use_signal(|| 0_u32);
+    let _ = (open(), saved());
+    let custom = library
+        .book_prompt_template(book_id)
+        .or_log("read the book prompt template")
+        .flatten()
+        .is_some();
+    let status = if custom {
+        "Custom template"
+    } else {
+        "Following global"
+    };
+    let text = library
+        .effective_prompt_template(book_id)
+        .or_log("read the effective prompt template")
+        .unwrap_or_else(|| DEFAULT_PROMPT_TEMPLATE.to_string());
+
+    rsx! {
+        h3 { class: "{Styles::settings_group_title}", "This book" }
+        PromptTemplateEditor {
+            label: "Book prompt template",
+            status,
+            custom,
+            reset_label: "Use global",
+            text,
+            on_save: {
+                let library = library.clone();
+                move |template: String| {
+                    library
+                        .set_book_prompt_template(book_id, &template)
+                        .or_log("save the book prompt template");
+                    saved += 1;
+                }
+            },
+            on_reset: move |_| {
+                library
+                    .clear_book_prompt_template(book_id)
+                    .or_log("use the global prompt template for the book");
+                saved += 1;
+            },
+        }
+    }
+}
+
+#[component]
+pub(crate) fn ReadingSettingsDrawer(book_id: i64) -> Element {
     let mut open = use_signal(|| false);
 
     rsx! {
@@ -393,6 +440,7 @@ pub(crate) fn ReadingSettingsDrawer() -> Element {
             div {
                 class: "{Styles::reading_settings}",
                 ReaderThemeControls {}
+                BookPromptTemplateSettings { book_id, open }
             }
         }
     }
