@@ -122,7 +122,7 @@ fn chapter_label(entries: &[TocEntry], chapter: usize, chapter_count: usize) -> 
     }
 }
 
-fn selection_draft(
+fn ask_message(
     template: &str,
     title: &str,
     author: Option<&str>,
@@ -299,7 +299,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                                         .join::<String>()
                                         .await
                                         .unwrap_or_default();
-                                    match selection_draft(
+                                    match ask_message(
                                         &template,
                                         &title,
                                         author.as_deref(),
@@ -480,9 +480,9 @@ mod test {
     use super::*;
 
     #[test]
-    fn a_blank_selection_drafts_nothing() {
+    fn a_blank_ask_messages_nothing() {
         assert_eq!(
-            selection_draft(
+            ask_message(
                 prompt::DEFAULT_PROMPT_TEMPLATE,
                 "Dune",
                 None,
@@ -491,15 +491,15 @@ mod test {
             ),
             None
         );
-        let draft = selection_draft(
+        let message = ask_message(
             "{title} {author} {chapter}: {selection}",
             "Dune",
             Some("Frank Herbert"),
             Some("Book I"),
             "  spice\n",
         )
-        .expect("a real selection drafts");
-        assert_eq!(draft, "Dune Frank Herbert Book I: > spice\n");
+        .expect("a real selection makes an ask message");
+        assert_eq!(message, "Dune Frank Herbert Book I: > spice\n");
     }
 
     #[test]
@@ -508,7 +508,7 @@ mod test {
             epub::open_with_spine(Path::new(crate::TEST_BOOK)).expect("open fixture book");
         let entries = toc::toc_entries(&epub, &docs);
 
-        let draft = selection_draft(
+        let message = ask_message(
             "[{chapter}] {selection}",
             "Sherlock",
             None,
@@ -516,7 +516,7 @@ mod test {
             "x",
         );
 
-        assert_eq!(draft.as_deref(), Some("[] > x\n"));
+        assert_eq!(message.as_deref(), Some("[] > x\n"));
     }
 
     #[test]
@@ -602,7 +602,7 @@ mod test {
         assert!(
             READER_CONTROLLER_JS.contains("removeAllRanges()"),
             "an unfocused frame hides its selection but keeps it, so reopening the chat \
-             would draft and send the same passage again",
+             would send the same ask message again",
         );
     }
 
