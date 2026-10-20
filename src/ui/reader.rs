@@ -15,7 +15,7 @@ use crate::{
         chat::{use_chat_handle, ChatPanel},
         components::icon::{self, Icon},
         library::OpenBook,
-        settings::ReadingSettingsDrawer,
+        settings::{read_effective_prompt_template, ReadingSettingsDrawer},
         toc::ContentsPopover,
         OrLog, SWIPE_MIN_PX,
     },
@@ -288,12 +288,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                                     author.clone(),
                                     chapter.clone(),
                                 );
-                                let template = library
-                                    .effective_prompt_template(book_id)
-                                    .or_log("read the effective prompt template")
-                                    .unwrap_or_else(|| {
-                                        prompt::DEFAULT_PROMPT_TEMPLATE.to_string()
-                                    });
+                                let template = read_effective_prompt_template(&library, book_id);
                                 async move {
                                     let selected = document::eval(TAKE_SELECTION_JS)
                                         .join::<String>()

@@ -376,6 +376,13 @@ fn read_global_prompt_template(library: &Library) -> Option<String> {
         .flatten()
 }
 
+pub(crate) fn read_effective_prompt_template(library: &Library, book_id: i64) -> String {
+    library
+        .effective_prompt_template(book_id)
+        .or_log("read the effective prompt template")
+        .unwrap_or_else(|| DEFAULT_PROMPT_TEMPLATE.to_string())
+}
+
 #[component]
 fn BookPromptTemplateSettings(book_id: i64, open: ReadSignal<bool>) -> Element {
     let library = use_context::<Rc<Library>>();
@@ -391,10 +398,7 @@ fn BookPromptTemplateSettings(book_id: i64, open: ReadSignal<bool>) -> Element {
     } else {
         "Following global"
     };
-    let text = library
-        .effective_prompt_template(book_id)
-        .or_log("read the effective prompt template")
-        .unwrap_or_else(|| DEFAULT_PROMPT_TEMPLATE.to_string());
+    let text = read_effective_prompt_template(&library, book_id);
 
     rsx! {
         h3 { class: "{Styles::settings_group_title}", "This book" }
