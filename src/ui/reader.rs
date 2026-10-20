@@ -123,6 +123,7 @@ fn chapter_label(entries: &[TocEntry], chapter: usize, chapter_count: usize) -> 
 }
 
 fn selection_draft(
+    template: &str,
     title: &str,
     author: Option<&str>,
     chapter: &str,
@@ -130,12 +131,15 @@ fn selection_draft(
 ) -> Option<String> {
     let text = selected.trim();
     (!text.is_empty()).then(|| {
-        prompt::draft(&Passage {
-            title,
-            author,
-            chapter: Some(chapter),
-            text,
-        })
+        prompt::render(
+            template,
+            &Passage {
+                title,
+                author,
+                chapter: Some(chapter),
+                text,
+            },
+        )
     })
 }
 
@@ -286,7 +290,13 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                                         .join::<String>()
                                         .await
                                         .unwrap_or_default();
-                                    match selection_draft(&title, author.as_deref(), &chapter, &selected) {
+                                    match selection_draft(
+                                        prompt::DEFAULT_PROMPT_TEMPLATE,
+                                        &title,
+                                        author.as_deref(),
+                                        &chapter,
+                                        &selected,
+                                    ) {
                                         Some(text) => chat.send(text),
                                         None => chat.show(),
                                     }
@@ -462,14 +472,25 @@ mod test {
 
     #[test]
     fn a_blank_selection_drafts_nothing() {
-        assert_eq!(selection_draft("Dune", None, "Book I", " \n\t"), None);
-        let draft = selection_draft("Dune", Some("Frank Herbert"), "Book I", "  spice\n")
-            .expect("a real selection drafts");
-        assert!(draft.contains("> spice\n"), "trimmed and quoted: {draft:?}");
-        assert!(
-            !draft.contains(">   spice"),
-            "leading whitespace is trimmed"
+        assert_eq!(
+            selection_draft(
+                prompt::DEFAULT_PROMPT_TEMPLATE,
+                "Dune",
+                None,
+                "Book I",
+                " \n\t"
+            ),
+            None
         );
+        let draft = selection_draft(
+            "{title} {author} {chapter}: {selection}",
+            "Dune",
+            Some("Frank Herbert"),
+            "Book I",
+            "  spice\n",
+        )
+        .expect("a real selection drafts");
+        assert_eq!(draft, "Dune Frank Herbert Book I: > spice\n");
     }
 
     #[test]
