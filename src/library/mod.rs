@@ -6,6 +6,7 @@ use std::{
 use rbook::Epub;
 
 use crate::{
+    ai::prompt::DEFAULT_PROMPT_TEMPLATE,
     db::{Db, NewBook},
     epub::{self, Locator},
     library::files::BookFiles,
@@ -148,6 +149,36 @@ impl Library {
     pub(crate) fn position(&self, book_id: i64) -> Result<Option<Locator>, Error> {
         Ok(self.db.position(book_id)?)
     }
+
+    pub(crate) fn global_prompt_template(&self) -> Result<Option<String>, Error> {
+        Ok(self.db.global_prompt_template()?)
+    }
+
+    pub(crate) fn set_global_prompt_template(&self, template: &str) -> Result<(), Error> {
+        if is_unset_prompt_template(template, DEFAULT_PROMPT_TEMPLATE) {
+            return self.clear_global_prompt_template();
+        }
+        Ok(self.db.save_global_prompt_template(template)?)
+    }
+
+    pub(crate) fn clear_global_prompt_template(&self) -> Result<(), Error> {
+        Ok(self.db.clear_global_prompt_template()?)
+    }
+
+    pub(crate) fn effective_prompt_template(&self, _book_id: i64) -> Result<String, Error> {
+        self.global_or_default_prompt_template()
+    }
+
+    fn global_or_default_prompt_template(&self) -> Result<String, Error> {
+        Ok(self
+            .global_prompt_template()?
+            .unwrap_or_else(|| DEFAULT_PROMPT_TEMPLATE.to_string()))
+    }
+}
+
+fn is_unset_prompt_template(template: &str, fallback: &str) -> bool {
+    let template = template.trim();
+    template.is_empty() || template == fallback.trim()
 }
 
 #[cfg(test)]
@@ -523,6 +554,101 @@ mod test {
             .expect("save position");
         assert!(library.remove(book.id).expect("remove book"));
         assert_eq!(library.position(book.id).expect("position lookup"), None);
+    }
+
+    #[test]
+    fn the_effective_prompt_template_is_the_default_when_nothing_is_set() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let (library, source, _) = library_with_source(&dir);
+        let book = library.add_from_path(&source, 1_000).expect("import");
+
+        assert_eq!(library.global_prompt_template().expect("read"), None);
+        assert_eq!(
+            library
+                .effective_prompt_template(book.id)
+                .expect("effective"),
+            DEFAULT_PROMPT_TEMPLATE
+        );
+    }
+
+    #[test]
+    fn a_saved_global_prompt_template_is_effective_and_survives_reopening() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let (library, source, books_dir) = library_with_source(&dir);
+        let book = library.add_from_path(&source, 1_000).expect("import");
+
+        library
+            .set_global_prompt_template("Explain {selection} from {title}")
+            .expect("save the global template");
+        assert_eq!(
+            library
+                .effective_prompt_template(book.id)
+                .expect("effective"),
+            "Explain {selection} from {title}"
+        );
+        drop(library);
+
+        let library = Library::new(Rc::new(Db::open(&dir).expect("reopen")), &books_dir);
+        assert_eq!(
+            library.global_prompt_template().expect("read"),
+            Some("Explain {selection} from {title}".to_string())
+        );
+        assert_eq!(
+            library
+                .effective_prompt_template(book.id)
+                .expect("effective"),
+            "Explain {selection} from {title}"
+        );
+    }
+
+    #[test]
+    fn saving_blank_or_default_text_leaves_the_global_prompt_template_not_set() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let (library, source, _) = library_with_source(&dir);
+        let book = library.add_from_path(&source, 1_000).expect("import");
+
+        for not_a_template in ["", "  \n\t ", DEFAULT_PROMPT_TEMPLATE] {
+            library
+                .set_global_prompt_template("Explain {selection}")
+                .expect("save a custom template");
+            library
+                .set_global_prompt_template(not_a_template)
+                .expect("save text that is not a template");
+
+            assert_eq!(
+                library.global_prompt_template().expect("read"),
+                None,
+                "{not_a_template:?} should leave the global template not set"
+            );
+            assert_eq!(
+                library
+                    .effective_prompt_template(book.id)
+                    .expect("effective"),
+                DEFAULT_PROMPT_TEMPLATE
+            );
+        }
+    }
+
+    #[test]
+    fn resetting_the_global_prompt_template_returns_to_the_default() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let (library, source, _) = library_with_source(&dir);
+        let book = library.add_from_path(&source, 1_000).expect("import");
+        library
+            .set_global_prompt_template("Explain {selection}")
+            .expect("save a custom template");
+
+        library
+            .clear_global_prompt_template()
+            .expect("reset to default");
+
+        assert_eq!(library.global_prompt_template().expect("read"), None);
+        assert_eq!(
+            library
+                .effective_prompt_template(book.id)
+                .expect("effective"),
+            DEFAULT_PROMPT_TEMPLATE
+        );
     }
 
     #[test]

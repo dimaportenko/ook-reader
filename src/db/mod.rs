@@ -5,6 +5,7 @@ use rusqlite::Connection;
 mod books;
 mod chat_model;
 mod positions;
+mod prompt_templates;
 mod settings;
 
 pub(crate) use books::{Book, NewBook};
@@ -74,6 +75,14 @@ impl Db {
             [],
         )?;
 
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS global_prompt_template (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                template TEXT NOT NULL
+            )",
+            [],
+        )?;
+
         Ok(())
     }
 }
@@ -116,6 +125,49 @@ mod test {
         db.save_settings(&saved).expect("save over the legacy row");
 
         assert_eq!(db.settings().expect("read"), Some(saved));
+    }
+
+    #[test]
+    fn a_database_without_prompt_template_storage_opens_and_saves_one() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join(DB_FILENAME);
+        let legacy = Connection::open(&path).expect("open legacy database");
+        legacy
+            .execute_batch(
+                "CREATE TABLE settings (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    theme TEXT NOT NULL,
+                    font_family TEXT NOT NULL,
+                    font_size INTEGER NOT NULL,
+                    line_height INTEGER NOT NULL,
+                    page_margins INTEGER NOT NULL,
+                    max_line_length INTEGER NOT NULL
+                );
+                CREATE TABLE chat_model (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    provider TEXT NOT NULL,
+                    model_id TEXT NOT NULL
+                );
+                INSERT INTO settings
+                    (id, theme, font_family, font_size, line_height, page_margins, max_line_length)
+                VALUES (1, 'night', 'humanist', 125, 170, 150, 55);",
+            )
+            .expect("seed a database from before prompt templates");
+        drop(legacy);
+
+        let db = Db::open(dir.path()).expect("open the older database");
+        assert_eq!(db.global_prompt_template().expect("read"), None);
+
+        db.save_global_prompt_template("Explain {selection}")
+            .expect("save a global template");
+        assert_eq!(
+            db.global_prompt_template().expect("read back"),
+            Some("Explain {selection}".to_string())
+        );
+        assert_eq!(
+            db.settings().expect("settings").map(|s| s.theme),
+            Some(Theme::Night)
+        );
     }
 
     #[test]
