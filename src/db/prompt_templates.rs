@@ -33,4 +33,41 @@ impl Db {
             )
             .optional()
     }
+
+    pub(crate) fn save_book_prompt_template(
+        &self,
+        book_id: i64,
+        template: &str,
+    ) -> Result<(), rusqlite::Error> {
+        self.conn.execute(
+            "INSERT INTO book_prompt_templates (book_id, template)
+            VALUES (?1, ?2)
+            ON CONFLICT(book_id) DO UPDATE SET template = excluded.template",
+            params![book_id, template],
+        )?;
+
+        Ok(())
+    }
+
+    pub(crate) fn clear_book_prompt_template(&self, book_id: i64) -> Result<(), rusqlite::Error> {
+        self.conn.execute(
+            "DELETE FROM book_prompt_templates WHERE book_id = ?1",
+            params![book_id],
+        )?;
+
+        Ok(())
+    }
+
+    pub(crate) fn book_prompt_template(
+        &self,
+        book_id: i64,
+    ) -> Result<Option<String>, rusqlite::Error> {
+        self.conn
+            .query_row(
+                "SELECT template FROM book_prompt_templates WHERE book_id = ?1",
+                params![book_id],
+                |row| row.get(0),
+            )
+            .optional()
+    }
 }

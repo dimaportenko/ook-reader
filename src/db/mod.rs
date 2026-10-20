@@ -83,6 +83,14 @@ impl Db {
             [],
         )?;
 
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS book_prompt_templates (
+                book_id INTEGER PRIMARY KEY REFERENCES books(id) ON DELETE CASCADE,
+                template TEXT NOT NULL
+            )",
+            [],
+        )?;
+
         Ok(())
     }
 }
@@ -167,6 +175,50 @@ mod test {
         assert_eq!(
             db.settings().expect("settings").map(|s| s.theme),
             Some(Theme::Night)
+        );
+    }
+
+    #[test]
+    fn a_database_without_book_prompt_template_storage_opens_and_saves_one() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join(DB_FILENAME);
+        let legacy = Connection::open(&path).expect("open legacy database");
+        legacy
+            .execute_batch(
+                "CREATE TABLE books (
+                    id INTEGER PRIMARY KEY,
+                    path TEXT NOT NULL UNIQUE,
+                    source_path TEXT NOT NULL UNIQUE,
+                    title TEXT NOT NULL,
+                    author TEXT,
+                    cover_path TEXT,
+                    added_at INTEGER NOT NULL,
+                    last_opened_at INTEGER
+                );
+                CREATE TABLE global_prompt_template (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    template TEXT NOT NULL
+                );
+                INSERT INTO books (id, path, source_path, title, added_at)
+                VALUES (7, 'holmes.epub', '/books/holmes.epub', 'Holmes', 1000);
+                INSERT INTO global_prompt_template (id, template)
+                VALUES (1, 'Explain {selection}');",
+            )
+            .expect("seed a database from before book prompt templates");
+        drop(legacy);
+
+        let db = Db::open(dir.path()).expect("open the older database");
+        assert_eq!(db.book_prompt_template(7).expect("read"), None);
+
+        db.save_book_prompt_template(7, "Summarise {selection}")
+            .expect("save a book template");
+        assert_eq!(
+            db.book_prompt_template(7).expect("read back"),
+            Some("Summarise {selection}".to_string())
+        );
+        assert_eq!(
+            db.global_prompt_template().expect("global"),
+            Some("Explain {selection}".to_string())
         );
     }
 
