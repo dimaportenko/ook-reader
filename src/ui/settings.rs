@@ -301,7 +301,7 @@ fn PromptTemplateEditor(
     on_save: EventHandler<String>,
     on_reset: EventHandler,
 ) -> Element {
-    let mut revision = use_signal(|| 0_u32);
+    let mut textarea_generation = use_signal(|| 0_u32);
 
     rsx! {
         div {
@@ -313,20 +313,20 @@ fn PromptTemplateEditor(
                     disabled: !custom,
                     onclick: move |_| {
                         on_reset.call(());
-                        revision += 1;
+                        textarea_generation += 1;
                     },
                     {reset_label}
                 }
             }
             textarea {
-                key: "{revision}",
+                key: "{textarea_generation}",
                 class: "{Styles::prompt_template}",
                 aria_label: label,
                 spellcheck: "false",
                 value: "{text}",
                 onchange: move |event| {
                     on_save.call(event.value());
-                    revision += 1;
+                    textarea_generation += 1;
                 },
             }
         }
@@ -384,21 +384,23 @@ pub(crate) fn read_effective_prompt_template(library: &Library, book_id: i64) ->
 }
 
 #[component]
-fn BookPromptTemplateSettings(book_id: i64, open: ReadSignal<bool>) -> Element {
+fn BookPromptTemplateSettings(book_id: ReadSignal<i64>, open: ReadSignal<bool>) -> Element {
     let library = use_context::<Rc<Library>>();
-    let mut saved = use_signal(|| 0_u32);
-    let _ = (open(), saved());
-    let custom = library
-        .book_prompt_template(book_id)
-        .or_log("read the book prompt template")
-        .flatten()
-        .is_some();
+    let mut book_template_writes = use_signal(|| 0_u32);
+    let stored = use_memo({
+        let library = library.clone();
+        move || {
+            let _reread_on_open = open();
+            let _reread_after_write = book_template_writes();
+            StoredBookPromptTemplate::read(&library, book_id())
+        }
+    });
+    let StoredBookPromptTemplate { custom, text } = stored();
     let status = if custom {
         "Custom template"
     } else {
         "Following global"
     };
-    let text = read_effective_prompt_template(&library, book_id);
 
     rsx! {
         h3 { class: "{Styles::settings_group_title}", "This book" }
@@ -412,18 +414,36 @@ fn BookPromptTemplateSettings(book_id: i64, open: ReadSignal<bool>) -> Element {
                 let library = library.clone();
                 move |template: String| {
                     library
-                        .set_book_prompt_template(book_id, &template)
+                        .set_book_prompt_template(book_id(), &template)
                         .or_log("save the book prompt template");
-                    saved += 1;
+                    book_template_writes += 1;
                 }
             },
             on_reset: move |_| {
                 library
-                    .clear_book_prompt_template(book_id)
+                    .clear_book_prompt_template(book_id())
                     .or_log("use the global prompt template for the book");
-                saved += 1;
+                book_template_writes += 1;
             },
         }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct StoredBookPromptTemplate {
+    custom: bool,
+    text: String,
+}
+
+impl StoredBookPromptTemplate {
+    fn read(library: &Library, book_id: i64) -> Self {
+        let custom = library
+            .book_prompt_template(book_id)
+            .or_log("read the book prompt template")
+            .flatten()
+            .is_some();
+        let text = read_effective_prompt_template(library, book_id);
+        Self { custom, text }
     }
 }
 
