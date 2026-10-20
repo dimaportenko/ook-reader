@@ -1,7 +1,6 @@
 use std::rc::Rc;
 
 use dioxus::prelude::*;
-use dioxus_primitives::ContentAlign;
 
 use crate::{
     ai::Provider,
@@ -11,10 +10,8 @@ use crate::{
         MAX_LINE_LENGTH_MAX, MAX_LINE_LENGTH_MIN, PAGE_MARGINS_MAX, PAGE_MARGINS_MIN,
     },
     ui::{
-        components::{
-            icon::{self, Icon},
-            popover::{PopoverContent, PopoverRoot, PopoverTrigger},
-        },
+        components::icon::{self, Icon},
+        drawer::Drawer,
         OrLog,
     },
 };
@@ -77,6 +74,7 @@ fn ChoiceRow<T: Choice>(label: &'static str, selected: T, on_pick: EventHandler<
             select {
                 class: "{Styles::pill_button} {Styles::choice}",
                 aria_label: label,
+                onpointerdown: move |e| e.stop_propagation(),
                 onchange: move |event| on_pick.call(T::from_slug(&event.value())),
                 for choice in T::all().iter().copied() {
                     option {
@@ -290,17 +288,22 @@ pub(crate) fn OpenAiSettings() -> Element {
     }
 }
 
-pub(crate) fn SettingsPopover() -> Element {
+#[component]
+pub(crate) fn ReadingSettingsDrawer() -> Element {
+    let mut open = use_signal(|| false);
+
     rsx! {
-        PopoverRoot {
-            PopoverTrigger {
-                aria_label: "Reading settings",
-                Icon { icon: icon::SETTINGS }
-            }
-            PopoverContent {
-                class: Styles::settings_popover__content.to_string(),
-                gap: "0.25rem",
-                align: ContentAlign::End,
+        button {
+            class: "icon-button",
+            aria_label: "Reading settings",
+            onclick: move |_| open.set(true),
+            Icon { icon: icon::SETTINGS }
+        }
+        Drawer {
+            open,
+            label: "Reading settings",
+            div {
+                class: "{Styles::reading_settings}",
                 ReaderThemeControls {}
             }
         }
