@@ -291,17 +291,42 @@ pub(crate) fn OpenAiSettings() -> Element {
 
 const PLACEHOLDER_HINT: &str = "Placeholders: {title} {author} {chapter} {selection}";
 
+#[derive(Clone, Copy, PartialEq)]
+struct PromptTemplateLabels {
+    field: &'static str,
+    custom_status: &'static str,
+    uncustomized_status: &'static str,
+    reset: &'static str,
+}
+
+const GLOBAL_PROMPT_TEMPLATE_LABELS: PromptTemplateLabels = PromptTemplateLabels {
+    field: "Global prompt template",
+    custom_status: "Custom",
+    uncustomized_status: "Default",
+    reset: "Reset to default",
+};
+
+const BOOK_PROMPT_TEMPLATE_LABELS: PromptTemplateLabels = PromptTemplateLabels {
+    field: "Book prompt template",
+    custom_status: "Custom template",
+    uncustomized_status: "Following global",
+    reset: "Use global",
+};
+
 #[component]
 fn PromptTemplateEditor(
-    label: &'static str,
-    status: &'static str,
+    labels: PromptTemplateLabels,
     custom: bool,
-    reset_label: &'static str,
     text: String,
     on_save: EventHandler<String>,
     on_reset: EventHandler,
 ) -> Element {
-    let mut revision = use_signal(|| 0_u32);
+    let mut textarea_generation = use_signal(|| 0_u32);
+    let status = if custom {
+        labels.custom_status
+    } else {
+        labels.uncustomized_status
+    };
 
     rsx! {
         div {
@@ -313,20 +338,20 @@ fn PromptTemplateEditor(
                     disabled: !custom,
                     onclick: move |_| {
                         on_reset.call(());
-                        revision += 1;
+                        textarea_generation += 1;
                     },
-                    {reset_label}
+                    {labels.reset}
                 }
             }
             textarea {
-                key: "{revision}",
+                key: "{textarea_generation}",
                 class: "{Styles::prompt_template}",
-                aria_label: label,
+                aria_label: labels.field,
                 spellcheck: "false",
                 value: "{text}",
                 onchange: move |event| {
                     on_save.call(event.value());
-                    revision += 1;
+                    textarea_generation += 1;
                 },
             }
         }
@@ -339,16 +364,13 @@ pub(crate) fn GlobalPromptTemplateSettings() -> Element {
     let library = use_context::<Rc<Library>>();
     let mut global = use_signal(|| read_global_prompt_template(&library));
     let custom = global.read().is_some();
-    let status = if custom { "Custom" } else { "Default" };
     let text = global().unwrap_or_else(|| DEFAULT_PROMPT_TEMPLATE.to_string());
 
     rsx! {
         h3 { class: "{Styles::settings_group_title}", "Prompt template" }
         PromptTemplateEditor {
-            label: "Global prompt template",
-            status,
+            labels: GLOBAL_PROMPT_TEMPLATE_LABELS,
             custom,
-            reset_label: "Reset to default",
             text,
             on_save: {
                 let library = library.clone();
@@ -376,50 +398,67 @@ fn read_global_prompt_template(library: &Library) -> Option<String> {
         .flatten()
 }
 
-#[component]
-fn BookPromptTemplateSettings(book_id: i64, open: ReadSignal<bool>) -> Element {
-    let library = use_context::<Rc<Library>>();
-    let mut saved = use_signal(|| 0_u32);
-    let _ = (open(), saved());
-    let custom = library
-        .book_prompt_template(book_id)
-        .or_log("read the book prompt template")
-        .flatten()
-        .is_some();
-    let status = if custom {
-        "Custom template"
-    } else {
-        "Following global"
-    };
-    let text = library
+pub(crate) fn read_effective_prompt_template(library: &Library, book_id: i64) -> String {
+    library
         .effective_prompt_template(book_id)
         .or_log("read the effective prompt template")
-        .unwrap_or_else(|| DEFAULT_PROMPT_TEMPLATE.to_string());
+        .unwrap_or_else(|| DEFAULT_PROMPT_TEMPLATE.to_string())
+}
+
+#[component]
+fn BookPromptTemplateSettings(book_id: ReadSignal<i64>, open: ReadSignal<bool>) -> Element {
+    let library = use_context::<Rc<Library>>();
+    let mut book_template_writes = use_signal(|| 0_u32);
+    let stored = use_memo({
+        let library = library.clone();
+        move || {
+            let _reread_on_open = open();
+            let _reread_after_write = book_template_writes();
+            StoredBookPromptTemplate::read(&library, book_id())
+        }
+    });
+    let StoredBookPromptTemplate { custom, text } = stored();
 
     rsx! {
         h3 { class: "{Styles::settings_group_title}", "This book" }
         PromptTemplateEditor {
-            label: "Book prompt template",
-            status,
+            labels: BOOK_PROMPT_TEMPLATE_LABELS,
             custom,
-            reset_label: "Use global",
             text,
             on_save: {
                 let library = library.clone();
                 move |template: String| {
                     library
-                        .set_book_prompt_template(book_id, &template)
+                        .set_book_prompt_template(book_id(), &template)
                         .or_log("save the book prompt template");
-                    saved += 1;
+                    book_template_writes += 1;
                 }
             },
             on_reset: move |_| {
                 library
-                    .clear_book_prompt_template(book_id)
+                    .clear_book_prompt_template(book_id())
                     .or_log("use the global prompt template for the book");
-                saved += 1;
+                book_template_writes += 1;
             },
         }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct StoredBookPromptTemplate {
+    custom: bool,
+    text: String,
+}
+
+impl StoredBookPromptTemplate {
+    fn read(library: &Library, book_id: i64) -> Self {
+        let custom = library
+            .book_prompt_template(book_id)
+            .or_log("read the book prompt template")
+            .flatten()
+            .is_some();
+        let text = read_effective_prompt_template(library, book_id);
+        Self { custom, text }
     }
 }
 

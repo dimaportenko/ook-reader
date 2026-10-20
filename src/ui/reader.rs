@@ -15,7 +15,7 @@ use crate::{
         chat::{use_chat_handle, ChatPanel},
         components::icon::{self, Icon},
         library::OpenBook,
-        settings::ReadingSettingsDrawer,
+        settings::{read_effective_prompt_template, ReadingSettingsDrawer},
         toc::ContentsPopover,
         OrLog, SWIPE_MIN_PX,
     },
@@ -122,11 +122,11 @@ fn chapter_label(entries: &[TocEntry], chapter: usize, chapter_count: usize) -> 
     }
 }
 
-fn selection_draft(
+fn ask_message(
     template: &str,
     title: &str,
     author: Option<&str>,
-    chapter: &str,
+    chapter: Option<&str>,
     selected: &str,
 ) -> Option<String> {
     let text = selected.trim();
@@ -136,7 +136,7 @@ fn selection_draft(
             &Passage {
                 title,
                 author,
-                chapter: Some(chapter),
+                chapter,
                 text,
             },
         )
@@ -176,6 +176,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
 
     let page_label = page_label(page(), page_count());
     let chapter_label = chapter_label(&entries, chapter(), state.chapter_count);
+    let toc_chapter = toc::label_for_spine(&entries, chapter()).map(str::to_string);
     let show_controls = use_signal(|| true);
     let opened = use_signal(|| false);
 
@@ -278,7 +279,7 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                         onclick: {
                             let title = book.title.clone();
                             let author = book.author.clone();
-                            let chapter = chapter_label.clone();
+                            let chapter = toc_chapter.clone();
                             let library = library.clone();
                             let book_id = book.id;
                             move |_| {
@@ -287,22 +288,17 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                                     author.clone(),
                                     chapter.clone(),
                                 );
-                                let template = library
-                                    .effective_prompt_template(book_id)
-                                    .or_log("read the effective prompt template")
-                                    .unwrap_or_else(|| {
-                                        prompt::DEFAULT_PROMPT_TEMPLATE.to_string()
-                                    });
+                                let template = read_effective_prompt_template(&library, book_id);
                                 async move {
                                     let selected = document::eval(TAKE_SELECTION_JS)
                                         .join::<String>()
                                         .await
                                         .unwrap_or_default();
-                                    match selection_draft(
+                                    match ask_message(
                                         &template,
                                         &title,
                                         author.as_deref(),
-                                        &chapter,
+                                        chapter.as_deref(),
                                         &selected,
                                     ) {
                                         Some(text) => chat.send(text),
@@ -479,26 +475,43 @@ mod test {
     use super::*;
 
     #[test]
-    fn a_blank_selection_drafts_nothing() {
+    fn a_blank_ask_messages_nothing() {
         assert_eq!(
-            selection_draft(
+            ask_message(
                 prompt::DEFAULT_PROMPT_TEMPLATE,
                 "Dune",
                 None,
-                "Book I",
+                Some("Book I"),
                 " \n\t"
             ),
             None
         );
-        let draft = selection_draft(
+        let message = ask_message(
             "{title} {author} {chapter}: {selection}",
             "Dune",
             Some("Frank Herbert"),
-            "Book I",
+            Some("Book I"),
             "  spice\n",
         )
-        .expect("a real selection drafts");
-        assert_eq!(draft, "Dune Frank Herbert Book I: > spice\n");
+        .expect("a real selection makes an ask message");
+        assert_eq!(message, "Dune Frank Herbert Book I: > spice\n");
+    }
+
+    #[test]
+    fn a_page_with_no_toc_chapter_leaves_the_chapter_placeholder_empty() {
+        let (epub, docs) =
+            epub::open_with_spine(Path::new(crate::TEST_BOOK)).expect("open fixture book");
+        let entries = toc::toc_entries(&epub, &docs);
+
+        let message = ask_message(
+            "[{chapter}] {selection}",
+            "Sherlock",
+            None,
+            toc::label_for_spine(&entries, 0),
+            "x",
+        );
+
+        assert_eq!(message.as_deref(), Some("[] > x\n"));
     }
 
     #[test]
@@ -584,7 +597,7 @@ mod test {
         assert!(
             READER_CONTROLLER_JS.contains("removeAllRanges()"),
             "an unfocused frame hides its selection but keeps it, so reopening the chat \
-             would draft and send the same passage again",
+             would send the same ask message again",
         );
     }
 
