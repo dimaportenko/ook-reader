@@ -150,51 +150,79 @@ impl Library {
         Ok(self.db.position(book_id)?)
     }
 
-    pub(crate) fn global_prompt_template(&self) -> Result<Option<String>, Error> {
-        Ok(self.db.global_prompt_template()?)
-    }
-
-    pub(crate) fn set_global_prompt_template(&self, template: &str) -> Result<(), Error> {
-        if is_unset_prompt_template(template, DEFAULT_PROMPT_TEMPLATE) {
-            return self.clear_global_prompt_template();
-        }
-        Ok(self.db.save_global_prompt_template(template)?)
-    }
-
-    pub(crate) fn clear_global_prompt_template(&self) -> Result<(), Error> {
-        Ok(self.db.clear_global_prompt_template()?)
-    }
-
-    pub(crate) fn book_prompt_template(&self, book_id: i64) -> Result<Option<String>, Error> {
-        Ok(self.db.book_prompt_template(book_id)?)
-    }
-
-    pub(crate) fn set_book_prompt_template(
+    pub(crate) fn prompt_template(
         &self,
-        book_id: i64,
-        template: &str,
+        scope: PromptTemplateScope,
+    ) -> Result<PromptTemplateView, Error> {
+        Ok(match self.own_prompt_template(scope)? {
+            Some(text) => PromptTemplateView { text, custom: true },
+            None => PromptTemplateView {
+                text: self.inherited_prompt_template(scope)?,
+                custom: false,
+            },
+        })
+    }
+
+    pub(crate) fn save_prompt_template(
+        &self,
+        scope: PromptTemplateScope,
+        text: &str,
     ) -> Result<(), Error> {
-        if is_unset_prompt_template(template, &self.global_or_default_prompt_template()?) {
-            return self.clear_book_prompt_template(book_id);
+        if is_unset_prompt_template(text, &self.inherited_prompt_template(scope)?) {
+            return self.reset_prompt_template(scope);
         }
-        Ok(self.db.save_book_prompt_template(book_id, template)?)
+        match scope {
+            PromptTemplateScope::Global => self.db.save_global_prompt_template(text)?,
+            PromptTemplateScope::Book(book_id) => {
+                self.db.save_book_prompt_template(book_id, text)?
+            }
+        }
+        Ok(())
     }
 
-    pub(crate) fn clear_book_prompt_template(&self, book_id: i64) -> Result<(), Error> {
-        Ok(self.db.clear_book_prompt_template(book_id)?)
+    pub(crate) fn reset_prompt_template(&self, scope: PromptTemplateScope) -> Result<(), Error> {
+        match scope {
+            PromptTemplateScope::Global => self.db.clear_global_prompt_template()?,
+            PromptTemplateScope::Book(book_id) => self.db.clear_book_prompt_template(book_id)?,
+        }
+        Ok(())
     }
 
-    pub(crate) fn effective_prompt_template(&self, book_id: i64) -> Result<String, Error> {
-        match self.book_prompt_template(book_id)? {
-            Some(template) => Ok(template),
-            None => self.global_or_default_prompt_template(),
+    fn own_prompt_template(&self, scope: PromptTemplateScope) -> Result<Option<String>, Error> {
+        Ok(match scope {
+            PromptTemplateScope::Global => self.db.global_prompt_template()?,
+            PromptTemplateScope::Book(book_id) => self.db.book_prompt_template(book_id)?,
+        })
+    }
+
+    fn inherited_prompt_template(&self, scope: PromptTemplateScope) -> Result<String, Error> {
+        match scope {
+            PromptTemplateScope::Global => Ok(DEFAULT_PROMPT_TEMPLATE.to_string()),
+            PromptTemplateScope::Book(_) => {
+                Ok(self.prompt_template(PromptTemplateScope::Global)?.text)
+            }
         }
     }
+}
 
-    fn global_or_default_prompt_template(&self) -> Result<String, Error> {
-        Ok(self
-            .global_prompt_template()?
-            .unwrap_or_else(|| DEFAULT_PROMPT_TEMPLATE.to_string()))
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum PromptTemplateScope {
+    Global,
+    Book(i64),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PromptTemplateView {
+    pub(crate) text: String,
+    pub(crate) custom: bool,
+}
+
+impl Default for PromptTemplateView {
+    fn default() -> Self {
+        Self {
+            text: DEFAULT_PROMPT_TEMPLATE.to_string(),
+            custom: false,
+        }
     }
 }
 
@@ -584,11 +612,12 @@ mod test {
         let (library, source, _) = library_with_source(&dir);
         let book = library.add_from_path(&source, 1_000).expect("import");
 
-        assert_eq!(library.global_prompt_template().expect("read"), None);
+        assert_eq!(own_template(&library, PromptTemplateScope::Global), None);
         assert_eq!(
             library
-                .effective_prompt_template(book.id)
-                .expect("effective"),
+                .prompt_template(PromptTemplateScope::Book(book.id))
+                .expect("effective")
+                .text,
             DEFAULT_PROMPT_TEMPLATE
         );
     }
@@ -600,25 +629,30 @@ mod test {
         let book = library.add_from_path(&source, 1_000).expect("import");
 
         library
-            .set_global_prompt_template("Explain {selection} from {title}")
+            .save_prompt_template(
+                PromptTemplateScope::Global,
+                "Explain {selection} from {title}",
+            )
             .expect("save the global template");
         assert_eq!(
             library
-                .effective_prompt_template(book.id)
-                .expect("effective"),
+                .prompt_template(PromptTemplateScope::Book(book.id))
+                .expect("effective")
+                .text,
             "Explain {selection} from {title}"
         );
         drop(library);
 
         let library = Library::new(Rc::new(Db::open(&dir).expect("reopen")), &books_dir);
         assert_eq!(
-            library.global_prompt_template().expect("read"),
+            own_template(&library, PromptTemplateScope::Global),
             Some("Explain {selection} from {title}".to_string())
         );
         assert_eq!(
             library
-                .effective_prompt_template(book.id)
-                .expect("effective"),
+                .prompt_template(PromptTemplateScope::Book(book.id))
+                .expect("effective")
+                .text,
             "Explain {selection} from {title}"
         );
     }
@@ -631,21 +665,22 @@ mod test {
 
         for not_a_template in ["", "  \n\t ", DEFAULT_PROMPT_TEMPLATE] {
             library
-                .set_global_prompt_template("Explain {selection}")
+                .save_prompt_template(PromptTemplateScope::Global, "Explain {selection}")
                 .expect("save a custom template");
             library
-                .set_global_prompt_template(not_a_template)
+                .save_prompt_template(PromptTemplateScope::Global, not_a_template)
                 .expect("save text that is not a template");
 
             assert_eq!(
-                library.global_prompt_template().expect("read"),
+                own_template(&library, PromptTemplateScope::Global),
                 None,
                 "{not_a_template:?} should leave the global template not set"
             );
             assert_eq!(
                 library
-                    .effective_prompt_template(book.id)
-                    .expect("effective"),
+                    .prompt_template(PromptTemplateScope::Book(book.id))
+                    .expect("effective")
+                    .text,
                 DEFAULT_PROMPT_TEMPLATE
             );
         }
@@ -657,20 +692,26 @@ mod test {
         let (library, source, _) = library_with_source(&dir);
         let book = library.add_from_path(&source, 1_000).expect("import");
         library
-            .set_global_prompt_template("Explain {selection}")
+            .save_prompt_template(PromptTemplateScope::Global, "Explain {selection}")
             .expect("save a custom template");
 
         library
-            .clear_global_prompt_template()
+            .reset_prompt_template(PromptTemplateScope::Global)
             .expect("reset to default");
 
-        assert_eq!(library.global_prompt_template().expect("read"), None);
+        assert_eq!(own_template(&library, PromptTemplateScope::Global), None);
         assert_eq!(
             library
-                .effective_prompt_template(book.id)
-                .expect("effective"),
+                .prompt_template(PromptTemplateScope::Book(book.id))
+                .expect("effective")
+                .text,
             DEFAULT_PROMPT_TEMPLATE
         );
+    }
+
+    fn own_template(library: &Library, scope: PromptTemplateScope) -> Option<String> {
+        let view = library.prompt_template(scope).expect("read");
+        view.custom.then_some(view.text)
     }
 
     fn library_with_two_books(dir: &tempfile::TempDir) -> (Library, Book, Book, PathBuf) {
@@ -690,32 +731,38 @@ mod test {
         let (library, book, other, books_dir) = library_with_two_books(&dir);
 
         library
-            .set_book_prompt_template(book.id, "Summarise {selection}")
+            .save_prompt_template(PromptTemplateScope::Book(book.id), "Summarise {selection}")
             .expect("save the book template");
         assert_eq!(
             library
-                .effective_prompt_template(book.id)
-                .expect("effective"),
+                .prompt_template(PromptTemplateScope::Book(book.id))
+                .expect("effective")
+                .text,
             "Summarise {selection}"
         );
         assert_eq!(
             library
-                .effective_prompt_template(other.id)
-                .expect("effective"),
+                .prompt_template(PromptTemplateScope::Book(other.id))
+                .expect("effective")
+                .text,
             DEFAULT_PROMPT_TEMPLATE
         );
         drop(library);
 
         let library = Library::new(Rc::new(Db::open(&dir).expect("reopen")), &books_dir);
         assert_eq!(
-            library.book_prompt_template(book.id).expect("read"),
+            own_template(&library, PromptTemplateScope::Book(book.id)),
             Some("Summarise {selection}".to_string())
         );
-        assert_eq!(library.book_prompt_template(other.id).expect("read"), None);
+        assert_eq!(
+            own_template(&library, PromptTemplateScope::Book(other.id)),
+            None
+        );
         assert_eq!(
             library
-                .effective_prompt_template(book.id)
-                .expect("effective"),
+                .prompt_template(PromptTemplateScope::Book(book.id))
+                .expect("effective")
+                .text,
             "Summarise {selection}"
         );
     }
@@ -726,27 +773,29 @@ mod test {
         let dir = tempfile::tempdir().expect("temp dir");
         let (library, following, tuned, _) = library_with_two_books(&dir);
         library
-            .set_book_prompt_template(tuned.id, "Summarise {selection}")
+            .save_prompt_template(PromptTemplateScope::Book(tuned.id), "Summarise {selection}")
             .expect("save the book template");
 
         library
-            .set_global_prompt_template("Explain {selection}")
+            .save_prompt_template(PromptTemplateScope::Global, "Explain {selection}")
             .expect("edit the global template");
 
         assert_eq!(
-            library.book_prompt_template(following.id).expect("read"),
+            own_template(&library, PromptTemplateScope::Book(following.id)),
             None
         );
         assert_eq!(
             library
-                .effective_prompt_template(following.id)
-                .expect("effective"),
+                .prompt_template(PromptTemplateScope::Book(following.id))
+                .expect("effective")
+                .text,
             "Explain {selection}"
         );
         assert_eq!(
             library
-                .effective_prompt_template(tuned.id)
-                .expect("effective"),
+                .prompt_template(PromptTemplateScope::Book(tuned.id))
+                .expect("effective")
+                .text,
             "Summarise {selection}"
         );
     }
@@ -758,36 +807,40 @@ mod test {
 
         for not_a_template in ["", "  \n\t ", DEFAULT_PROMPT_TEMPLATE] {
             library
-                .set_book_prompt_template(book.id, "Summarise {selection}")
+                .save_prompt_template(PromptTemplateScope::Book(book.id), "Summarise {selection}")
                 .expect("save a book template");
             library
-                .set_book_prompt_template(book.id, not_a_template)
+                .save_prompt_template(PromptTemplateScope::Book(book.id), not_a_template)
                 .expect("save text that is not a book template");
             assert_eq!(
-                library.book_prompt_template(book.id).expect("read"),
+                own_template(&library, PromptTemplateScope::Book(book.id)),
                 None,
                 "{not_a_template:?} should leave the book template not set"
             );
         }
 
         library
-            .set_global_prompt_template("Explain {selection}")
+            .save_prompt_template(PromptTemplateScope::Global, "Explain {selection}")
             .expect("save a global template");
         library
-            .set_book_prompt_template(book.id, "Summarise {selection}")
+            .save_prompt_template(PromptTemplateScope::Book(book.id), "Summarise {selection}")
             .expect("save a book template");
         library
-            .set_book_prompt_template(book.id, "Explain {selection}\n")
+            .save_prompt_template(PromptTemplateScope::Book(book.id), "Explain {selection}\n")
             .expect("save the global text");
 
-        assert_eq!(library.book_prompt_template(book.id).expect("read"), None);
+        assert_eq!(
+            own_template(&library, PromptTemplateScope::Book(book.id)),
+            None
+        );
         library
-            .set_global_prompt_template("Translate {selection}")
+            .save_prompt_template(PromptTemplateScope::Global, "Translate {selection}")
             .expect("edit the global template");
         assert_eq!(
             library
-                .effective_prompt_template(book.id)
-                .expect("effective"),
+                .prompt_template(PromptTemplateScope::Book(book.id))
+                .expect("effective")
+                .text,
             "Translate {selection}"
         );
     }
@@ -797,21 +850,25 @@ mod test {
         let dir = tempfile::tempdir().expect("temp dir");
         let (library, book, _, _) = library_with_two_books(&dir);
         library
-            .set_global_prompt_template("Explain {selection}")
+            .save_prompt_template(PromptTemplateScope::Global, "Explain {selection}")
             .expect("save a global template");
         library
-            .set_book_prompt_template(book.id, "Summarise {selection}")
+            .save_prompt_template(PromptTemplateScope::Book(book.id), "Summarise {selection}")
             .expect("save a book template");
 
         library
-            .clear_book_prompt_template(book.id)
+            .reset_prompt_template(PromptTemplateScope::Book(book.id))
             .expect("use global");
 
-        assert_eq!(library.book_prompt_template(book.id).expect("read"), None);
+        assert_eq!(
+            own_template(&library, PromptTemplateScope::Book(book.id)),
+            None
+        );
         assert_eq!(
             library
-                .effective_prompt_template(book.id)
-                .expect("effective"),
+                .prompt_template(PromptTemplateScope::Book(book.id))
+                .expect("effective")
+                .text,
             "Explain {selection}"
         );
     }
@@ -821,12 +878,15 @@ mod test {
         let dir = tempfile::tempdir().expect("temp dir");
         let (library, book, _, _) = library_with_two_books(&dir);
         library
-            .set_book_prompt_template(book.id, "Summarise {selection}")
+            .save_prompt_template(PromptTemplateScope::Book(book.id), "Summarise {selection}")
             .expect("save a book template");
 
         assert!(library.remove(book.id).expect("remove book"));
 
-        assert_eq!(library.book_prompt_template(book.id).expect("read"), None);
+        assert_eq!(
+            own_template(&library, PromptTemplateScope::Book(book.id)),
+            None
+        );
     }
 
     #[test]

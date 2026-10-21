@@ -7,7 +7,7 @@ use crate::{
     ai::prompt::{self, Passage},
     clock::now_secs,
     epub::{self, Locator},
-    library::Library,
+    library::{Library, PromptTemplateScope},
     nav::{self, ReaderDataStoreExt, ReaderState},
     settings::Settings,
     toc::{self, TocEntry},
@@ -15,7 +15,7 @@ use crate::{
         chat::{use_chat_handle, ChatPanel},
         components::icon::{self, Icon},
         library::OpenBook,
-        settings::{read_effective_prompt_template, ReadingSettingsDrawer},
+        settings::ReadingSettingsDrawer,
         toc::ContentsPopover,
         OrLog, SWIPE_MIN_PX,
     },
@@ -288,7 +288,11 @@ pub(crate) fn Reader(book: OpenBook) -> Element {
                                     author.clone(),
                                     chapter.clone(),
                                 );
-                                let template = read_effective_prompt_template(&library, book_id);
+                                let template = library
+                                    .prompt_template(PromptTemplateScope::Book(book_id))
+                                    .or_log("read the prompt template")
+                                    .unwrap_or_default()
+                                    .text;
                                 async move {
                                     let selected = document::eval(TAKE_SELECTION_JS)
                                         .join::<String>()

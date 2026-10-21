@@ -3,8 +3,8 @@ use std::rc::Rc;
 use dioxus::prelude::*;
 
 use crate::{
-    ai::{prompt::DEFAULT_PROMPT_TEMPLATE, Provider},
-    library::Library,
+    ai::Provider,
+    library::{Library, PromptTemplateScope, PromptTemplateView},
     secrets::{api_key, SecretStore},
     settings::{
         choice::Choice, Settings, FONT_SIZE_MAX, FONT_SIZE_MIN, LINE_HEIGHT_MAX, LINE_HEIGHT_MIN,
@@ -293,6 +293,7 @@ const PLACEHOLDER_HINT: &str = "Placeholders: {title} {author} {chapter} {select
 
 #[derive(Clone, Copy, PartialEq)]
 struct PromptTemplateLabels {
+    heading: &'static str,
     field: &'static str,
     custom_status: &'static str,
     uncustomized_status: &'static str,
@@ -300,6 +301,7 @@ struct PromptTemplateLabels {
 }
 
 const GLOBAL_PROMPT_TEMPLATE_LABELS: PromptTemplateLabels = PromptTemplateLabels {
+    heading: "Prompt template",
     field: "Global prompt template",
     custom_status: "Custom",
     uncustomized_status: "Default",
@@ -307,6 +309,7 @@ const GLOBAL_PROMPT_TEMPLATE_LABELS: PromptTemplateLabels = PromptTemplateLabels
 };
 
 const BOOK_PROMPT_TEMPLATE_LABELS: PromptTemplateLabels = PromptTemplateLabels {
+    heading: "This book",
     field: "Book prompt template",
     custom_status: "Custom template",
     uncustomized_status: "Following global",
@@ -314,14 +317,36 @@ const BOOK_PROMPT_TEMPLATE_LABELS: PromptTemplateLabels = PromptTemplateLabels {
 };
 
 #[component]
-fn PromptTemplateEditor(
+pub(crate) fn GlobalPromptTemplateSettings() -> Element {
+    rsx! {
+        PromptTemplateSettings {
+            scope: PromptTemplateScope::Global,
+            labels: GLOBAL_PROMPT_TEMPLATE_LABELS,
+            visible: true,
+        }
+    }
+}
+
+#[component]
+fn PromptTemplateSettings(
+    scope: ReadSignal<PromptTemplateScope>,
     labels: PromptTemplateLabels,
-    custom: bool,
-    text: String,
-    on_save: EventHandler<String>,
-    on_reset: EventHandler,
+    visible: ReadSignal<bool>,
 ) -> Element {
-    let mut textarea_generation = use_signal(|| 0_u32);
+    let library = use_context::<Rc<Library>>();
+    let mut writes = use_signal(|| 0_u32);
+    let view = use_memo({
+        let library = library.clone();
+        move || {
+            let _reread_when_shown = visible();
+            let _reread_after_write = writes();
+            library
+                .prompt_template(scope())
+                .or_log("read the prompt template")
+                .unwrap_or_default()
+        }
+    });
+    let PromptTemplateView { text, custom } = view();
     let status = if custom {
         labels.custom_status
     } else {
@@ -329,6 +354,7 @@ fn PromptTemplateEditor(
     };
 
     rsx! {
+        h3 { class: "{Styles::settings_group_title}", {labels.heading} }
         div {
             class: "{Styles::settings_group}",
             SettingRow {
@@ -336,129 +362,33 @@ fn PromptTemplateEditor(
                 button {
                     class: "{Styles::pill_button}",
                     disabled: !custom,
-                    onclick: move |_| {
-                        on_reset.call(());
-                        textarea_generation += 1;
+                    onclick: {
+                        let library = library.clone();
+                        move |_| {
+                            library
+                                .reset_prompt_template(scope())
+                                .or_log("reset the prompt template");
+                            writes += 1;
+                        }
                     },
                     {labels.reset}
                 }
             }
             textarea {
-                key: "{textarea_generation}",
+                key: "{writes}",
                 class: "{Styles::prompt_template}",
                 aria_label: labels.field,
                 spellcheck: "false",
                 value: "{text}",
                 onchange: move |event| {
-                    on_save.call(event.value());
-                    textarea_generation += 1;
+                    library
+                        .save_prompt_template(scope(), &event.value())
+                        .or_log("save the prompt template");
+                    writes += 1;
                 },
             }
         }
         p { class: "{Styles::settings_group_note}", {PLACEHOLDER_HINT} }
-    }
-}
-
-#[component]
-pub(crate) fn GlobalPromptTemplateSettings() -> Element {
-    let library = use_context::<Rc<Library>>();
-    let mut global = use_signal(|| read_global_prompt_template(&library));
-    let custom = global.read().is_some();
-    let text = global().unwrap_or_else(|| DEFAULT_PROMPT_TEMPLATE.to_string());
-
-    rsx! {
-        h3 { class: "{Styles::settings_group_title}", "Prompt template" }
-        PromptTemplateEditor {
-            labels: GLOBAL_PROMPT_TEMPLATE_LABELS,
-            custom,
-            text,
-            on_save: {
-                let library = library.clone();
-                move |template: String| {
-                    library
-                        .set_global_prompt_template(&template)
-                        .or_log("save the global prompt template");
-                    global.set(read_global_prompt_template(&library));
-                }
-            },
-            on_reset: move |_| {
-                library
-                    .clear_global_prompt_template()
-                    .or_log("reset the global prompt template");
-                global.set(read_global_prompt_template(&library));
-            },
-        }
-    }
-}
-
-fn read_global_prompt_template(library: &Library) -> Option<String> {
-    library
-        .global_prompt_template()
-        .or_log("read the global prompt template")
-        .flatten()
-}
-
-pub(crate) fn read_effective_prompt_template(library: &Library, book_id: i64) -> String {
-    library
-        .effective_prompt_template(book_id)
-        .or_log("read the effective prompt template")
-        .unwrap_or_else(|| DEFAULT_PROMPT_TEMPLATE.to_string())
-}
-
-#[component]
-fn BookPromptTemplateSettings(book_id: ReadSignal<i64>, open: ReadSignal<bool>) -> Element {
-    let library = use_context::<Rc<Library>>();
-    let mut book_template_writes = use_signal(|| 0_u32);
-    let stored = use_memo({
-        let library = library.clone();
-        move || {
-            let _reread_on_open = open();
-            let _reread_after_write = book_template_writes();
-            StoredBookPromptTemplate::read(&library, book_id())
-        }
-    });
-    let StoredBookPromptTemplate { custom, text } = stored();
-
-    rsx! {
-        h3 { class: "{Styles::settings_group_title}", "This book" }
-        PromptTemplateEditor {
-            labels: BOOK_PROMPT_TEMPLATE_LABELS,
-            custom,
-            text,
-            on_save: {
-                let library = library.clone();
-                move |template: String| {
-                    library
-                        .set_book_prompt_template(book_id(), &template)
-                        .or_log("save the book prompt template");
-                    book_template_writes += 1;
-                }
-            },
-            on_reset: move |_| {
-                library
-                    .clear_book_prompt_template(book_id())
-                    .or_log("use the global prompt template for the book");
-                book_template_writes += 1;
-            },
-        }
-    }
-}
-
-#[derive(Clone, PartialEq)]
-struct StoredBookPromptTemplate {
-    custom: bool,
-    text: String,
-}
-
-impl StoredBookPromptTemplate {
-    fn read(library: &Library, book_id: i64) -> Self {
-        let custom = library
-            .book_prompt_template(book_id)
-            .or_log("read the book prompt template")
-            .flatten()
-            .is_some();
-        let text = read_effective_prompt_template(library, book_id);
-        Self { custom, text }
     }
 }
 
@@ -479,7 +409,11 @@ pub(crate) fn ReadingSettingsDrawer(book_id: i64) -> Element {
             div {
                 class: "{Styles::reading_settings}",
                 ReaderThemeControls {}
-                BookPromptTemplateSettings { book_id, open }
+                PromptTemplateSettings {
+                    scope: PromptTemplateScope::Book(book_id),
+                    labels: BOOK_PROMPT_TEMPLATE_LABELS,
+                    visible: open,
+                }
             }
         }
     }
